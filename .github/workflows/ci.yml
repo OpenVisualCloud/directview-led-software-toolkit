@@ -1,0 +1,68 @@
+#
+# Apache v2 license
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+name: Transmitter App CI
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  static-analysis:
+    name: CI_Tests_Static_Analysis
+    runs-on: self-hosted
+    steps:
+      - name: Clean up previous run
+        run: |
+          find "${{ github.workspace }}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+      - name: Checkout repository
+        run: |
+          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/intel-innersource/applications.media.ledvideowall.gardencove-next.transmitter-app.git .
+          git checkout ${{ github.sha }}
+
+      - name: cppcheck
+        run: |
+          REPORT_DIR="$HOME/static-analysis/${{ github.repository }}/${{ github.run_id }}"
+          mkdir -p "$REPORT_DIR"
+          cppcheck \
+            --enable=warning,style,performance,portability \
+            --std=c11 --force --inline-suppr \
+            --suppress=missingIncludeSystem \
+            -Iinclude src 2>&1 | tee "$REPORT_DIR/cppcheck-report.txt" || true
+          echo "cppcheck scan complete. Report saved to $REPORT_DIR/cppcheck-report.txt"
+
+      - name: flawfinder
+        run: |
+          REPORT_DIR="$HOME/static-analysis/${{ github.repository }}/${{ github.run_id }}"
+          mkdir -p "$REPORT_DIR"
+          flawfinder --minlevel=3 --dataonly src include 2>&1 | tee "$REPORT_DIR/flawfinder-report.txt" || true
+          echo "flawfinder scan complete. Report saved to $REPORT_DIR/flawfinder-report.txt"
+
+      - name: shellcheck scripts
+        run: |
+          REPORT_DIR="$HOME/static-analysis/${{ github.repository }}/${{ github.run_id }}"
+          mkdir -p "$REPORT_DIR"
+          shellcheck build.sh script/run.sh 2>&1 | tee "$REPORT_DIR/shellcheck-report.txt" || true
+          echo "shellcheck scan complete. Report saved to $REPORT_DIR/shellcheck-report.txt"
+
+      - name: codespell
+        run: |
+          REPORT_DIR="$HOME/static-analysis/${{ github.repository }}/${{ github.run_id }}"
+          mkdir -p "$REPORT_DIR"
+          codespell \
+            --skip="./.git,./build" \
+            --ignore-words-list=mtl,st20p,st30p \
+            . 2>&1 | tee "$REPORT_DIR/codespell-report.txt" || true
+          echo "codespell scan complete. Report saved to $REPORT_DIR/codespell-report.txt"
+
+      - name: Upload static analysis reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: static-analysis-reports-${{ github.run_id }}
+          path: ${{ env.HOME }}/static-analysis/${{ github.repository }}/${{ github.run_id }}/
+          retention-days: 30

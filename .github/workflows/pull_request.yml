@@ -1,0 +1,108 @@
+#
+# Apache v2 license
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+name: Pull Request
+
+on:
+  pull_request:
+    types: [assigned, opened, synchronize, reopened]
+    branches-ignore:
+      - main
+
+  push:
+
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build TxApp
+    runs-on: self-hosted
+
+    steps:
+      - name: Clean up previous run
+        run: |
+          echo "Cleaning up previous run"
+          rm -rf "${{ github.workspace }}/build"
+          find "${{ github.workspace }}" -mindepth 1 -maxdepth 1 ! -name 'build' -exec rm -rf {} +
+
+      - name: Checkout repository
+        run: |
+          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/intel-innersource/applications.media.ledvideowall.gardencove-next.transmitter-app.git .
+          git checkout ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Build
+        run: |
+          echo "Setting up meson build directory..."
+          meson setup build
+
+          echo "Compiling TxApp..."
+          ninja -C build
+
+          echo "Build successful!"
+
+      - name: Verify build output
+        run: |
+          if [ ! -f "./build/TxApp" ]; then
+            echo "ERROR: Build artifact TxApp not found!"
+            exit 1
+          fi
+          echo "Build artifact verified: $(file ./build/TxApp)"
+
+  static-analysis:
+    name: Static Analysis
+    runs-on: self-hosted
+
+    steps:
+      - name: Clean up previous run
+        run: |
+          find "${{ github.workspace }}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+      - name: Checkout repository
+        run: |
+          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/intel-innersource/applications.media.ledvideowall.gardencove-next.transmitter-app.git .
+          git checkout ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: cppcheck
+        run: |
+          REPORT_DIR="$HOME/static-analysis/${{ github.repository }}/${{ github.run_id }}"
+          mkdir -p "$REPORT_DIR"
+          cppcheck \
+            --enable=warning,style,performance,portability \
+            --std=c11 --force --inline-suppr \
+            --suppress=missingIncludeSystem \
+            -Iinclude src 2>&1 | tee "$REPORT_DIR/cppcheck-report.txt" || true
+          echo "cppcheck scan complete. Report saved to $REPORT_DIR/cppcheck-report.txt"
+
+      - name: flawfinder
+        run: |
+          REPORT_DIR="$HOME/static-analysis/${{ github.repository }}/${{ github.run_id }}"
+          mkdir -p "$REPORT_DIR"
+          flawfinder --minlevel=3 --dataonly src include 2>&1 | tee "$REPORT_DIR/flawfinder-report.txt" || true
+          echo "flawfinder scan complete. Report saved to $REPORT_DIR/flawfinder-report.txt"
+
+      - name: shellcheck scripts
+        run: |
+          REPORT_DIR="$HOME/static-analysis/${{ github.repository }}/${{ github.run_id }}"
+          mkdir -p "$REPORT_DIR"
+          shellcheck build.sh script/run.sh 2>&1 | tee "$REPORT_DIR/shellcheck-report.txt" || true
+          echo "shellcheck scan complete. Report saved to $REPORT_DIR/shellcheck-report.txt"
+
+      - name: codespell
+        run: |
+          REPORT_DIR="$HOME/static-analysis/${{ github.repository }}/${{ github.run_id }}"
+          mkdir -p "$REPORT_DIR"
+          codespell \
+            --skip="./.git,./build" \
+            --ignore-words-list=mtl,st20p,st30p \
+            . 2>&1 | tee "$REPORT_DIR/codespell-report.txt" || true
+          echo "codespell scan complete. Report saved to $REPORT_DIR/codespell-report.txt"
+
+      - name: Upload static analysis reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: static-analysis-reports-${{ github.run_id }}
+          path: ${{ env.HOME }}/static-analysis/${{ github.repository }}/${{ github.run_id }}/
+          retention-days: 30
