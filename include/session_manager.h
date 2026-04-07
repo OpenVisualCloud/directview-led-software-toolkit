@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <pthread.h>
 
 /* FFmpeg headers */
@@ -82,9 +83,11 @@ struct st20p_tx_ctx {
   AVPacket*          enc_pkt;        /* pre-allocated packed frame buffer for MTL */
   int64_t            pts;
 
-  /* Vertical crop */
+  /* Crop rectangle (pixels, from JSON) */
   int crop_x_offset;
+  int crop_y_offset;
   int crop_width;
+  int crop_height;
 
   uint32_t frames_sent;
   size_t   frame_size;
@@ -135,5 +138,7 @@ bool session_manager_is_running(const session_manager_t* manager);
 int create_st20p_tx_session(session_manager_t* manager, struct tx_app_context* app, int session_idx);
 int create_st30p_tx_session(session_manager_t* manager, struct tx_app_context* app, int session_idx);
 
-int load_video_source(struct st20p_tx_ctx* ctx, const char* filename);
 int load_audio_source(struct st30p_tx_ctx* ctx, const char* filename);
+
+/* load_video_source() and all FFmpeg decode/output functions are declared in
+ * include/ffmpeg_decoder.h — which session_manager.h no longer includes directly. */

@@ -9,10 +9,22 @@
 #include <arpa/inet.h>
 #include <libavutil/pixfmt.h>
 
+#define MAX_TX_SESSIONS 8
+
+/* Per-session network and crop parameters (populated from JSON tx_sessions[]) */
+struct tx_session_net {
+  uint16_t udp_port;
+  uint8_t  payload_type;
+  int      crop_x;
+  int      crop_y;
+  int      crop_w;
+  int      crop_h;
+};
+
 /* Application context for TX sessions */
 struct tx_app_context {
   /* Configuration */
-  char port[64];        /* local network interface name (e.g. eth0) */
+  char port[64];        /* DPDK NIC PCI BDF/address for MTL output (e.g. 0000:af:00.0), not a Linux interface name */
   char tx_url[256];
   char config_file[256];
   char sip_addr_str[INET_ADDRSTRLEN];
@@ -35,6 +47,7 @@ struct tx_app_context {
   bool force_dhcp;
   int test_time_s;
 
-  /* Crop strip index (0-3) for 4-way vertical crop; session 0 sends this strip */
-  int crop_idx;
+  /* Per-session network + crop config (from JSON tx_sessions[]) */
+  struct tx_session_net session_net[MAX_TX_SESSIONS];
+
 };

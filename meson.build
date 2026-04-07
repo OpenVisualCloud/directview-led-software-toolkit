@@ -28,7 +28,8 @@ executable('TxApp',
   sources: [
     'src/tx_app_main.c',
     'src/config_reader.c',
-    'src/session_manager.c'
+    'src/session_manager.c',
+    'src/ffmpeg/ffmpeg_decoder.c'
   ],
   include_directories: include_directories('include'),
   dependencies: all_deps,

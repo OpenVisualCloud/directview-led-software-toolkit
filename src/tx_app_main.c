@@ -21,34 +21,53 @@
 #include "config_reader.h"
 #include "session_manager.h"
 
-static volatile bool g_tx_app_exit = false;
+/* Reference the shared exit flag defined in session_manager.c.
+ * Worker threads check this flag; do not write it from a signal handler —
+ * only normal code should set it (via tx_app_apply_pending_signal_exit). */
+extern _Atomic bool g_tx_app_exit;
+
+/* File-level application context pointer set before signals are installed. */
+static struct tx_app_context* g_app_ptr = NULL;
+
+/* Async-signal-safe shutdown flag: only written by the signal handler,
+ * only read by tx_app_apply_pending_signal_exit() in normal context. */
+static volatile sig_atomic_t g_tx_app_signal_exit = 0;
 
 static void tx_app_sig_handler(int sig) {
-  printf("Signal %d received, exit\n", sig);
+  static const char msg[] = "Signal received, exit\n";
+  (void)sig;
+  (void)!write(STDERR_FILENO, msg, sizeof(msg) - 1);
+  g_tx_app_signal_exit = 1;
+}
+
+/* Propagate a pending signal-driven shutdown into the shared exit flags.
+ * Must be called from non-signal context (e.g. the main polling loop). */
+static void tx_app_apply_pending_signal_exit(void) {
+  if (!g_tx_app_signal_exit) return;
   g_tx_app_exit = true;
+  if (g_app_ptr) g_app_ptr->exit = true;
 }
 
 static void print_help(const char* prog_name) {
   printf("Usage: %s [options]\n", prog_name);
   printf("Options:\n");
-  printf("  -p, --port <iface>          Local network interface (default: eth0)\n");
+  printf("  -p, --port <pci>            DPDK NIC PCI BDF (e.g. 0000:af:00.0)\n");
   printf("  -s, --sip <ip>              Source IP address\n");
-  printf("  -d, --dip <ip>              Destination IP address (default: 239.168.1.101)\n");
+  printf("  -d, --dip <ip>              Destination IP address (default: 239.168.85.20)\n");
   printf("  -u, --udp_port <port>       UDP port (default: 20000)\n");
   printf("  -w, --width <width>         Video width (default: 1920)\n");
   printf("  -h, --height <height>       Video height (default: 1080)\n");
-  printf("  -f, --fps <fps>             Frame rate (default: 59.94)\n");
+  printf("  -f, --fps <fps>             Frame rate (default: 25)\n");
   printf("  -F, --fmt <format>          Pixel format: yuv422p10le(default), yuv420p,\n");
   printf("                              yuv422p12le, yuv444p10le, yuv444p12le,\n");
   printf("                              gbrp10le, gbrp12le\n");
   printf("  -t, --tx_url <path>         Video source file path\n");
   printf("  -2, --st20p_sessions <n>    Number of ST20P sessions (default: 1)\n");
   printf("  -3, --st30p_sessions <n>    Number of ST30P sessions (default: 0)\n");
-  printf("  -T, --test_time <seconds>   Test duration (default: 60)\n");
-  printf("  -c, --config <file>         JSON config file\n");
-  printf("  --dhcp                      Use DHCP for IP configuration\n");
-  printf("  --payload_type <pt>         RTP payload type (default: 96)\n");
-  printf("  --crop_idx <n>              Which vertical crop strip to send (0-based, default: 0)\n");
+  printf("  -T, --time <seconds>        Test duration (default: 0 = run indefinitely)\n");
+  printf("  -C, --config <file>         JSON config file\n");
+  printf("  -D, --dhcp                  Use DHCP for IP configuration\n");
+  printf("  -P, --payload_type <pt>     RTP payload type (default: 96)\n");
   printf("  --help                      Show this help\n");
 }
 
@@ -69,13 +88,13 @@ static int parse_args(struct tx_app_context* ctx, int argc, char** argv) {
     {"dhcp", no_argument, 0, 'D'},
     {"config", required_argument, 0, 'C'},
     {"payload_type", required_argument, 0, 'P'},
-    {"crop_idx", required_argument, 0, 'X'},
     {"help", no_argument, 0, '?'},
     {0, 0, 0, 0}
   };
 
   /* Set defaults */
-  strncpy(ctx->port, "eth0", sizeof(ctx->port));
+  strncpy(ctx->port, "0000:af:01.0", sizeof(ctx->port) - 1);  /* placeholder — must be overridden with actual NIC PCI BDF */
+  ctx->port[sizeof(ctx->port) - 1] = '\0';
   ctx->sip_addr_str[0] = '\0'; /* No default - must be provided */
   strncpy(ctx->dip_addr_str, "239.168.85.20", sizeof(ctx->dip_addr_str));
   ctx->udp_port = 20000;
@@ -89,20 +108,22 @@ static int parse_args(struct tx_app_context* ctx, int argc, char** argv) {
   ctx->test_time_s = 0;
   ctx->tx_url[0] = '\0';
   ctx->config_file[0] = '\0';
-  ctx->crop_idx = 0; /* default: first strip */
   ctx->payload_type = 96; /* default: RTP dynamic payload type */
 
   int c, option_index = 0;
-  while ((c = getopt_long(argc, argv, "p:s:d:u:w:h:f:F:t:2:3:T:DC:P:X:?", long_options, &option_index)) != -1) {
+  while ((c = getopt_long(argc, argv, "p:s:d:u:w:h:f:F:t:2:3:T:DC:P:?", long_options, &option_index)) != -1) {
     switch (c) {
       case 'p':
         strncpy(ctx->port, optarg, sizeof(ctx->port) - 1);
+        ctx->port[sizeof(ctx->port) - 1] = '\0';
         break;
       case 's':
         strncpy(ctx->sip_addr_str, optarg, sizeof(ctx->sip_addr_str) - 1);
+        ctx->sip_addr_str[sizeof(ctx->sip_addr_str) - 1] = '\0';
         break;
       case 'd':
         strncpy(ctx->dip_addr_str, optarg, sizeof(ctx->dip_addr_str) - 1);
+        ctx->dip_addr_str[sizeof(ctx->dip_addr_str) - 1] = '\0';
         break;
       case 'u':
         ctx->udp_port = atoi(optarg);
@@ -148,13 +169,26 @@ static int parse_args(struct tx_app_context* ctx, int argc, char** argv) {
         break;
       case 't':
         strncpy(ctx->tx_url, optarg, sizeof(ctx->tx_url) - 1);
+        ctx->tx_url[sizeof(ctx->tx_url) - 1] = '\0';
         break;
-      case '2':
-        ctx->st20p_sessions = atoi(optarg);
+      case '2': {
+        int sessions = atoi(optarg);
+        if (sessions < 0 || sessions > MAX_TX_SESSIONS) {
+          printf("Error: --st20p_sessions must be in range 0-%d\n", MAX_TX_SESSIONS);
+          return -1;
+        }
+        ctx->st20p_sessions = sessions;
         break;
-      case '3':
-        ctx->st30p_sessions = atoi(optarg);
+      }
+      case '3': {
+        int sessions = atoi(optarg);
+        if (sessions < 0 || sessions > MAX_TX_SESSIONS) {
+          printf("Error: --st30p_sessions must be in range 0-%d\n", MAX_TX_SESSIONS);
+          return -1;
+        }
+        ctx->st30p_sessions = sessions;
         break;
+      }
       case 'T':
         ctx->test_time_s = atoi(optarg);
         break;
@@ -173,13 +207,7 @@ static int parse_args(struct tx_app_context* ctx, int argc, char** argv) {
         ctx->payload_type = (uint8_t)pt;
         break;
       }
-      case 'X':
-        ctx->crop_idx = atoi(optarg);
-        if (ctx->crop_idx < 0) {
-          printf("Error: --crop_idx must be >= 0\n");
-          return -1;
-        }
-        break;
+
       case '?':
       default:
         print_help(argv[0]);
@@ -187,23 +215,23 @@ static int parse_args(struct tx_app_context* ctx, int argc, char** argv) {
     }
   }
 
-  /* Convert IP addresses - SIP is optional if using DHCP */
+  return 0;
+}
+
+/* Convert sip_addr_str/dip_addr_str -> binary after config is loaded */
+static int resolve_ip_addrs(struct tx_app_context* ctx) {
   if (ctx->sip_addr_str[0] != '\0') {
-    /* Static IP mode - validate SIP */
     if (inet_pton(AF_INET, ctx->sip_addr_str, ctx->sip_addr) != 1) {
       printf("Error: Invalid source IP address %s\n", ctx->sip_addr_str);
       return -1;
     }
   } else {
-    /* No SIP provided - will use DHCP mode */
-    printf("Info: No source IP provided, will use DHCP for automatic IP configuration\n");
+    printf("Info: No source IP provided, DHCP mode\n");
   }
-
   if (inet_pton(AF_INET, ctx->dip_addr_str, ctx->dip_addr) != 1) {
-    printf("Error: Invalid IP address %s\n", ctx->dip_addr_str);
+    printf("Error: Invalid destination IP address %s\n", ctx->dip_addr_str);
     return -1;
   }
-
   return 0;
 }
 
@@ -220,12 +248,20 @@ int main(int argc, char** argv) {
     return -1;
   }
 
-  /* Load configuration from JSON if specified */
-  if (load_and_apply_config(&app, app.config_file) < 0) {
-    printf("Warning: Failed to load config file, using defaults\n");
+  /* Load configuration from JSON if specified — must happen before IP resolve
+   * because config supplies sip/dip when CLI args are omitted */
+  if (app.config_file[0] != '\0') {
+    if (load_and_apply_config(&app, app.config_file) < 0) {
+      printf("Error: Failed to load config file %s\n", app.config_file);
+      return -1;
+    }
   }
 
-  /* Install signal handler */
+  /* Resolve IP strings -> binary (after config may have overwritten them) */
+  if (resolve_ip_addrs(&app) < 0) return -1;
+
+  /* Install signal handler — set g_app_ptr first so the handler can set app.exit */
+  g_app_ptr = &app;
   signal(SIGINT, tx_app_sig_handler);
   signal(SIGTERM, tx_app_sig_handler);
 
@@ -254,11 +290,13 @@ int main(int argc, char** argv) {
   if (app.test_time_s > 0) {
     printf("Transmitting for %d seconds... Press Ctrl+C to stop\n", app.test_time_s);
     for (int i = 0; i < app.test_time_s && !app.exit; i++) {
+      tx_app_apply_pending_signal_exit();
       sleep(1);
     }
   } else {
     printf("Transmitting indefinitely... Press Ctrl+C to stop\n");
     while (!app.exit) {
+      tx_app_apply_pending_signal_exit();
       sleep(1);
     }
   }

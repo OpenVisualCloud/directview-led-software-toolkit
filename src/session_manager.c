@@ -3,30 +3,29 @@
  */
 
 #include "session_manager.h"
+#include "ffmpeg_decoder.h"
 #include "tx_app_context.h"
 #include "config_reader.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <unistd.h>
 
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/imgutils.h>
-#include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
 
-static bool g_tx_app_exit = false;
+/* Global exit flag — set by session_manager_stop() to signal all threads to terminate.
+ * _Atomic ensures reads/writes are race-free across TX threads.
+ * Also referenced by ffmpeg_decoder.c and tx_app_main.c via extern. */
+_Atomic bool g_tx_app_exit = false;
 
 /* =========================================================================
  * Helpers
  * ========================================================================= */
-
-static const char* fmt_name(enum AVPixelFormat fmt) {
-  const char* n = av_get_pix_fmt_name(fmt);
-  return n ? n : "unknown";
-}
 
 /* Used by open_audio_output() to build the RTP URL for the audio TX stream */
 static void build_output_url(char* buf, size_t bufsz,
@@ -34,247 +33,51 @@ static void build_output_url(char* buf, size_t bufsz,
   snprintf(buf, bufsz, "rtp://%s:%d", dip, (int)udp_port);
 }
 
-static bool is_raw_yuv(const char* filename) {
-  const char* ext = strrchr(filename, '.');
-  if (!ext) return false;
-  return (strcasecmp(ext, ".yuv") == 0 || strcasecmp(ext, ".raw") == 0);
-}
-
-/* =========================================================================
- * FFmpeg output session: open MTL Kahawai (mtl_st20p) output device
- * No encoder; codec params are set directly on the stream.
- * ========================================================================= */
-static int open_ffmpeg_output(struct st20p_tx_ctx* ctx) {
-  int out_w  = ctx->crop_width > 0 ? ctx->crop_width : ctx->app->width;
-  int height = ctx->app->height;
-
-  /* Locate the MTL Kahawai muxer compiled into this FFmpeg build */
-  const AVOutputFormat* fmt = av_guess_format("mtl_st20p", NULL, NULL);
-  if (!fmt) {
-    printf("ST20P TX(%d): mtl_st20p muxer not found - "
-           "rebuild FFmpeg with Intel MTL plugin (--enable-mtl)\n", ctx->idx);
-    return -1;
-  }
-
-  /* mtl_st20p is AVFMT_NOFILE: no URL required */
-  int ret = avformat_alloc_output_context2(&ctx->out_fmt_ctx, fmt, NULL, NULL);
-  if (ret < 0 || !ctx->out_fmt_ctx) {
-    printf("ST20P TX(%d): cannot alloc output ctx for mtl_st20p\n", ctx->idx);
-    return -1;
-  }
-
-  /* Set MTL device and session options via AVOptions */
-  av_opt_set    (ctx->out_fmt_ctx->priv_data, "p_port",  ctx->app->port,         0);
-  av_opt_set    (ctx->out_fmt_ctx->priv_data, "p_sip",   ctx->app->sip_addr_str, 0);
-  av_opt_set    (ctx->out_fmt_ctx->priv_data, "p_tx_ip", ctx->app->dip_addr_str, 0);
-  av_opt_set_int(ctx->out_fmt_ctx->priv_data, "udp_port",
-                 (int64_t)(ctx->app->udp_port + ctx->idx * 2), 0);
-  av_opt_set_int(ctx->out_fmt_ctx->priv_data, "payload_type",
-                 (int64_t)ctx->app->payload_type, 0);
-
-  /* Raw-video stream — no encoder needed, codec params set directly */
-  ctx->out_stream = avformat_new_stream(ctx->out_fmt_ctx, NULL);
-  if (!ctx->out_stream) {
-    avformat_free_context(ctx->out_fmt_ctx); ctx->out_fmt_ctx = NULL;
-    return -1;
-  }
-  ctx->out_stream->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
-  ctx->out_stream->codecpar->codec_id   = AV_CODEC_ID_RAWVIDEO;
-  ctx->out_stream->codecpar->width      = out_w;
-  ctx->out_stream->codecpar->height     = height;
-  ctx->out_stream->codecpar->format     = ctx->app->fmt;
-  ctx->out_stream->avg_frame_rate       = (AVRational){ctx->app->fps, 1};
-  ctx->out_stream->time_base            = (AVRational){1, ctx->app->fps};
-
-  /* write_header initialises the MTL session internally */
-  ret = avformat_write_header(ctx->out_fmt_ctx, NULL);
-  if (ret < 0) {
-    char errbuf[128]; av_strerror(ret, errbuf, sizeof(errbuf));
-    printf("ST20P TX(%d): avformat_write_header (mtl_st20p) failed: %s\n",
-           ctx->idx, errbuf);
-    avformat_free_context(ctx->out_fmt_ctx); ctx->out_fmt_ctx = NULL;
-    return -1;
-  }
-
-  /* Scratch frame used by send_video_frame to stage the cropped region */
-  ctx->enc_frame = av_frame_alloc();
-  if (!ctx->enc_frame) {
-    avformat_free_context(ctx->out_fmt_ctx); ctx->out_fmt_ctx = NULL;
-    return -1;
-  }
-  ctx->enc_frame->format = ctx->app->fmt;
-  ctx->enc_frame->width  = out_w;
-  ctx->enc_frame->height = height;
-  ret = av_frame_get_buffer(ctx->enc_frame, 32);
-  if (ret < 0) {
-    av_frame_free(&ctx->enc_frame);
-    avformat_free_context(ctx->out_fmt_ctx); ctx->out_fmt_ctx = NULL;
-    return -1;
-  }
-
-  /* Pre-allocate the output packet with the exact packed frame size.
-   * av_image_get_buffer_size uses align=1 so no stride padding.
-   * The MTL muxer validates pkt->size == its internal frame_size. */
-  int frame_sz = av_image_get_buffer_size(ctx->app->fmt, out_w, height, 1);
-  if (frame_sz < 0) {
-    av_frame_free(&ctx->enc_frame);
-    avformat_free_context(ctx->out_fmt_ctx); ctx->out_fmt_ctx = NULL;
-    return -1;
-  }
-  ctx->enc_pkt = av_packet_alloc();
-  if (!ctx->enc_pkt || av_new_packet(ctx->enc_pkt, frame_sz) < 0) {
-    av_packet_free(&ctx->enc_pkt);
-    av_frame_free(&ctx->enc_frame);
-    avformat_free_context(ctx->out_fmt_ctx); ctx->out_fmt_ctx = NULL;
-    return -1;
-  }
-
-  ctx->pts = 0;
-  printf("ST20P TX(%d): Kahawai (mtl_st20p) output opened "
-         "(%dx%d %s @ %dfps) -> %s:%u via %s\n",
-         ctx->idx, out_w, height, fmt_name(ctx->app->fmt), ctx->app->fps,
-         ctx->app->dip_addr_str,
-         (unsigned)(ctx->app->udp_port + ctx->idx * 2),
-         ctx->app->port);
-  return 0;
-}
-
-static void close_ffmpeg_output(struct st20p_tx_ctx* ctx) {
-  if (ctx->out_fmt_ctx) {
-    av_write_trailer(ctx->out_fmt_ctx);
-    /* mtl_st20p is AVFMT_NOFILE: no avio to close */
-    avformat_free_context(ctx->out_fmt_ctx);
-    ctx->out_fmt_ctx = NULL;
-  }
-  /* enc_ctx is not used in the Kahawai path (no encoder) */
-  if (ctx->enc_frame) av_frame_free(&ctx->enc_frame);
-  if (ctx->enc_pkt)   av_packet_free(&ctx->enc_pkt);
-}
-
-/* Send one decoded+cropped frame to the MTL Kahawai (mtl_st20p) muxer.
- * enc_frame is a crop-width scratch buffer; enc_pkt holds the pre-allocated
- * contiguous (stride-less) frame payload that MTL copies into its TX ring. */
-static void send_video_frame(struct st20p_tx_ctx* ctx, AVFrame* src,
-                              int crop_x, int crop_w) {
-  if (!ctx->out_fmt_ctx || !ctx->enc_frame || !ctx->enc_pkt) return;
-
-  av_frame_make_writable(ctx->enc_frame);
-
-  int height = ctx->app->height;
-
-  /* Copy the cropped horizontal strip from the full-width source frame */
-  for (int line = 0; line < height; line++)
-    memcpy(ctx->enc_frame->data[0] + line * ctx->enc_frame->linesize[0],
-           src->data[0] + line * src->linesize[0] + crop_x * 2,
-           crop_w * 2);
-  for (int line = 0; line < height; line++)
-    memcpy(ctx->enc_frame->data[1] + line * ctx->enc_frame->linesize[1],
-           src->data[1] + line * src->linesize[1] + (crop_x / 2) * 2,
-           (crop_w / 2) * 2);
-  for (int line = 0; line < height; line++)
-    memcpy(ctx->enc_frame->data[2] + line * ctx->enc_frame->linesize[2],
-           src->data[2] + line * src->linesize[2] + (crop_x / 2) * 2,
-           (crop_w / 2) * 2);
-
-  /* Pack all planes contiguously (no stride padding) into the MTL packet */
-  int packed = av_image_copy_to_buffer(
-      ctx->enc_pkt->data, ctx->enc_pkt->size,
-      (const uint8_t* const*)ctx->enc_frame->data, ctx->enc_frame->linesize,
-      ctx->app->fmt, crop_w, height, 1);
-  if (packed < 0) return;
-
-  ctx->enc_pkt->size         = packed;
-  ctx->enc_pkt->pts          = ctx->pts;
-  ctx->enc_pkt->dts          = ctx->pts++;
-  ctx->enc_pkt->pos          = -1;
-  ctx->enc_pkt->stream_index = ctx->out_stream->index;
-  av_write_frame(ctx->out_fmt_ctx, ctx->enc_pkt);
-  /* Restore size for next frame (packed == pre-allocated frame_sz) */
-  ctx->enc_pkt->size = packed;
-
-  ctx->frames_sent++;
-  if (ctx->frames_sent % 100 == 0)
-    printf("ST20P TX(%d): sent %d frames via Kahawai\n", ctx->idx, ctx->frames_sent);
-}
-
-/* =========================================================================
- * Shared decode thread
- * ========================================================================= */
-static void* shared_decode_thread(void* arg) {
-  struct shared_decode_ctx* dec = (struct shared_decode_ctx*)arg;
-
-  printf("Shared decode thread started (%d sessions)\n", dec->num_sessions);
-
-  while (!dec->exit && !g_tx_app_exit) {
-    bool got_frame = false;
-    while (!got_frame && !dec->exit && !g_tx_app_exit) {
-      int ret = av_read_frame(dec->fmt_ctx, dec->av_packet);
-      if (ret == AVERROR_EOF) {
-        av_seek_frame(dec->fmt_ctx, dec->video_stream_idx, 0, AVSEEK_FLAG_BACKWARD);
-        avcodec_flush_buffers(dec->codec_ctx);
-        printf("Shared decode: loop restart\n");
-        continue;
-      }
-      if (ret < 0) continue;
-
-      if (dec->av_packet->stream_index != dec->video_stream_idx) {
-        av_packet_unref(dec->av_packet);
-        continue;
-      }
-
-      avcodec_send_packet(dec->codec_ctx, dec->av_packet);
-      av_packet_unref(dec->av_packet);
-
-      ret = avcodec_receive_frame(dec->codec_ctx, dec->av_frame);
-      if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) continue;
-      if (ret < 0) break;
-
-      sws_scale(dec->sws_ctx,
-                (const uint8_t* const*)dec->av_frame->data,
-                dec->av_frame->linesize, 0, dec->codec_ctx->height,
-                dec->yuv_frame->data, dec->yuv_frame->linesize);
-
-      av_frame_unref(dec->av_frame);
-      dec->frame_counter++;
-      got_frame = true;
-    }
-
-    if (!got_frame) break;
-
-    pthread_barrier_wait(&dec->barrier_decoded);
-    pthread_barrier_wait(&dec->barrier_copied);
-  }
-
-  dec->exit = true;
-  pthread_barrier_wait(&dec->barrier_decoded);
-  pthread_barrier_wait(&dec->barrier_copied);
-
-  printf("Shared decode thread stopped, decoded %u frames\n", dec->frame_counter);
-  return NULL;
-}
-
 /* =========================================================================
  * Video TX thread — SHARED path (multi-session)
  * ========================================================================= */
+/*
+ * st20p_tx_thread_shared() — one instance per session (TX0, TX1, TX2).
+ *
+ * Used when sessions > 1 AND source is a video file (shared decode path).
+ * Each thread is responsible for a fixed horizontal crop strip of yuv_frame:
+ *   TX0: x=0,    w=640  -> UDP port 20000
+ *   TX1: x=640,  w=640  -> UDP port 20002
+ *   TX2: x=1280, w=640  -> UDP port 20004
+ *
+ * Per-frame flow:
+ *   1. barrier_decoded.wait -- stall until decode thread signals yuv_frame is ready.
+ *   2. send_video_frame()   -- crop strip, pack, av_write_frame -> MTL TX ring.
+ *   3. barrier_copied.wait  -- signal decode thread that this session is done.
+ */
 static void* st20p_tx_thread_shared(void* arg) {
   struct st20p_tx_ctx* ctx = (struct st20p_tx_ctx*)arg;
   struct shared_decode_ctx* dec = ctx->shared_dec;
-  int crop_w = ctx->crop_width;
   int crop_x = ctx->crop_x_offset;
+  int crop_y = ctx->crop_y_offset;
+  int crop_w = ctx->crop_width  > 0 ? ctx->crop_width  : (int)ctx->app->width;
+  int crop_h = ctx->crop_height > 0 ? ctx->crop_height : (int)ctx->app->height;
 
-  printf("ST20P TX(%d): shared thread started (crop x=%d w=%d)\n",
-         ctx->idx, crop_x, crop_w);
+  printf("ST20P TX(%d): shared thread started (crop x=%d y=%d w=%d h=%d)\n",
+         ctx->idx, crop_x, crop_y, crop_w, crop_h);
 
   while (!ctx->app->exit && !g_tx_app_exit) {
+    /* Wait for the decode thread to finish sws_scale into yuv_frame.
+     * All N TX threads + decode thread must reach this point before any proceed. */
     pthread_barrier_wait(&dec->barrier_decoded);
 
+    /* Check if decode thread exited (EOF or error) while we were waiting */
     if (dec->exit || ctx->app->exit || g_tx_app_exit) {
-      pthread_barrier_wait(&dec->barrier_copied);
+      pthread_barrier_wait(&dec->barrier_copied); /* must still hit barrier_copied */
       break;
     }
 
-    send_video_frame(ctx, dec->yuv_frame, crop_x, crop_w);
+    /* Crop this session's rect from yuv_frame, pack it, send via mtl_st20p */
+    send_video_frame(ctx, dec->yuv_frame, crop_x, crop_y, crop_w, crop_h);
 
+    /* Signal decode thread that this TX session has finished reading yuv_frame.
+     * When all N TX threads + decode thread arrive -> decode thread unblocks
+     * and may overwrite yuv_frame with the next decoded frame. */
     pthread_barrier_wait(&dec->barrier_copied);
   }
 
@@ -285,56 +88,31 @@ static void* st20p_tx_thread_shared(void* arg) {
 /* =========================================================================
  * Video TX thread — SINGLE SESSION path (per-session decode or raw YUV)
  * ========================================================================= */
+/*
+ * st20p_tx_thread() — single-session path (sessions == 1 or raw YUV input).
+ *
+ * Three sub-paths based on source type:
+ *   A. use_ffmpeg == true  : delegates to ffmpeg_decode_and_send() in ffmpeg_decoder.c.
+ *   B. source_buffer != NULL: raw YUV pre-loaded into memory, reads frame_size bytes.
+ *   C. neither A nor B     : synthetic YUV ramp test pattern.
+ */
 static void* st20p_tx_thread(void* arg) {
   struct st20p_tx_ctx* ctx = (struct st20p_tx_ctx*)arg;
-  int crop_w = (ctx->crop_width > 0) ? ctx->crop_width : ctx->app->width;
-  int crop_x = ctx->crop_x_offset;
 
   printf("ST20P TX(%d): thread started\n", ctx->idx);
 
   while (!ctx->app->exit && !g_tx_app_exit) {
     if (ctx->use_ffmpeg) {
-      bool got_frame = false;
-
-      while (!got_frame && !ctx->app->exit && !g_tx_app_exit) {
-        int ret = av_read_frame(ctx->fmt_ctx, ctx->av_packet);
-        if (ret == AVERROR_EOF) {
-          av_seek_frame(ctx->fmt_ctx, ctx->video_stream_idx, 0, AVSEEK_FLAG_BACKWARD);
-          avcodec_flush_buffers(ctx->codec_ctx);
-          printf("ST20P TX(%d): FFmpeg loop restart\n", ctx->idx);
-          continue;
-        }
-        if (ret < 0) continue;
-        if (ctx->av_packet->stream_index != ctx->video_stream_idx) {
-          av_packet_unref(ctx->av_packet);
-          continue;
-        }
-        avcodec_send_packet(ctx->codec_ctx, ctx->av_packet);
-        av_packet_unref(ctx->av_packet);
-
-        ret = avcodec_receive_frame(ctx->codec_ctx, ctx->av_frame);
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) continue;
-        if (ret < 0) break;
-
-        sws_scale(ctx->sws_ctx,
-                  (const uint8_t* const*)ctx->av_frame->data,
-                  ctx->av_frame->linesize, 0, ctx->codec_ctx->height,
-                  ctx->yuv_frame->data, ctx->yuv_frame->linesize);
-
-        av_frame_unref(ctx->av_frame);
-        got_frame = true;
-      }
-
-      if (got_frame)
-        send_video_frame(ctx, ctx->yuv_frame, crop_x, crop_w);
+      /* Path A: delegate to ffmpeg_decoder.c — demux -> decode -> sws_scale -> send */
+      ffmpeg_decode_and_send(ctx);
 
     } else if (ctx->source_buffer && ctx->source_size > 0) {
-      /* Raw YUV path: source file holds tightly-packed planar frames */
+      /* Path B: raw YUV — source file pre-loaded into source_buffer at init.
+       * Read frame_size bytes sequentially, wrap around at end (loop playback). */
       if (!ctx->enc_frame || !ctx->enc_pkt) { usleep(1000); continue; }
 
       av_frame_make_writable(ctx->enc_frame);
 
-      /* frame_size tracks the bytes-per-frame used when the file was loaded */
       size_t frame_bytes = ctx->frame_size;
       if (ctx->current_pos + frame_bytes > ctx->source_size)
         ctx->current_pos = 0;
@@ -347,7 +125,6 @@ static void* st20p_tx_thread(void* arg) {
              ctx->source_buffer + ctx->current_pos, copy_sz);
       ctx->current_pos += copy_sz;
 
-      /* Pack the frame into the MTL packet and send via Kahawai */
       int packed = av_image_copy_to_buffer(
           ctx->enc_pkt->data, ctx->enc_pkt->size,
           (const uint8_t* const*)ctx->enc_frame->data, ctx->enc_frame->linesize,
@@ -367,7 +144,8 @@ static void* st20p_tx_thread(void* arg) {
         printf("ST20P TX(%d): sent %d frames via Kahawai\n", ctx->idx, ctx->frames_sent);
 
     } else {
-      /* Test pattern (10-bit YUV422 ramp + neutral chroma) */
+      /* Path C: synthetic test pattern — incrementing luma ramp + neutral chroma.
+       * Rate-limited by usleep(1e6/fps). */
       if (!ctx->enc_frame || !ctx->enc_pkt) { usleep(1000); continue; }
 
       av_frame_make_writable(ctx->enc_frame);
@@ -386,7 +164,6 @@ static void* st20p_tx_thread(void* arg) {
         }
       }
 
-      /* Pack frame and send via Kahawai */
       int packed = av_image_copy_to_buffer(
           ctx->enc_pkt->data, ctx->enc_pkt->size,
           (const uint8_t* const*)ctx->enc_frame->data, ctx->enc_frame->linesize,
@@ -427,7 +204,7 @@ static void* st30p_tx_thread(void* arg) {
       continue;
     }
 
-    size_t chunk = ctx->frame_size ? ctx->frame_size : 1920;
+    size_t chunk = ctx->frame_size ? ctx->frame_size : 288;
 
     if (ctx->current_pos + chunk > ctx->source_size)
       ctx->current_pos = 0;
@@ -456,181 +233,8 @@ static void* st30p_tx_thread(void* arg) {
 }
 
 /* =========================================================================
- * Open shared FFmpeg decoder (multi-session input path)
+ * Audio source loading
  * ========================================================================= */
-static int open_shared_ffmpeg(struct shared_decode_ctx* dec, const char* filename) {
-  char errbuf[256];
-  int ret;
-  struct tx_app_context* app = dec->app;
-
-  ret = avformat_open_input(&dec->fmt_ctx, filename, NULL, NULL);
-  if (ret < 0) {
-    av_strerror(ret, errbuf, sizeof(errbuf));
-    printf("Shared decode: cannot open %s: %s\n", filename, errbuf);
-    return -1;
-  }
-  avformat_find_stream_info(dec->fmt_ctx, NULL);
-
-  dec->video_stream_idx = av_find_best_stream(dec->fmt_ctx, AVMEDIA_TYPE_VIDEO,
-                                               -1, -1, NULL, 0);
-  if (dec->video_stream_idx < 0) {
-    printf("Shared decode: no video stream in %s\n", filename);
-    avformat_close_input(&dec->fmt_ctx);
-    return -1;
-  }
-
-  AVStream* stream = dec->fmt_ctx->streams[dec->video_stream_idx];
-  const AVCodec* codec = avcodec_find_decoder(stream->codecpar->codec_id);
-  if (!codec) { avformat_close_input(&dec->fmt_ctx); return -1; }
-
-  dec->codec_ctx = avcodec_alloc_context3(codec);
-  avcodec_parameters_to_context(dec->codec_ctx, stream->codecpar);
-  dec->codec_ctx->thread_count = 4;
-  ret = avcodec_open2(dec->codec_ctx, codec, NULL);
-  if (ret < 0) {
-    avcodec_free_context(&dec->codec_ctx);
-    avformat_close_input(&dec->fmt_ctx);
-    return -1;
-  }
-
-  dec->sws_ctx = sws_getContext(
-    dec->codec_ctx->width,  dec->codec_ctx->height, dec->codec_ctx->pix_fmt,
-    app->width,             app->height,             app->fmt,
-    SWS_FAST_BILINEAR, NULL, NULL, NULL);
-  if (!dec->sws_ctx) {
-    avcodec_free_context(&dec->codec_ctx);
-    avformat_close_input(&dec->fmt_ctx);
-    return -1;
-  }
-
-  dec->av_frame  = av_frame_alloc();
-  dec->yuv_frame = av_frame_alloc();
-  dec->av_packet = av_packet_alloc();
-
-  dec->yuv_frame->format = app->fmt;
-  dec->yuv_frame->width  = app->width;
-  dec->yuv_frame->height = app->height;
-  ret = av_image_alloc(dec->yuv_frame->data, dec->yuv_frame->linesize,
-                       app->width, app->height, app->fmt, 32);
-  if (ret < 0) {
-    av_frame_free(&dec->av_frame);
-    av_frame_free(&dec->yuv_frame);
-    av_packet_free(&dec->av_packet);
-    sws_freeContext(dec->sws_ctx);
-    avcodec_free_context(&dec->codec_ctx);
-    avformat_close_input(&dec->fmt_ctx);
-    return -1;
-  }
-
-  printf("Shared decode: opened '%s' Codec=%s %dx%d %s -> %dx%d %s\n",
-         filename, codec->name,
-         dec->codec_ctx->width, dec->codec_ctx->height,
-         av_get_pix_fmt_name(dec->codec_ctx->pix_fmt),
-         app->width, app->height, fmt_name(app->fmt));
-  return 0;
-}
-
-/* =========================================================================
- * Open per-session FFmpeg input decoder (single-session path)
- * ========================================================================= */
-static int open_ffmpeg_source(struct st20p_tx_ctx* ctx, const char* filename) {
-  char errbuf[256];
-  int ret;
-
-  ret = avformat_open_input(&ctx->fmt_ctx, filename, NULL, NULL);
-  if (ret < 0) {
-    av_strerror(ret, errbuf, sizeof(errbuf));
-    printf("ST20P TX(%d): cannot open %s: %s\n", ctx->idx, filename, errbuf);
-    return -1;
-  }
-  avformat_find_stream_info(ctx->fmt_ctx, NULL);
-
-  ctx->video_stream_idx = av_find_best_stream(ctx->fmt_ctx, AVMEDIA_TYPE_VIDEO,
-                                               -1, -1, NULL, 0);
-  if (ctx->video_stream_idx < 0) {
-    avformat_close_input(&ctx->fmt_ctx);
-    return -1;
-  }
-
-  AVStream* stream = ctx->fmt_ctx->streams[ctx->video_stream_idx];
-  const AVCodec* codec = avcodec_find_decoder(stream->codecpar->codec_id);
-  if (!codec) { avformat_close_input(&ctx->fmt_ctx); return -1; }
-
-  ctx->codec_ctx = avcodec_alloc_context3(codec);
-  avcodec_parameters_to_context(ctx->codec_ctx, stream->codecpar);
-  ctx->codec_ctx->thread_count = 4;
-  ret = avcodec_open2(ctx->codec_ctx, codec, NULL);
-  if (ret < 0) {
-    avcodec_free_context(&ctx->codec_ctx);
-    avformat_close_input(&ctx->fmt_ctx);
-    return -1;
-  }
-
-  ctx->sws_ctx = sws_getContext(
-    ctx->codec_ctx->width,  ctx->codec_ctx->height,  ctx->codec_ctx->pix_fmt,
-    ctx->app->width,        ctx->app->height,         ctx->app->fmt,
-    SWS_FAST_BILINEAR, NULL, NULL, NULL);
-  if (!ctx->sws_ctx) {
-    avcodec_free_context(&ctx->codec_ctx);
-    avformat_close_input(&ctx->fmt_ctx);
-    return -1;
-  }
-
-  ctx->av_frame  = av_frame_alloc();
-  ctx->yuv_frame = av_frame_alloc();
-  ctx->av_packet = av_packet_alloc();
-
-  ctx->yuv_frame->format = ctx->app->fmt;
-  ctx->yuv_frame->width  = ctx->app->width;
-  ctx->yuv_frame->height = ctx->app->height;
-  ret = av_image_alloc(ctx->yuv_frame->data, ctx->yuv_frame->linesize,
-                       ctx->app->width, ctx->app->height, ctx->app->fmt, 32);
-  if (ret < 0) {
-    av_frame_free(&ctx->av_frame);
-    av_frame_free(&ctx->yuv_frame);
-    av_packet_free(&ctx->av_packet);
-    sws_freeContext(ctx->sws_ctx);
-    avcodec_free_context(&ctx->codec_ctx);
-    avformat_close_input(&ctx->fmt_ctx);
-    return -1;
-  }
-
-  ctx->use_ffmpeg = true;
-  printf("ST20P TX(%d): input opened '%s' Codec=%s %dx%d %s -> %dx%d %s\n",
-         ctx->idx, filename, codec->name,
-         ctx->codec_ctx->width, ctx->codec_ctx->height,
-         av_get_pix_fmt_name(ctx->codec_ctx->pix_fmt),
-         ctx->app->width, ctx->app->height, fmt_name(ctx->app->fmt));
-  return 0;
-}
-
-int load_video_source(struct st20p_tx_ctx* ctx, const char* filename) {
-  if (!filename || strlen(filename) == 0) {
-    printf("ST20P TX(%d): No source file, will use test pattern\n", ctx->idx);
-    return 0;
-  }
-  if (is_raw_yuv(filename)) {
-    FILE* f = fopen(filename, "rb");
-    if (!f) { printf("ST20P TX(%d): Cannot open %s\n", ctx->idx, filename); return 0; }
-    fseek(f, 0, SEEK_END); ctx->source_size = ftell(f); fseek(f, 0, SEEK_SET);
-    if (!ctx->source_size) { fclose(f); return 0; }
-    ctx->source_buffer = malloc(ctx->source_size);
-    if (!ctx->source_buffer) { fclose(f); return -1; }
-    ctx->source_size = fread(ctx->source_buffer, 1, ctx->source_size, f);
-    fclose(f);
-    ctx->current_pos   = 0;
-    ctx->loop_playback = true;
-    ctx->use_ffmpeg    = false;
-    const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(ctx->app->fmt);
-    ctx->frame_size = (size_t)ctx->app->width * ctx->app->height
-                      * (desc ? desc->comp[0].depth / 8 : 2) * 2 /* yuv422 */;
-    printf("ST20P TX(%d): Loaded %zu bytes from RAW YUV: %s\n",
-           ctx->idx, ctx->source_size, filename);
-    return 0;
-  }
-  return open_ffmpeg_source(ctx, filename);
-}
-
 int load_audio_source(struct st30p_tx_ctx* ctx, const char* filename) {
   if (!filename || strlen(filename) == 0) return 0;
   FILE* f = fopen(filename, "rb");
@@ -643,7 +247,7 @@ int load_audio_source(struct st30p_tx_ctx* ctx, const char* filename) {
   fclose(f);
   ctx->current_pos   = 0;
   ctx->loop_playback = true;
-  ctx->frame_size    = 1920; /* 1 ms @ 48 kHz stereo 16-bit */
+  ctx->frame_size = 288; /* 1 ms @ 48 kHz stereo 24-bit (PCM_S24BE): 48 * 2 * 3 = 288 bytes */
   printf("ST30P TX(%d): Loaded %zu bytes from %s\n", ctx->idx, ctx->source_size, filename);
   return 0;
 }
@@ -694,6 +298,13 @@ static int open_audio_output(struct st30p_tx_ctx* ctx) {
 /* =========================================================================
  * Session creation
  * ========================================================================= */
+/*
+ * create_st20p_tx_session() — initialise one ST20P video TX session.
+ *
+ * Calculates the horizontal crop strip for this session, opens the MTL
+ * output (avformat_write_header -> MTL TX session created), then
+ * attaches either the shared decoder or loads a per-session video source.
+ */
 int create_st20p_tx_session(session_manager_t* manager, struct tx_app_context* app,
                              int session_idx) {
   struct st20p_tx_ctx* ctx = &manager->st20p_sessions[session_idx];
@@ -702,11 +313,27 @@ int create_st20p_tx_session(session_manager_t* manager, struct tx_app_context* a
   ctx->idx = session_idx;
   ctx->app = app;
 
-  ctx->crop_width    = app->width / app->st20p_sessions;
-  ctx->crop_x_offset = session_idx * ctx->crop_width;
-  printf("ST20P TX session %d: crop strip x=%d w=%d (%d / %d sessions)\n",
-         session_idx, ctx->crop_x_offset, ctx->crop_width,
-         app->width, app->st20p_sessions);
+  ctx->crop_x_offset = app->session_net[session_idx].crop_x;
+  ctx->crop_y_offset = app->session_net[session_idx].crop_y;
+  ctx->crop_width    = app->session_net[session_idx].crop_w;
+  ctx->crop_height   = app->session_net[session_idx].crop_h;
+
+  /* Fallback for CLI-only runs where session_net[] is zero-initialised.
+   * Divide the frame width evenly across all sessions; height is always full. */
+  if (ctx->crop_width == 0 || ctx->crop_height == 0) {
+    int total = app->st20p_sessions > 0 ? app->st20p_sessions : 1;
+    int strip_w = (int)app->width / total;
+    ctx->crop_x_offset = session_idx * strip_w;
+    ctx->crop_y_offset = 0;
+    /* Last session gets any remaining pixels so strips cover the full width */
+    ctx->crop_width  = (session_idx == total - 1)
+                       ? ((int)app->width - ctx->crop_x_offset)
+                       : strip_w;
+    ctx->crop_height = (int)app->height;
+  }
+  printf("ST20P TX session %d: crop rect x=%d y=%d w=%d h=%d\n",
+         session_idx, ctx->crop_x_offset, ctx->crop_y_offset,
+         ctx->crop_width, ctx->crop_height);
 
   snprintf(ctx->session_name, sizeof(ctx->session_name), "st20p_tx_%d", session_idx);
 
@@ -716,13 +343,15 @@ int create_st20p_tx_session(session_manager_t* manager, struct tx_app_context* a
   }
 
   const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(app->fmt);
-  ctx->frame_size = (size_t)ctx->crop_width * app->height
+  ctx->frame_size = (size_t)ctx->crop_width * ctx->crop_height
                     * (desc ? desc->comp[0].depth / 8 : 2) * 2;
 
   if (manager->shared_dec) {
+    /* Multi-session path: attach shared decoder -- TX thread will use barriers */
     ctx->shared_dec = manager->shared_dec;
     printf("ST20P TX session %d: using shared decoder\n", session_idx);
   } else if (strlen(app->tx_url) > 0) {
+    /* Single-session path: each session owns its own decoder or raw buffer */
     load_video_source(ctx, app->tx_url);
   }
 
@@ -744,7 +373,7 @@ int create_st30p_tx_session(session_manager_t* manager, struct tx_app_context* a
     return -1;
   }
 
-  ctx->frame_size = 1920;
+  ctx->frame_size = 288; /* 1 ms @ 48 kHz stereo 24-bit (PCM_S24BE): 48 * 2 * 3 = 288 bytes */
   printf("ST30P TX session %d created\n", session_idx);
   return 0;
 }
@@ -752,9 +381,20 @@ int create_st30p_tx_session(session_manager_t* manager, struct tx_app_context* a
 /* =========================================================================
  * session_manager_init / start / stop / cleanup
  * ========================================================================= */
+/*
+ * session_manager_init() — allocate and configure all TX sessions.
+ *
+ * Decision: use_shared = true when sessions > 1 and source is a video file.
+ *   -> one shared decoder + N TX threads sharing one yuv_frame via barriers.
+ *   -> avoids N decoders running in parallel (saves CPU and memory bandwidth).
+ *
+ * If use_shared = false (single session or raw YUV):
+ *   -> each session runs its own decode loop independently (no barriers).
+ */
 int session_manager_init(session_manager_t* manager, struct tx_app_context* app) {
   memset(manager, 0, sizeof(*manager));
 
+  /* Use shared decoder only when > 1 session and source needs decoding */
   bool use_shared = (app->st20p_sessions > 1 &&
                      strlen(app->tx_url) > 0 &&
                      !is_raw_yuv(app->tx_url));
@@ -767,6 +407,8 @@ int session_manager_init(session_manager_t* manager, struct tx_app_context* app)
     manager->shared_dec->num_sessions = app->st20p_sessions;
     manager->shared_dec->exit         = false;
 
+    /* barrier count = N TX threads + 1 decode thread.
+     * Both barriers must be released by ALL threads simultaneously. */
     pthread_barrier_init(&manager->shared_dec->barrier_decoded,
                          NULL, app->st20p_sessions + 1);
     pthread_barrier_init(&manager->shared_dec->barrier_copied,
@@ -774,6 +416,8 @@ int session_manager_init(session_manager_t* manager, struct tx_app_context* app)
 
     if (open_shared_ffmpeg(manager->shared_dec, app->tx_url) < 0) {
       printf("Error: Failed to open shared FFmpeg source\n");
+      pthread_barrier_destroy(&manager->shared_dec->barrier_decoded);
+      pthread_barrier_destroy(&manager->shared_dec->barrier_copied);
       free(manager->shared_dec);
       manager->shared_dec = NULL;
       return -1;
@@ -813,10 +457,20 @@ int session_manager_init(session_manager_t* manager, struct tx_app_context* app)
   return 0;
 }
 
+/*
+ * session_manager_start() — spawn all worker threads.
+ *
+ * Thread launch order matters for barrier correctness:
+ *   1. shared_decode_thread first -- it will block on barrier_decoded waiting
+ *      for all TX threads to arrive.
+ *   2. st20p_tx_thread_shared xN -- each blocks on barrier_decoded too.
+ *   All N+1 threads must be running before any frame can be processed.
+ */
 int session_manager_start(session_manager_t* manager) {
   g_tx_app_exit = false;
 
   if (manager->shared_dec) {
+    /* Launch the single shared decode thread (runs shared_decode_thread()) */
     if (pthread_create(&manager->shared_dec->decode_thread, NULL,
                        shared_decode_thread, manager->shared_dec) != 0) {
       printf("Error: Failed to create shared decode thread\n");
@@ -826,6 +480,7 @@ int session_manager_start(session_manager_t* manager) {
 
   for (int i = 0; i < manager->st20p_count; i++) {
     struct st20p_tx_ctx* ctx = &manager->st20p_sessions[i];
+    /* Select thread function: shared barrier path or independent single-session path */
     void* thread_fn = ctx->shared_dec ? st20p_tx_thread_shared : st20p_tx_thread;
 
     if (pthread_create(&ctx->thread, NULL, thread_fn, ctx) != 0) {
@@ -879,17 +534,8 @@ void session_manager_cleanup(session_manager_t* manager) {
   if (manager->st20p_sessions) {
     for (int i = 0; i < manager->st20p_count; i++) {
       struct st20p_tx_ctx* ctx = &manager->st20p_sessions[i];
-
       close_ffmpeg_output(ctx);
-
-      if (ctx->use_ffmpeg) {
-        if (ctx->av_frame)  av_frame_free(&ctx->av_frame);
-        if (ctx->yuv_frame) { av_freep(&ctx->yuv_frame->data[0]); av_frame_free(&ctx->yuv_frame); }
-        if (ctx->av_packet) av_packet_free(&ctx->av_packet);
-        if (ctx->sws_ctx)   { sws_freeContext(ctx->sws_ctx); ctx->sws_ctx = NULL; }
-        if (ctx->codec_ctx) avcodec_free_context(&ctx->codec_ctx);
-        if (ctx->fmt_ctx)   avformat_close_input(&ctx->fmt_ctx);
-      }
+      close_ffmpeg_source(ctx);
       if (ctx->source_buffer) { free(ctx->source_buffer); ctx->source_buffer = NULL; }
     }
     free(manager->st20p_sessions);
@@ -897,16 +543,10 @@ void session_manager_cleanup(session_manager_t* manager) {
   }
 
   if (manager->shared_dec) {
-    struct shared_decode_ctx* dec = manager->shared_dec;
-    if (dec->av_frame)  av_frame_free(&dec->av_frame);
-    if (dec->yuv_frame) { av_freep(&dec->yuv_frame->data[0]); av_frame_free(&dec->yuv_frame); }
-    if (dec->av_packet) av_packet_free(&dec->av_packet);
-    if (dec->sws_ctx)   { sws_freeContext(dec->sws_ctx); dec->sws_ctx = NULL; }
-    if (dec->codec_ctx) avcodec_free_context(&dec->codec_ctx);
-    if (dec->fmt_ctx)   avformat_close_input(&dec->fmt_ctx);
-    pthread_barrier_destroy(&dec->barrier_decoded);
-    pthread_barrier_destroy(&dec->barrier_copied);
-    free(dec);
+    close_shared_ffmpeg(manager->shared_dec);
+    pthread_barrier_destroy(&manager->shared_dec->barrier_decoded);
+    pthread_barrier_destroy(&manager->shared_dec->barrier_copied);
+    free(manager->shared_dec);
     manager->shared_dec = NULL;
   }
 
@@ -928,4 +568,8 @@ void session_manager_cleanup(session_manager_t* manager) {
 
   manager->st20p_count = 0;
   manager->st30p_count = 0;
+}
+
+bool session_manager_is_running(const session_manager_t* manager) {
+  return manager->running;
 }
