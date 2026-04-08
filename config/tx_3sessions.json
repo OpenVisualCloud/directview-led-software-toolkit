@@ -1,7 +1,7 @@
 {
   "interfaces": [
     {
-      "name": "0000:02:00.0",
+      "name": "0000:06:00.0",
       "sip":  "192.168.50.29",
       "dip":  "239.168.85.22"
     }
@@ -9,9 +9,9 @@
   "video": {
     "width":  1920,
     "height": 1080,
-    "fps":    25,
+    "fps":    30,
     "fmt":    "yuv422p10le",
-    "tx_url": "sample/bbb_sunflower_1080p_30fps_normal.mp4"
+    "tx_url": "bbb_sunflower_1080p_30fps_normal.mp4"
   },
   "tx_sessions": [
     {
