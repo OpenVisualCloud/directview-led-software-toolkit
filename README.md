@@ -7,10 +7,9 @@ TxApp is a simplified, standalone transmitter application using FFMPEG APIs and 
 ## Features
 
 - **ST20P Video Transmission**: Uncompressed video over SMPTE ST 2110-20
-- **Multi-session Support**: Multiple concurrent video/audio streams
+- **Multi-session Support**: Multiple concurrent video streams
 - **JSON Configuration**: Per-session crop and network settings via JSON config
 - **Memory Efficient**: Uses hugepages for optimal performance
-- **Signal Handling**: Graceful shutdown on SIGINT/SIGTERM
 
 ## Building
 
@@ -26,33 +25,49 @@ TxApp is a simplified, standalone transmitter application using FFMPEG APIs and 
 
 ## Usage
 
-### Command Line Arguments
+### JSON Configuration
 
-```
-Usage: TxApp [OPTIONS]
+TxApp uses a JSON config file with three sections:
 
-Options:
-  --port <pci_addr>       Network port PCI address (default: 0000:af:01.0)
-  --dip <ip>              Destination IP address (default: 239.168.85.20)
-  --udp_port <port>       Base UDP port (default: 20000)
-  --width <width>         Video width (default: 1920)
-  --height <height>       Video height (default: 1080)
-  --fps <fps>             Frame rate: 25, 30, 50, 60 (default: 25)
-  --fmt <format>          Pixel format: yuv422p10le, yuv420p (default: yuv422p10le)
-  --tx_url <file>         Video source file
-  --st20p_sessions <n>    Number of ST20P sessions (default: 1)
-  --time <seconds>        Test duration in seconds (0=infinite)
-  --help                  Show help
+| Section | Field | Description |
+|---------|-------|-------------|
+| **interfaces** | `name` | PCI BDF address of the NIC (e.g. `0000:06:00.0`) |
+| | `sip` | Source IP address |
+| | `dip` | Destination multicast IP address |
+| **video** | `width` | Frame width in pixels |
+| | `height` | Frame height in pixels |
+| | `fps` | Frames per second (25, 30, 50, 60) |
+| | `fmt` | Pixel format (`yuv422p10le`, `yuv420p`, `yuv444p10le`, `gbrp10le`) |
+| | `tx_url` | Path to the source video file |
+| **tx_sessions[]** | `udp_port` | UDP port for the session |
+| | `payload_type` | RTP payload type (typically 96) |
+| | `crop` | Region to transmit: `x`, `y`, `w`, `h` in pixels |
+
+Example (`config/tx_1session.json`):
+```json
+{
+  "interfaces": [
+    { "name": "0000:06:00.0", "sip": "192.168.50.29", "dip": "239.168.85.20" }
+  ],
+  "video": {
+    "width": 1920, "height": 1080, "fps": 30,
+    "fmt": "yuv422p10le",
+    "tx_url": "bbb_sunflower_1080p_30fps_normal.mp4"
+  },
+  "tx_sessions": [
+    { "udp_port": 20000, "payload_type": 96, "crop": { "x": 0, "y": 0, "w": 1920, "h": 1080 } }
+  ]
+}
 ```
+
+Multiple sessions can be defined in `tx_sessions` to transmit different crop regions of the same video simultaneously (see `config/tx_3sessions.json`).
 
 ### Examples
 
 #### Using JSON Configuration (recommended)
 ```bash
-./build/TxApp --config config/tx_3sessions.json
+./build/TxApp --config config/tx_1session.json
 ```
-
-
 
 ## Supported Formats
 
@@ -61,7 +76,6 @@ Options:
 - **yuv420p**: YUV 4:2:0 8-bit
 - **yuv444p10le**: YUV 4:4:4 10-bit little endian
 - **gbrp10le**: RGB (GBR planar) 10-bit little endian
-
 
 ### Frame Rates
 - 25 fps
@@ -73,49 +87,6 @@ Options:
 - Any resolution supported by ST 2110-20
 - Common: 1920x1080, 3840x2160, 1280x720
 
-## Architecture
-
-### Core Components
-
-1. **Main Application Context** (`tx_app_context`)
-   - MTL library management
-   - Global configuration
-   - Session coordination
-
-2. **ST20P TX Context** (`st20p_tx_ctx`)
-   - Video session management
-   - Frame processing thread
-   - Source data handling
-
-
-### Threading Model
-
-- **Main Thread**: Application control and coordination
-- **ST20P Threads**: One per video session for frame processing
-- **Signal Handler**: Graceful shutdown management
-
-### Memory Management
-
-- **Hugepages**: Used for all media buffers for performance
-- **Circular Buffers**: Continuous playback from source files
-- **Automatic Cleanup**: Proper resource deallocation on exit
-
-## Network Configuration
-
-### Default Settings
-- **Port**: 0000:06:00.0 (modify for your network card)
-- **Destination IP**: 239.168.85.20 (multicast)
-- **Base UDP Port**: 20000
-- **Port Allocation**: 
-  - ST20P sessions: base_port + (session_id * 2)
-
-### Multi-session Addressing
-Each session gets unique UDP ports to avoid conflicts:
-- Session 0: UDP 20000
-- Session 1: UDP 20002  
-- Session 2: UDP 20004
-- etc.
-
 ## Performance Considerations
 
 ### Optimization Features
@@ -123,11 +94,6 @@ Each session gets unique UDP ports to avoid conflicts:
 - **Zero-copy Design**: Minimal memory copying
 - **Hardware Acceleration**: Uses MTL's hardware features
 - **Efficient Threading**: Minimal context switching
-
-### Resource Usage
-- **Memory**: ~100MB per video session + source file size
-- **CPU**: ~5-10% per session (varies by resolution/fps)
-- **Network**: Bandwidth = width × height × fps × bits_per_pixel
 
 ## Troubleshooting
 
@@ -147,34 +113,3 @@ Each session gets unique UDP ports to avoid conflicts:
    - Verify multicast routing
    - Check firewall settings
    - Ensure network card supports required bandwidth
-
-### Debug Information
-
-The application provides runtime information including:
-- Session creation status
-- Frame/packet transmission counters
-- Error messages and warnings
-- Graceful shutdown confirmation
-
-
-## Source File Format
-
-### Video Files
-- Raw YUV format matching specified parameters
-- File size should be multiple of frame size
-- Continuous looping playback
-
-
-## Integration
-
-### With Other Applications
-- Standard ST 2110 output compatible with professional equipment  
-- Works with MTL RX applications
-- Compatible with broadcast infrastructure
-
-### Monitoring
-- Built-in frame counters
-- Runtime statistics
-- Graceful error handling
-
-This application provides a solid foundation for ST 2110 transmission testing and can be extended for specific use cases.
