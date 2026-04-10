@@ -28,9 +28,10 @@ jobs:
           find "${{ github.workspace }}" -mindepth 1 -maxdepth 1 ! -name 'build' -exec rm -rf {} +
 
       - name: Checkout repository
-        run: |
-          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/intel-innersource/applications.media.ledvideowall.gardencove-next.transmitter-app.git .
-          git checkout ${{ github.event.pull_request.head.sha || github.sha }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
 
       - name: Build
         run: |
@@ -60,9 +61,10 @@ jobs:
           find "${{ github.workspace }}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 
       - name: Checkout repository
-        run: |
-          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/intel-innersource/applications.media.ledvideowall.gardencove-next.transmitter-app.git .
-          git checkout ${{ github.event.pull_request.head.sha || github.sha }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
 
       - name: cppcheck
         run: |
