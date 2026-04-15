@@ -109,7 +109,11 @@ verify_pkg() {
 
 # ── Pinned versions (edit here to change what is built) ───────────────────────
 MTL_TAG="v26.01"
+DPDK_TAG="v25.11"
 FFMPEG_VERSION="7.0"
+# Derived: version strings used for skip-if-installed checks (strip leading 'v')
+DPDK_EXPECTED_VER="${DPDK_TAG#v}"
+MTL_EXPECTED_VER=""  # resolved after clone from pkg-config .pc in MTL repo
 
 # ── Argument parsing ───────────────────────────────────────────────────────────
 WITH_SDL2=false
@@ -161,6 +165,9 @@ done
 # Every run gets its own timestamped directory so nothing is ever reused.
 # The workspace is removed at the end of the script; only system-installed
 # artifacts (via sudo make install / sudo ninja install) persist.
+# Resolve the transmitter-app scripts directory early (before any cd)
+TXAPP_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 WORKSPACE_DIR="${BASE_DIR}/mtl_build_workspace_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "${WORKSPACE_DIR}"
 
@@ -328,12 +335,97 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
+# STEP 0b – GRUB IOMMU/VFIO kernel parameters
+# ══════════════════════════════════════════════════════════════════════════════
+_section "Step 0b – GRUB IOMMU/VFIO kernel parameters"
+
+GRUB_DEFAULT="/etc/default/grub"
+GRUB_REQUIRED_PARAMS="intel_iommu=on iommu=pt pcie_aspm=off pcie_port_pm=off vfio-pci.disable_idle_d3=1"
+GRUB_CHANGED=false
+
+if [ -f "${GRUB_DEFAULT}" ]; then
+    CURRENT_CMDLINE=$(grep '^GRUB_CMDLINE_LINUX_DEFAULT=' "${GRUB_DEFAULT}" | head -1 || true)
+    _info "Current GRUB_CMDLINE_LINUX_DEFAULT: ${CURRENT_CMDLINE:-<not set>}"
+
+    MISSING_PARAMS=()
+    for param in ${GRUB_REQUIRED_PARAMS}; do
+        if ! echo "${CURRENT_CMDLINE}" | grep -Fq -- "${param}"; then
+            MISSING_PARAMS+=("${param}")
+        fi
+    done
+
+    if [ ${#MISSING_PARAMS[@]} -eq 0 ]; then
+        _ok "All required GRUB kernel parameters already present."
+    else
+        _info "Missing GRUB parameters: ${MISSING_PARAMS[*]}"
+
+        # Build the new GRUB_CMDLINE_LINUX_DEFAULT value by appending missing params
+        # to whatever is already configured (preserve existing user values like 'quiet splash').
+        EXISTING_VALUE=$(echo "${CURRENT_CMDLINE}" | sed -E 's/^GRUB_CMDLINE_LINUX_DEFAULT="(.*)"/\1/' || true)
+        NEW_VALUE="${EXISTING_VALUE}"
+        for param in "${MISSING_PARAMS[@]}"; do
+            NEW_VALUE="${NEW_VALUE} ${param}"
+        done
+        # Trim leading/trailing whitespace
+        NEW_VALUE=$(echo "${NEW_VALUE}" | sed 's/^ *//;s/ *$//')
+        NEW_LINE="GRUB_CMDLINE_LINUX_DEFAULT=\"${NEW_VALUE}\""
+
+        _info "New GRUB_CMDLINE_LINUX_DEFAULT: ${NEW_LINE}"
+
+        # Back up before modifying
+        run_cmd "backup ${GRUB_DEFAULT}" \
+            sudo cp "${GRUB_DEFAULT}" "${GRUB_DEFAULT}.bak.$(date +%Y%m%d_%H%M%S)"
+
+        if [ -n "${CURRENT_CMDLINE}" ]; then
+            run_cmd "update GRUB_CMDLINE_LINUX_DEFAULT" \
+                sudo sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|${NEW_LINE}|" "${GRUB_DEFAULT}"
+        else
+            # Variable not present at all – append it
+            run_cmd "append GRUB_CMDLINE_LINUX_DEFAULT" \
+                sudo bash -c "echo '${NEW_LINE}' >> '${GRUB_DEFAULT}'"
+        fi
+
+        run_cmd "update-grub" sudo update-grub
+        GRUB_CHANGED=true
+        _ok "GRUB updated. A reboot is required for IOMMU/VFIO parameters to take effect."
+    fi
+else
+    _warn "${GRUB_DEFAULT} not found – GRUB configuration skipped."
+    record_failure "GRUB config file not found: ${GRUB_DEFAULT}"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STEP 0c – VFIO group setup
+# ══════════════════════════════════════════════════════════════════════════════
+_section "Step 0c – VFIO group setup"
+
+VFIO_USER="${SUDO_USER:-${USER}}"
+_info "Target user for vfio group: ${VFIO_USER}"
+
+if getent group vfio >/dev/null 2>&1; then
+    _ok "Group 'vfio' already exists."
+else
+    run_cmd "create vfio group" sudo groupadd vfio
+fi
+
+if id -nG "${VFIO_USER}" 2>/dev/null | grep -qw vfio; then
+    _ok "User '${VFIO_USER}' is already a member of the 'vfio' group."
+else
+    run_cmd "add ${VFIO_USER} to vfio group" \
+        sudo usermod -aG vfio "${VFIO_USER}"
+    _ok "User '${VFIO_USER}' added to vfio group. Log out/in or run 'newgrp vfio' to activate."
+fi
+
+_info "Current groups for ${VFIO_USER}: $(id -nG "${VFIO_USER}" 2>/dev/null || echo 'unknown')"
+
+if ${GRUB_CHANGED}; then
+    _warn "GRUB was modified – a REBOOT is required before IOMMU/VFIO features will work."
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
 # STEP 1 – Install OS build dependencies
 # ══════════════════════════════════════════════════════════════════════════════
 _section "Step 1 – Install OS build dependencies (apt-get)"
-
-run_cmd "apt-get update" \
-    sudo apt-get update
 
 APT_PACKAGES=(
     git gcc g++ build-essential make meson python3 python3-venv
@@ -342,8 +434,23 @@ APT_PACKAGES=(
     flex byacc
 )
 
-run_cmd "apt-get install core packages" \
-    sudo apt-get install -y "${APT_PACKAGES[@]}"
+# Check which packages are not yet installed to avoid unnecessary apt calls
+MISSING_PKGS=()
+for pkg in "${APT_PACKAGES[@]}"; do
+    if ! dpkg -s "${pkg}" >/dev/null 2>&1; then
+        MISSING_PKGS+=("${pkg}")
+    fi
+done
+
+if [ ${#MISSING_PKGS[@]} -eq 0 ]; then
+    _ok "All core apt packages already installed – skipping apt-get update/install."
+else
+    _info "Missing ${#MISSING_PKGS[@]} package(s): ${MISSING_PKGS[*]}"
+    run_cmd "apt-get update" \
+        sudo apt-get update
+    run_cmd "apt-get install core packages" \
+        sudo apt-get install -y "${MISSING_PKGS[@]}"
+fi
 
 # Verify key build tools
 for cmd in git gcc g++ make meson python3 pkg-config clang llvm-config flex; do
@@ -390,14 +497,17 @@ if $WITH_SDL2; then
 fi
 
 # ── Kernel headers (needed for DPDK / PMD drivers) ────────────────────────────
-run_cmd "apt-get install kernel headers" \
-    sudo apt-get install -y "linux-headers-$(uname -r)"
-
 if [ -d "/lib/modules/$(uname -r)/build" ]; then
-    _ok "Kernel headers present: /lib/modules/$(uname -r)/build"
+    _ok "Kernel headers already present: /lib/modules/$(uname -r)/build – skipping install."
 else
-    record_failure "Kernel headers directory not found for $(uname -r)"
-    _warn "Some DPDK kernel modules may not build correctly."
+    run_cmd "apt-get install kernel headers" \
+        sudo apt-get install -y "linux-headers-$(uname -r)"
+    if [ -d "/lib/modules/$(uname -r)/build" ]; then
+        _ok "Kernel headers present: /lib/modules/$(uname -r)/build"
+    else
+        record_failure "Kernel headers directory not found for $(uname -r)"
+        _warn "Some DPDK kernel modules may not build correctly."
+    fi
 fi
 
 # ── Python build tools via isolated venv ─────────────────────────────────────
@@ -581,13 +691,28 @@ fi
 # ══════════════════════════════════════════════════════════════════════════════
 _section "Step 2 – Clone Media Transport Library (tag ${MTL_TAG})"
 
-rm -rf "${MTL_DIR}"
-run_cmd "git clone MTL tag ${MTL_TAG}" \
-    git clone --branch "${MTL_TAG}" --depth 1 \
-        https://github.com/OpenVisualCloud/Media-Transport-Library.git \
-        "${MTL_DIR}"
-
 export mtl_source_code="${MTL_DIR}"
+
+# Check if MTL source already exists at the correct tag – skip clone if so.
+# The source tree is always needed (even when skipping build) for FFmpeg plugin files.
+if [ -d "${mtl_source_code}" ]; then
+    MTL_ACTUAL_TAG=$(git -C "${mtl_source_code}" describe --tags --exact-match 2>/dev/null || echo "unknown")
+    if [ "${MTL_ACTUAL_TAG}" = "${MTL_TAG}" ]; then
+        _ok "MTL source already present at tag ${MTL_TAG} – skipping clone."
+    else
+        _info "MTL source exists but at tag '${MTL_ACTUAL_TAG}' (need '${MTL_TAG}') – re-cloning."
+        rm -rf "${MTL_DIR}"
+        run_cmd "git clone MTL tag ${MTL_TAG}" \
+            git clone --branch "${MTL_TAG}" --depth 1 \
+                https://github.com/OpenVisualCloud/Media-Transport-Library.git \
+                "${MTL_DIR}"
+    fi
+else
+    run_cmd "git clone MTL tag ${MTL_TAG}" \
+        git clone --branch "${MTL_TAG}" --depth 1 \
+            https://github.com/OpenVisualCloud/Media-Transport-Library.git \
+            "${MTL_DIR}"
+fi
 
 if [ -d "${mtl_source_code}" ]; then
     _ok "mtl_source_code = ${mtl_source_code}"
@@ -608,14 +733,27 @@ fi
 # ══════════════════════════════════════════════════════════════════════════════
 # STEP 3 – DPDK: Get source
 # ══════════════════════════════════════════════════════════════════════════════
-_section "Step 3 – Clone DPDK v25.11"
+_section "Step 3 – Clone DPDK ${DPDK_TAG}"
+
+# Check if the required DPDK version is already installed
+DPDK_INSTALLED_VER=$(pkg-config --modversion libdpdk 2>/dev/null || echo "")
+SKIP_DPDK_BUILD=false
+if [ -n "${DPDK_INSTALLED_VER}" ] && [ "${DPDK_INSTALLED_VER}" = "${DPDK_EXPECTED_VER}" ]; then
+    _ok "DPDK ${DPDK_INSTALLED_VER} already installed – skipping clone, patch, and build (Steps 3–5)."
+    SKIP_DPDK_BUILD=true
+elif [ -n "${DPDK_INSTALLED_VER}" ]; then
+    _info "DPDK installed version (${DPDK_INSTALLED_VER}) differs from required (${DPDK_EXPECTED_VER}) – rebuilding."
+else
+    _info "DPDK not found via pkg-config – will clone and build."
+fi
+
+if ! ${SKIP_DPDK_BUILD}; then
 
 rm -rf "${DPDK_DIR}"
 run_cmd "git clone DPDK" \
     git clone https://github.com/DPDK/dpdk.git "${DPDK_DIR}"
 
 if cd "${DPDK_DIR}"; then
-    DPDK_TAG="v25.11"
     run_cmd "git checkout DPDK ${DPDK_TAG}" \
         git checkout "${DPDK_TAG}"
 
@@ -660,27 +798,25 @@ if [ -d "${PATCH_DIR}" ]; then
             # Pre-expand the glob into an array so run_cmd receives individual args.
             DPDK_PATCHES=("${PATCH_DIR}"/*.patch)
 
-            # Idempotence check: if the patches apply cleanly, proceed with git am.
+            # Idempotence check: if the patches apply cleanly, proceed with git apply --3way.
+            # --3way enables a three-way merge fallback so minor context drift between
+            # versions does not cause an outright failure.
             # If not, check whether they are already applied (reverse check).
             # Only skip silently when patches are confirmed already applied;
             # otherwise record a failure so the operator knows manual action is needed.
             if git apply --check "${DPDK_PATCHES[@]}" >/dev/null 2>&1; then
-                _info "DPDK patches appear applicable. Proceeding with git am."
-                run_cmd "git am DPDK patches" \
-                    git am --3way "${DPDK_PATCHES[@]}"
+                _info "DPDK patches appear applicable. Proceeding with git apply --3way."
+                run_cmd "git apply DPDK patches" \
+                    git apply --3way "${DPDK_PATCHES[@]}"
 
                 PATCH_RC=$?
                 if [ ${PATCH_RC} -ne 0 ]; then
-                    _warn "git am reported errors. Attempting git am --abort to clean state."
-                    git am --abort 2>/dev/null || true
                     _error "Patches did not apply cleanly. Manual intervention may be needed."
                 else
                     _ok "All ${PATCH_COUNT} DPDK patch(es) applied successfully."
-                    _info "Last ${PATCH_COUNT} commit(s) in DPDK after patching:"
-                    git log --oneline -n "${PATCH_COUNT}" 2>/dev/null || true
                 fi
             elif git apply --reverse --check "${DPDK_PATCHES[@]}" >/dev/null 2>&1; then
-                _ok "DPDK patches already applied – skipping git am."
+                _ok "DPDK patches already applied – skipping."
             else
                 record_failure "DPDK patches: cannot apply and not detected as already applied; manual intervention may be needed"
                 _error "Patches are neither applicable nor detected as already applied. Check DPDK tree in ${DPDK_DIR}."
@@ -747,7 +883,11 @@ else
     _error "Cannot enter ${DPDK_DIR} – DPDK build skipped."
 fi
 
+fi # end: if ! ${SKIP_DPDK_BUILD} (Steps 3–5 build)
+
 # ── Fix PKG_CONFIG_PATH if libdpdk.pc was installed to a non-standard path ────
+# This runs regardless of whether DPDK was just built or was already installed,
+# so that PKG_CONFIG_PATH is set correctly for MTL and FFmpeg builds.
 _section "Step 5b – Configure PKG_CONFIG_PATH for libdpdk"
 
 DPDK_PC=$(find /usr /usr/local -name libdpdk.pc 2>/dev/null | head -n1)
@@ -797,7 +937,23 @@ fi
 # ══════════════════════════════════════════════════════════════════════════════
 _section "Step 6 – Build Media Transport Library and sample apps"
 
-if [ ! -d "${mtl_source_code}" ]; then
+# Check if the required MTL version is already installed
+MTL_INSTALLED_VER=$(pkg-config --modversion mtl 2>/dev/null || echo "")
+# MTL_TAG is e.g. "v26.01" – the pkg-config version is typically "26.01"
+MTL_EXPECTED_VER="${MTL_TAG#v}"
+SKIP_MTL_BUILD=false
+if [ -n "${MTL_INSTALLED_VER}" ] && [ "${MTL_INSTALLED_VER}" = "${MTL_EXPECTED_VER}" ]; then
+    _ok "MTL ${MTL_INSTALLED_VER} already installed – skipping build."
+    SKIP_MTL_BUILD=true
+elif [ -n "${MTL_INSTALLED_VER}" ]; then
+    _info "MTL installed version (${MTL_INSTALLED_VER}) differs from required (${MTL_EXPECTED_VER}) – rebuilding."
+else
+    _info "MTL not found via pkg-config – will build."
+fi
+
+if ${SKIP_MTL_BUILD}; then
+    _ok "MTL build skipped – already at required version."
+elif [ ! -d "${mtl_source_code}" ]; then
     _error "MTL source directory not found at ${mtl_source_code}. Skipping MTL build."
     record_failure "MTL build skipped – source directory missing"
 else
@@ -860,10 +1016,23 @@ FFMPEG_BUILD_DIR="${WORKSPACE_DIR}/ffmpeg_build"
 mkdir -p "${FFMPEG_BUILD_DIR}"
 
 # ── Step 7.0  apt prerequisites for FFmpeg build ──────────────────────────────
-run_cmd "apt-get install FFmpeg build tools (wget patch unzip nasm)" \
-    sudo apt-get install -y wget patch unzip nasm
+FFMPEG_BUILD_TOOLS=(wget patch unzip nasm)
+MISSING_FFTOOLS=()
+for pkg in "${FFMPEG_BUILD_TOOLS[@]}"; do
+    if ! command -v "${pkg}" >/dev/null 2>&1; then
+        MISSING_FFTOOLS+=("${pkg}")
+    fi
+done
 
-for cmd in wget patch unzip nasm; do
+if [ ${#MISSING_FFTOOLS[@]} -eq 0 ]; then
+    _ok "FFmpeg build tools already available – skipping apt install."
+else
+    _info "Missing FFmpeg build tools: ${MISSING_FFTOOLS[*]}"
+    run_cmd "apt-get install FFmpeg build tools (wget patch unzip nasm)" \
+        sudo apt-get install -y wget patch unzip nasm
+fi
+
+for cmd in "${FFMPEG_BUILD_TOOLS[@]}"; do
     verify_cmd "${cmd}" "apt-get install FFmpeg build tools"
 done
 
@@ -952,23 +1121,21 @@ else
             # Pre-expand the glob into an array so run_cmd receives individual args.
             FFMPEG_PATCHES=("${FFMPEG_PATCH_DIR}"/*.patch)
 
-            # Idempotence check: if the patches apply cleanly, proceed with git am.
+            # Idempotence check: if the patches apply cleanly, proceed with git apply --3way.
+            # --3way enables a three-way merge fallback so minor context drift between
+            # versions does not cause an outright failure.
             # If not, check whether they are already applied (reverse check).
             if git apply --check "${FFMPEG_PATCHES[@]}" >/dev/null 2>&1; then
-                _info "FFmpeg patches appear applicable. Proceeding with git am."
-                run_cmd "git am FFmpeg MTL patches" \
-                    git am --3way "${FFMPEG_PATCHES[@]}"
+                _info "FFmpeg patches appear applicable. Proceeding with git apply --3way."
+                run_cmd "git apply FFmpeg MTL patches" \
+                    git apply --3way "${FFMPEG_PATCHES[@]}"
                 if [ $? -ne 0 ]; then
-                    _warn "git am failed – attempting git am --abort to restore clean state."
-                    git am --abort 2>/dev/null || true
                     record_failure "FFmpeg MTL patches did not apply cleanly for version ${FFMPEG_VERSION}"
                 else
                     _ok "All ${FPATCH_COUNT} FFmpeg MTL patch(es) applied successfully."
-                    _info "Last ${FPATCH_COUNT} commit(s) in FFmpeg after patching:"
-                    git log --oneline -n "${FPATCH_COUNT}" 2>/dev/null || true
                 fi
             elif git apply --reverse --check "${FFMPEG_PATCHES[@]}" >/dev/null 2>&1; then
-                _ok "FFmpeg MTL patches already applied – skipping git am."
+                _ok "FFmpeg MTL patches already applied – skipping."
             else
                 record_failure "FFmpeg patches: cannot apply and not detected as already applied; manual intervention may be needed"
                 _error "FFmpeg patches are neither applicable nor detected as already applied. Check FFmpeg tree."
@@ -980,6 +1147,37 @@ else
     else
         _warn "FFmpeg patch directory not found: ${FFMPEG_PATCH_DIR}"
         record_failure "FFmpeg patch directory missing: ${FFMPEG_PATCH_DIR}"
+    fi
+
+    # ── Step 7.4b  Apply transmitter-app colour format patch to MTL plugin ────
+    _info "--- 7.4b  Apply colour format patch to mtl_st20p_tx.c ---"
+    COLOUR_PATCH="${TXAPP_SCRIPT_DIR}/../patches/0001-Patch-mtl_st20p_tx-for-colour-format-additional-supp.patch"
+
+    if [ -f "${COLOUR_PATCH}" ]; then
+        _info "Colour format patch found: ${COLOUR_PATCH}"
+        if pushd "${mtl_source_code}" >/dev/null 2>&1; then
+            if git apply --check "${COLOUR_PATCH}" >/dev/null 2>&1; then
+                _info "Colour format patch appears applicable. Applying with git apply --3way."
+                run_cmd "git apply colour format patch" \
+                    git apply --3way "${COLOUR_PATCH}"
+                if [ $? -ne 0 ]; then
+                    record_failure "Colour format patch did not apply cleanly"
+                else
+                    _ok "Colour format patch applied successfully."
+                fi
+            elif git apply --reverse --check "${COLOUR_PATCH}" >/dev/null 2>&1; then
+                _ok "Colour format patch already applied – skipping."
+            else
+                record_failure "Colour format patch: cannot apply and not detected as already applied"
+                _error "Colour format patch could not be applied. Manual intervention may be needed."
+            fi
+            popd >/dev/null 2>&1
+        else
+            record_failure "pushd into MTL source for colour patch: ${mtl_source_code} not accessible"
+        fi
+    else
+        _warn "Colour format patch not found: ${COLOUR_PATCH}"
+        record_failure "Colour format patch missing: ${COLOUR_PATCH}"
     fi
 
     # ── Step 7.5  Copy MTL in/out device source files ─────────────────────────
