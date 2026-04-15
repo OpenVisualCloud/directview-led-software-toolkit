@@ -197,6 +197,7 @@ static int parse_args(struct tx_app_context* ctx, int argc, char** argv) {
         break;
       case 'C':
         strncpy(ctx->config_file, optarg, sizeof(ctx->config_file) - 1);
+        ctx->config_file[sizeof(ctx->config_file) - 1] = '\0';
         break;
       case 'P': {
         int pt = atoi(optarg);

@@ -9,6 +9,7 @@
 #include <stdatomic.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
 
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
@@ -289,6 +290,16 @@ void* shared_decode_thread(void* arg) {
 
   printf("Shared decode thread started (%d sessions)\n", dec->num_sessions);
 
+  /* Frame period in nanoseconds for FPS-based pacing (e.g. 33 333 333 ns @ 30fps).
+   * The decode thread sleeps after each barrier_copied to ensure frames are
+   * fed into the MTL TX ring at the configured rate. Without pacing, FFmpeg
+   * decodes much faster than the network can transmit, causing MTL's 3-deep
+   * frame ring to fill up and log st20p_tx_get_frame timeout on every frame. */
+  int fps = dec->app->fps > 0 ? dec->app->fps : 30;
+  long frame_period_ns = 1000000000L / fps;
+  struct timespec last_frame_ts;
+  clock_gettime(CLOCK_MONOTONIC, &last_frame_ts);
+
   while (!dec->exit && !g_tx_app_exit) {
     bool got_frame = false;
 
@@ -349,6 +360,21 @@ void* shared_decode_thread(void* arg) {
      * N TX threads arrive after send_video_frame() completes.
      * Once all N+1 arrive → decode thread is released → safe to overwrite yuv_frame. */
     pthread_barrier_wait(&dec->barrier_copied);
+
+    /* FPS pacing: sleep until the next frame deadline.
+     * Compute elapsed time since last frame and sleep for the remainder of
+     * the frame period. This prevents FFmpeg from decoding faster than the
+     * network can transmit, which would exhaust MTL's TX ring buffers. */
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    long elapsed_ns = (now.tv_sec  - last_frame_ts.tv_sec)  * 1000000000L
+                    + (now.tv_nsec - last_frame_ts.tv_nsec);
+    long sleep_ns = frame_period_ns - elapsed_ns;
+    if (sleep_ns > 0) {
+      struct timespec req = { .tv_sec = 0, .tv_nsec = sleep_ns };
+      nanosleep(&req, NULL);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &last_frame_ts);
   }
 
   /* Signal exit: hit both barriers one final time so TX threads don't deadlock */

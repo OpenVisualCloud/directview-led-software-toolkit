@@ -61,24 +61,21 @@ static void* st20p_tx_thread_shared(void* arg) {
   printf("ST20P TX(%d): shared thread started (crop x=%d y=%d w=%d h=%d)\n",
          ctx->idx, crop_x, crop_y, crop_w, crop_h);
 
-  while (!ctx->app->exit && !g_tx_app_exit) {
-    /* Wait for the decode thread to finish sws_scale into yuv_frame.
-     * All N TX threads + decode thread must reach this point before any proceed. */
+  while (1) {
+    /* Always enter barrier_decoded unconditionally — even during shutdown.
+     * The decode thread's cleanup path always posts barrier_decoded to release
+     * TX threads; if a TX thread skips this barrier the decode thread deadlocks
+     * forever in pthread_barrier_wait. */
     pthread_barrier_wait(&dec->barrier_decoded);
 
-    /* Check if decode thread exited (EOF or error) while we were waiting */
-    if (dec->exit || ctx->app->exit || g_tx_app_exit) {
-      pthread_barrier_wait(&dec->barrier_copied); /* must still hit barrier_copied */
-      break;
-    }
+    bool should_exit = (dec->exit || ctx->app->exit || g_tx_app_exit);
+    if (!should_exit)
+      /* Crop this session's rect from yuv_frame, pack it, send via mtl_st20p */
+      send_video_frame(ctx, dec->yuv_frame, crop_x, crop_y, crop_w, crop_h);
 
-    /* Crop this session's rect from yuv_frame, pack it, send via mtl_st20p */
-    send_video_frame(ctx, dec->yuv_frame, crop_x, crop_y, crop_w, crop_h);
-
-    /* Signal decode thread that this TX session has finished reading yuv_frame.
-     * When all N TX threads + decode thread arrive -> decode thread unblocks
-     * and may overwrite yuv_frame with the next decoded frame. */
+    /* Always enter barrier_copied too, then break if exiting */
     pthread_barrier_wait(&dec->barrier_copied);
+    if (should_exit) break;
   }
 
   printf("ST20P TX(%d): thread stopped, sent %d frames\n", ctx->idx, ctx->frames_sent);
@@ -119,10 +116,21 @@ static void* st20p_tx_thread(void* arg) {
 
       size_t copy_sz = (ctx->current_pos + frame_bytes <= ctx->source_size)
                          ? frame_bytes : (ctx->source_size - ctx->current_pos);
-      /* Raw YUV files are stored plane-contiguous; data[0] is the base of
-       * the contiguous allocation so copying here fills Y (+ U,V overlap). */
-      memcpy(ctx->enc_frame->data[0],
-             ctx->source_buffer + ctx->current_pos, copy_sz);
+
+      /* Raw YUV files are packed (no per-line stride padding). Use
+       * av_image_fill_arrays with align=1 to map the packed source buffer
+       * onto the plane pointers/linesizes that av_image_copy_to_buffer expects.
+       * This correctly handles all formats and avoids writing a packed blob
+       * into enc_frame->data[0] which has padded (aligned) linesizes. */
+      uint8_t* planes[AV_NUM_DATA_POINTERS];
+      int      linesizes[AV_NUM_DATA_POINTERS];
+      av_image_fill_arrays(planes, linesizes,
+                           ctx->source_buffer + ctx->current_pos,
+                           ctx->app->fmt,
+                           ctx->enc_frame->width, ctx->enc_frame->height, 1);
+      av_image_copy(ctx->enc_frame->data, ctx->enc_frame->linesize,
+                    (const uint8_t**)planes, linesizes,
+                    ctx->app->fmt, ctx->enc_frame->width, ctx->enc_frame->height);
       ctx->current_pos += copy_sz;
 
       int packed = av_image_copy_to_buffer(
@@ -342,9 +350,11 @@ int create_st20p_tx_session(session_manager_t* manager, struct tx_app_context* a
     return -1;
   }
 
-  const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(app->fmt);
-  ctx->frame_size = (size_t)ctx->crop_width * ctx->crop_height
-                    * (desc ? desc->comp[0].depth / 8 : 2) * 2;
+  /* Use av_image_get_buffer_size (align=1) for the exact packed frame size.
+   * This correctly handles all formats (4:2:0, 4:2:2, 4:4:4, 10/12-bit) without
+   * relying on the broken depth/8 integer division or hardcoded * 2 chroma factor. */
+  int fsize = av_image_get_buffer_size(app->fmt, ctx->crop_width, ctx->crop_height, 1);
+  ctx->frame_size = (fsize > 0) ? (size_t)fsize : 0;
 
   if (manager->shared_dec) {
     /* Multi-session path: attach shared decoder -- TX thread will use barriers */
@@ -481,7 +491,7 @@ int session_manager_start(session_manager_t* manager) {
   for (int i = 0; i < manager->st20p_count; i++) {
     struct st20p_tx_ctx* ctx = &manager->st20p_sessions[i];
     /* Select thread function: shared barrier path or independent single-session path */
-    void* thread_fn = ctx->shared_dec ? st20p_tx_thread_shared : st20p_tx_thread;
+    void *(*thread_fn)(void *) = ctx->shared_dec ? st20p_tx_thread_shared : st20p_tx_thread;
 
     if (pthread_create(&ctx->thread, NULL, thread_fn, ctx) != 0) {
       printf("Error: Failed to create ST20P TX thread %d\n", i);
