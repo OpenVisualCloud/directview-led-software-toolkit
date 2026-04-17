@@ -31,6 +31,7 @@ TxApp uses a JSON config file with three sections:
 
 | Section | Field | Description |
 |---------|-------|-------------|
+| **log_file** | `log_file` | (Optional) Path/name of the log output file (e.g. `TxApp.log`). If omitted, logging goes to console only. |
 | **interfaces** | `name` | PCI BDF address of the NIC (e.g. `0000:06:00.0`) |
 | | `sip` | Source IP address |
 | | `dip` | Destination multicast IP address |
@@ -46,6 +47,7 @@ TxApp uses a JSON config file with three sections:
 Example (`config/tx_1session.json`):
 ```json
 {
+  "log_file": "TxApp.log",
   "interfaces": [
     { "name": "0000:06:00.0", "sip": "192.168.50.29", "dip": "239.168.85.20" }
   ],
@@ -61,6 +63,32 @@ Example (`config/tx_1session.json`):
 ```
 
 Multiple sessions can be defined in `tx_sessions` to transmit different crop regions of the same video simultaneously (see `config/tx_3sessions.json`).
+
+## Logging
+
+TxApp includes a built-in logger with configurable output targets and log levels.
+
+### Log File
+
+Specify a log file in the JSON config with the top-level `log_file` field:
+
+```json
+{
+  "log_file": "TxApp.log",
+  ...
+}
+```
+
+When `log_file` is set, log output is written to that file in addition to the console. If the field is omitted, output goes to the console only.
+
+### Log Levels
+
+| Level | Description |
+|-------|-------------|
+| `ERROR` | Critical failures only |
+| `WARN` | Non-fatal warnings |
+| `INFO` | General operational messages (default) |
+| `DEBUG` | Verbose diagnostic output |
 
 ### Examples
 

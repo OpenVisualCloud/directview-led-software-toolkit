@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #include "config_reader.h"
 #include "tx_app_context.h"
+#include "util/logger.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -128,12 +129,40 @@ static const char* find_array_end(const char* arr_start, const char* buf_end) {
 }
 
 /* -------------------------------------------------------------------------
+ * peek_config_log_file — quickly extract only the top-level "log_file" value.
+ * Returns 0 and fills out_buf on success, -1 if not found or on error.
+ * Intentionally lightweight so the logger can be redirected to file BEFORE
+ * the full parse (and its log output) runs.
+ * -------------------------------------------------------------------------*/
+int peek_config_log_file(const char* config_file, char* out_buf, size_t out_size) {
+    FILE* fp = fopen(config_file, "r");
+    if (!fp) return -1;
+
+    fseek(fp, 0, SEEK_END);
+    long file_size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (file_size <= 0) { fclose(fp); return -1; }
+
+    char* json = malloc(file_size + 1);
+    if (!json) { fclose(fp); return -1; }
+
+    fread(json, 1, file_size, fp);
+    json[file_size] = '\0';
+    fclose(fp);
+
+    char* result = extract_json_string(json, json + file_size, "log_file", out_buf, out_size);
+    free(json);
+    return result ? 0 : -1;
+}
+
+/* -------------------------------------------------------------------------
  * parse_tx_config — parse the JSON config file into tx_app_config.
  *
  * Expected JSON structure:
  *   {
  *     "interfaces": [ { "name": "...", "sip": "...", "dip": "..." } ],
  *     "video": { "width": N, "height": N, "fps": N, "fmt": "...", "tx_url": "..." },
+ *     "log_file": "/path/to/TxApp.log",  (optional — omit for console-only logging)
  *     "tx_sessions": [
  *       { "udp_port": N, "payload_type": N, "crop": { "x":N, "y":N, "w":N, "h":N } },
  *       ...
@@ -143,7 +172,7 @@ static const char* find_array_end(const char* arr_start, const char* buf_end) {
 int parse_tx_config(const char* config_file, struct tx_app_config* config) {
     FILE* fp = fopen(config_file, "r");
     if (!fp) {
-        printf("Error: Cannot open config file %s\n", config_file);
+        LOG_ERROR("Cannot open config file %s", config_file);
         return -1;
     }
 
@@ -173,8 +202,8 @@ int parse_tx_config(const char* config_file, struct tx_app_config* config) {
                 const char* iface_obj = first_brace;
                 const char* iface_end = find_object_end(iface_obj, ifaces_end);
                 if (!iface_end) {
-                    printf("Warning: interfaces[0] object not properly closed; "
-                           "truncating parse at array end\n");
+                    LOG_WARN("interfaces[0] object not properly closed; "
+                           "truncating parse at array end");
                     iface_end = ifaces_end;
                 }
                 extract_json_string(iface_obj, iface_end, "name", config->interface_name, sizeof(config->interface_name));
@@ -201,10 +230,13 @@ int parse_tx_config(const char* config_file, struct tx_app_config* config) {
         strncpy(config->fmt, "yuv422p10le", sizeof(config->fmt) - 1);
     }
 
+    /* --- optional top-level log_file --- */
+    extract_json_string(json, buf_end, "log_file", config->log_file, sizeof(config->log_file));
+
     /* --- tx_sessions array --- */
     const char* sessions_arr = find_array(json, buf_end, "tx_sessions");
     if (!sessions_arr) {
-        printf("Error: 'tx_sessions' not found in config\n");
+        LOG_ERROR("'tx_sessions' not found in config");
         free(json);
         return -1;
     }
@@ -232,10 +264,10 @@ int parse_tx_config(const char* config_file, struct tx_app_config* config) {
             s->udp_port = (uint16_t)v;
         } else {
             if (v <= 0)
-                printf("Warning: session %d: udp_port not set or invalid (%d); using default 20000\n",
+                LOG_WARN("session %d: udp_port not set or invalid (%d); using default 20000",
                        config->session_count, v);
             else
-                printf("Warning: session %d: udp_port %d exceeds 65535; using default 20000\n",
+                LOG_WARN("session %d: udp_port %d exceeds 65535; using default 20000",
                        config->session_count, v);
             s->udp_port = 20000;
         }
@@ -245,10 +277,10 @@ int parse_tx_config(const char* config_file, struct tx_app_config* config) {
             s->payload_type = (uint8_t)v;
         } else {
             if (v <= 0)
-                printf("Warning: session %d: payload_type not set or invalid (%d); using default 96\n",
+                LOG_WARN("session %d: payload_type not set or invalid (%d); using default 96",
                        config->session_count, v);
             else
-                printf("Warning: session %d: payload_type %d exceeds 255; using default 96\n",
+                LOG_WARN("session %d: payload_type %d exceeds 255; using default 96",
                        config->session_count, v);
             s->payload_type = 96;
         }
@@ -274,7 +306,7 @@ int parse_tx_config(const char* config_file, struct tx_app_config* config) {
     }
 
     if (config->session_count == 0) {
-        printf("Error: No tx_sessions found in config\n");
+        LOG_ERROR("No tx_sessions found in config");
         free(json);
         return -1;
     }
@@ -286,11 +318,11 @@ int parse_tx_config(const char* config_file, struct tx_app_config* config) {
 int validate_tx_config(const struct tx_app_config* config) {
     /* Interface validation */
     if (config->interface_name[0] == '\0') {
-        printf("Error: interfaces[0].name is required\n");
+        LOG_ERROR("interfaces[0].name is required");
         return -1;
     }
     if (config->interface_dip[0] == '\0') {
-        printf("Error: interfaces[0].dip is required\n");
+        LOG_ERROR("interfaces[0].dip is required");
         return -1;
     }
 
@@ -298,37 +330,37 @@ int validate_tx_config(const struct tx_app_config* config) {
     if (config->interface_sip[0] != '\0') {
         struct in_addr tmp;
         if (inet_pton(AF_INET, config->interface_sip, &tmp) != 1) {
-            printf("Error: Invalid source IP address '%s'\n", config->interface_sip);
+            LOG_ERROR("Invalid source IP address '%s'", config->interface_sip);
             return -1;
         }
     }
     {
         struct in_addr tmp;
         if (inet_pton(AF_INET, config->interface_dip, &tmp) != 1) {
-            printf("Error: Invalid destination IP address '%s'\n", config->interface_dip);
+            LOG_ERROR("Invalid destination IP address '%s'", config->interface_dip);
             return -1;
         }
     }
 
     /* Video resolution validation */
     if (config->width == 0 || config->height == 0) {
-        printf("Error: video width/height must be non-zero\n");
+        LOG_ERROR("video width/height must be non-zero");
         return -1;
     }
     if (config->width > 7680 || config->height > 4320) {
-        printf("Error: video resolution %dx%d exceeds maximum 7680x4320\n",
+        LOG_ERROR("video resolution %dx%d exceeds maximum 7680x4320",
                config->width, config->height);
         return -1;
     }
     if (config->width % 2 != 0) {
-        printf("Error: video width %d must be even for YUV formats\n", config->width);
+        LOG_ERROR("video width %d must be even for YUV formats", config->width);
         return -1;
     }
 
     /* FPS validation */
     if (config->fps != 25 && config->fps != 30 &&
         config->fps != 50 && config->fps != 60) {
-        printf("Error: unsupported fps %d (supported: 25, 30, 50, 60)\n", config->fps);
+        LOG_ERROR("unsupported fps %d (supported: 25, 30, 50, 60)", config->fps);
         return -1;
     }
 
@@ -341,9 +373,9 @@ int validate_tx_config(const struct tx_app_config* config) {
         strcmp(config->fmt, "yuv444p12le") != 0 &&
         strcmp(config->fmt, "gbrp10le") != 0 &&
         strcmp(config->fmt, "gbrp12le") != 0) {
-        printf("Error: unsupported pixel format '%s'\n", config->fmt);
-        printf("  Supported: yuv422p10le, yuv420p, yuv422p12le, yuv444p10le, "
-               "yuv444p12le, gbrp10le, gbrp12le\n");
+        LOG_ERROR("unsupported pixel format '%s'", config->fmt);
+        LOG_ERROR("  Supported: yuv422p10le, yuv420p, yuv422p12le, yuv444p10le, "
+               "yuv444p12le, gbrp10le, gbrp12le");
         return -1;
     }
 
@@ -351,7 +383,7 @@ int validate_tx_config(const struct tx_app_config* config) {
     if (config->tx_url[0] != '\0') {
         FILE* f = fopen(config->tx_url, "r");
         if (!f) {
-            printf("Error: video source file not found: %s\n", config->tx_url);
+            LOG_ERROR("video source file not found: %s", config->tx_url);
             return -1;
         }
         fclose(f);
@@ -359,7 +391,7 @@ int validate_tx_config(const struct tx_app_config* config) {
 
     /* Session validation */
     if (config->session_count == 0) {
-        printf("Error: tx_sessions array is empty\n");
+        LOG_ERROR("tx_sessions array is empty");
         return -1;
     }
 
@@ -368,36 +400,36 @@ int validate_tx_config(const struct tx_app_config* config) {
 
         /* UDP port range */
         if (s->udp_port == 0) {
-            printf("Error: session %d: udp_port must be non-zero\n", i);
+            LOG_ERROR("session %d: udp_port must be non-zero", i);
             return -1;
         }
 
         /* Payload type range (RFC 3551: dynamic range 96-127) */
         if (s->payload_type < 96 || s->payload_type > 127) {
-            printf("Error: session %d: payload_type %d out of range 96-127\n",
+            LOG_ERROR("session %d: payload_type %d out of range 96-127",
                    i, s->payload_type);
             return -1;
         }
 
         /* Crop bounds: must fit within the source video */
         if (s->crop_x < 0 || s->crop_y < 0 || s->crop_w <= 0 || s->crop_h <= 0) {
-            printf("Error: session %d: crop values must be positive "
-                   "(x=%d y=%d w=%d h=%d)\n", i, s->crop_x, s->crop_y,
+            LOG_ERROR("session %d: crop values must be positive "
+                   "(x=%d y=%d w=%d h=%d)", i, s->crop_x, s->crop_y,
                    s->crop_w, s->crop_h);
             return -1;
         }
         if ((uint32_t)(s->crop_x + s->crop_w) > config->width) {
-            printf("Error: session %d: crop x=%d + w=%d = %d exceeds video width %d\n",
+            LOG_ERROR("session %d: crop x=%d + w=%d = %d exceeds video width %d",
                    i, s->crop_x, s->crop_w, s->crop_x + s->crop_w, config->width);
             return -1;
         }
         if ((uint32_t)(s->crop_y + s->crop_h) > config->height) {
-            printf("Error: session %d: crop y=%d + h=%d = %d exceeds video height %d\n",
+            LOG_ERROR("session %d: crop y=%d + h=%d = %d exceeds video height %d",
                    i, s->crop_y, s->crop_h, s->crop_y + s->crop_h, config->height);
             return -1;
         }
         if (s->crop_w % 2 != 0) {
-            printf("Error: session %d: crop width %d must be even for YUV formats\n",
+            LOG_ERROR("session %d: crop width %d must be even for YUV formats",
                    i, s->crop_w);
             return -1;
         }
@@ -414,23 +446,23 @@ int validate_tx_config(const struct tx_app_config* config) {
             int y_align = desc ? (1 << desc->log2_chroma_h) : 1;
 
             if (x_align > 1 && s->crop_x % x_align != 0) {
-                printf("Error: session %d: crop_x %d must be a multiple of %d "
-                       "for pixel format '%s'\n", i, s->crop_x, x_align, config->fmt);
+                LOG_ERROR("session %d: crop_x %d must be a multiple of %d "
+                       "for pixel format '%s'", i, s->crop_x, x_align, config->fmt);
                 return -1;
             }
             if (x_align > 1 && s->crop_w % x_align != 0) {
-                printf("Error: session %d: crop_w %d must be a multiple of %d "
-                       "for pixel format '%s'\n", i, s->crop_w, x_align, config->fmt);
+                LOG_ERROR("session %d: crop_w %d must be a multiple of %d "
+                       "for pixel format '%s'", i, s->crop_w, x_align, config->fmt);
                 return -1;
             }
             if (y_align > 1 && s->crop_y % y_align != 0) {
-                printf("Error: session %d: crop_y %d must be a multiple of %d "
-                       "for pixel format '%s'\n", i, s->crop_y, y_align, config->fmt);
+                LOG_ERROR("session %d: crop_y %d must be a multiple of %d "
+                       "for pixel format '%s'", i, s->crop_y, y_align, config->fmt);
                 return -1;
             }
             if (y_align > 1 && s->crop_h % y_align != 0) {
-                printf("Error: session %d: crop_h %d must be a multiple of %d "
-                       "for pixel format '%s'\n", i, s->crop_h, y_align, config->fmt);
+                LOG_ERROR("session %d: crop_h %d must be a multiple of %d "
+                       "for pixel format '%s'", i, s->crop_h, y_align, config->fmt);
                 return -1;
             }
         }
@@ -438,7 +470,7 @@ int validate_tx_config(const struct tx_app_config* config) {
         /* Check for duplicate UDP ports */
         for (int j = 0; j < i; j++) {
             if (config->sessions[j].udp_port == s->udp_port) {
-                printf("Error: session %d and %d have duplicate udp_port %d\n",
+                LOG_ERROR("session %d and %d have duplicate udp_port %d",
                        j, i, s->udp_port);
                 return -1;
             }
@@ -454,11 +486,11 @@ int load_and_apply_config(struct tx_app_context* app, const char* config_file) {
 
     struct tx_app_config config;
     if (parse_tx_config(config_file, &config) != 0) {
-        printf("Warning: Failed to parse config file %s\n", config_file);
+        LOG_WARN("Failed to parse config file %s", config_file);
         return -1;
     }
     if (validate_tx_config(&config) != 0) {
-        printf("Warning: Invalid config file %s\n", config_file);
+        LOG_WARN("Invalid config file %s", config_file);
         return -1;
     }
 
@@ -487,7 +519,7 @@ int load_and_apply_config(struct tx_app_context* app, const char* config_file) {
     else if (strcmp(config.fmt, "gbrp10le") == 0)     app->fmt = AV_PIX_FMT_GBRP10LE;
     else if (strcmp(config.fmt, "gbrp12le") == 0)     app->fmt = AV_PIX_FMT_GBRP12LE;
     else {
-        printf("Warning: Unknown fmt '%s', defaulting to yuv422p10le\n", config.fmt);
+        LOG_WARN("Unknown fmt '%s', defaulting to yuv422p10le", config.fmt);
         app->fmt = AV_PIX_FMT_YUV422P10LE;
     }
 
@@ -514,15 +546,21 @@ int load_and_apply_config(struct tx_app_context* app, const char* config_file) {
     app->udp_port     = config.sessions[0].udp_port;
     app->payload_type = config.sessions[0].payload_type;
 
-    printf("Config loaded: %s (interface=%s sip=%s dip=%s)\n",
+    /* Optional log file from config */
+    if (config.log_file[0] != '\0') {
+        strncpy(app->log_file, config.log_file, sizeof(app->log_file) - 1);
+        app->log_file[sizeof(app->log_file) - 1] = '\0';
+    }
+
+    LOG_INFO("Config loaded: %s (interface=%s sip=%s dip=%s)",
            config_file, config.interface_name,
            config.interface_sip[0] ? config.interface_sip : "dhcp",
            config.interface_dip);
-    printf("Video: %dx%d %dfps %s  tx_url=%s\n",
+    LOG_INFO("Video: %dx%d %dfps %s  tx_url=%s",
            config.width, config.height, config.fps, config.fmt,
            config.tx_url[0] ? config.tx_url : "<none>");
     for (int i = 0; i < config.session_count; i++)
-        printf("  Session %d: udp_port=%u pt=%u crop=[%d,%d %dx%d]\n", i,
+        LOG_INFO("  Session %d: udp_port=%u pt=%u crop=[%d,%d %dx%d]", i,
                config.sessions[i].udp_port, config.sessions[i].payload_type,
                config.sessions[i].crop_x, config.sessions[i].crop_y,
                config.sessions[i].crop_w, config.sessions[i].crop_h);

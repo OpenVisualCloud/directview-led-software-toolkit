@@ -4,6 +4,7 @@
 
 #include "ffmpeg_decoder.h"
 #include "tx_app_context.h"
+#include "util/logger.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdatomic.h>
@@ -37,13 +38,13 @@ bool is_raw_yuv(const char* filename) {
 }
 
 /* =========================================================================
- * FFmpeg output session: open MTL Kahawai (mtl_st20p) output device
+ * FFmpeg output session: open MTL (mtl_st20p) output device
  * No encoder; codec params are set directly on the stream.
  * ========================================================================= */
 /*
  * open_ffmpeg_output() — called once per session during init.
  *
- * Creates an AVFormatContext backed by the "mtl_st20p" muxer (Intel MTL Kahawai
+ * Creates an AVFormatContext backed by the "mtl_st20p" muxer (Intel MTL
  * FFmpeg plugin). This is NOT a file muxer — it is AVFMT_NOFILE, meaning MTL
  * manages its own TX ring buffer internally; no URL or avio is needed.
  *
@@ -64,15 +65,15 @@ int open_ffmpeg_output(struct st20p_tx_ctx* ctx) {
   /* Locate the MTL muxer compiled into this FFmpeg build */
   const AVOutputFormat* fmt = av_guess_format("mtl_st20p", NULL, NULL);
   if (!fmt) {
-    printf("ST20P TX(%d): mtl_st20p muxer not found - "
-           "rebuild FFmpeg with Intel MTL plugin (--enable-mtl)\n", ctx->idx);
+    LOG_ERROR("ST20P TX(%d): mtl_st20p muxer not found - "
+           "rebuild FFmpeg with Intel MTL plugin (--enable-mtl)", ctx->idx);
     return -1;
   }
 
   /* mtl_st20p is AVFMT_NOFILE: no URL required */
   int ret = avformat_alloc_output_context2(&ctx->out_fmt_ctx, fmt, NULL, NULL);
   if (ret < 0 || !ctx->out_fmt_ctx) {
-    printf("ST20P TX(%d): cannot alloc output ctx for mtl_st20p\n", ctx->idx);
+    LOG_ERROR("ST20P TX(%d): cannot alloc output ctx for mtl_st20p", ctx->idx);
     return -1;
   }
 
@@ -120,7 +121,7 @@ int open_ffmpeg_output(struct st20p_tx_ctx* ctx) {
   ret = avformat_write_header(ctx->out_fmt_ctx, NULL);
   if (ret < 0) {
     char errbuf[128]; av_strerror(ret, errbuf, sizeof(errbuf));
-    printf("ST20P TX(%d): avformat_write_header (mtl_st20p) failed: %s\n",
+    LOG_ERROR("ST20P TX(%d): avformat_write_header (mtl_st20p) failed: %s",
            ctx->idx, errbuf);
     avformat_free_context(ctx->out_fmt_ctx); ctx->out_fmt_ctx = NULL;
     return -1;
@@ -160,8 +161,8 @@ int open_ffmpeg_output(struct st20p_tx_ctx* ctx) {
   }
 
   ctx->pts = 0;
-  printf("ST20P TX(%d): Kahawai (mtl_st20p) output opened "
-         "(%dx%d %s @ %dfps) -> %s:%u via %s\n",
+  LOG_INFO("ST20P TX(%d): mtl_st20p output opened "
+         "(%dx%d %s @ %dfps) -> %s:%u via %s",
          ctx->idx, out_w, height, fmt_name(ctx->app->fmt), ctx->app->fps,
          ctx->app->dip_addr_str,
          (unsigned)udp_port,
@@ -176,7 +177,7 @@ void close_ffmpeg_output(struct st20p_tx_ctx* ctx) {
     avformat_free_context(ctx->out_fmt_ctx);
     ctx->out_fmt_ctx = NULL;
   }
-  /* enc_ctx is not used in the Kahawai path (no encoder) */
+  /* enc_ctx is not used in the mtl_st20p path (no encoder) */
   if (ctx->enc_frame) av_frame_free(&ctx->enc_frame);
   if (ctx->enc_pkt)   av_packet_free(&ctx->enc_pkt);
 }
@@ -262,7 +263,7 @@ void send_video_frame(struct st20p_tx_ctx* ctx, AVFrame* src,
 
   ctx->frames_sent++;
   if (ctx->frames_sent % 100 == 0)
-    printf("ST20P TX(%d): sent %d frames\n", ctx->idx, ctx->frames_sent);
+    LOG_DEBUG("ST20P TX(%d): sent %d frames", ctx->idx, ctx->frames_sent);
 }
 
 /* =========================================================================
@@ -288,7 +289,7 @@ void send_video_frame(struct st20p_tx_ctx* ctx, AVFrame* src,
 void* shared_decode_thread(void* arg) {
   struct shared_decode_ctx* dec = (struct shared_decode_ctx*)arg;
 
-  printf("Shared decode thread started (%d sessions)\n", dec->num_sessions);
+  LOG_INFO("Shared decode thread started (%d sessions)", dec->num_sessions);
 
   /* Frame period in nanoseconds for FPS-based pacing (e.g. 33 333 333 ns @ 30fps).
    * The decode thread sleeps after each barrier_copied to ensure frames are
@@ -312,7 +313,7 @@ void* shared_decode_thread(void* arg) {
         /* End of file — seek back to start and flush decoder for looping */
         av_seek_frame(dec->fmt_ctx, dec->video_stream_idx, 0, AVSEEK_FLAG_BACKWARD);
         avcodec_flush_buffers(dec->codec_ctx);
-        printf("Shared decode: loop restart\n");
+        LOG_DEBUG("Shared decode: loop restart");
         continue;
       }
       if (ret < 0) continue;
@@ -382,7 +383,7 @@ void* shared_decode_thread(void* arg) {
   pthread_barrier_wait(&dec->barrier_decoded);
   pthread_barrier_wait(&dec->barrier_copied);
 
-  printf("Shared decode thread stopped, decoded %u frames\n", dec->frame_counter);
+  LOG_INFO("Shared decode thread stopped, decoded %u frames", dec->frame_counter);
   return NULL;
 }
 
@@ -410,7 +411,7 @@ int open_shared_ffmpeg(struct shared_decode_ctx* dec, const char* filename) {
   ret = avformat_open_input(&dec->fmt_ctx, filename, NULL, NULL);
   if (ret < 0) {
     av_strerror(ret, errbuf, sizeof(errbuf));
-    printf("Shared decode: cannot open %s: %s\n", filename, errbuf);
+    LOG_ERROR("Shared decode: cannot open %s: %s", filename, errbuf);
     return -1;
   }
   avformat_find_stream_info(dec->fmt_ctx, NULL);
@@ -418,7 +419,7 @@ int open_shared_ffmpeg(struct shared_decode_ctx* dec, const char* filename) {
   dec->video_stream_idx = av_find_best_stream(dec->fmt_ctx, AVMEDIA_TYPE_VIDEO,
                                                -1, -1, NULL, 0);
   if (dec->video_stream_idx < 0) {
-    printf("Shared decode: no video stream in %s\n", filename);
+    LOG_ERROR("Shared decode: no video stream in %s", filename);
     avformat_close_input(&dec->fmt_ctx);
     return -1;
   }
@@ -473,7 +474,7 @@ int open_shared_ffmpeg(struct shared_decode_ctx* dec, const char* filename) {
     return -1;
   }
 
-  printf("Shared decode: opened '%s' Codec=%s %dx%d %s -> %dx%d %s\n",
+  LOG_INFO("Shared decode: opened '%s' Codec=%s %dx%d %s -> %dx%d %s",
          filename, codec->name,
          dec->codec_ctx->width, dec->codec_ctx->height,
          av_get_pix_fmt_name(dec->codec_ctx->pix_fmt),
@@ -503,7 +504,7 @@ static int open_ffmpeg_source(struct st20p_tx_ctx* ctx, const char* filename) {
   ret = avformat_open_input(&ctx->fmt_ctx, filename, NULL, NULL);
   if (ret < 0) {
     av_strerror(ret, errbuf, sizeof(errbuf));
-    printf("ST20P TX(%d): cannot open %s: %s\n", ctx->idx, filename, errbuf);
+    LOG_ERROR("ST20P TX(%d): cannot open %s: %s", ctx->idx, filename, errbuf);
     return -1;
   }
   avformat_find_stream_info(ctx->fmt_ctx, NULL);
@@ -559,7 +560,7 @@ static int open_ffmpeg_source(struct st20p_tx_ctx* ctx, const char* filename) {
   }
 
   ctx->use_ffmpeg = true;
-  printf("ST20P TX(%d): input opened '%s' Codec=%s %dx%d %s -> %dx%d %s\n",
+  LOG_INFO("ST20P TX(%d): input opened '%s' Codec=%s %dx%d %s -> %dx%d %s",
          ctx->idx, filename, codec->name,
          ctx->codec_ctx->width, ctx->codec_ctx->height,
          av_get_pix_fmt_name(ctx->codec_ctx->pix_fmt),
@@ -585,12 +586,12 @@ void close_ffmpeg_source(struct st20p_tx_ctx* ctx) {
  * ========================================================================= */
 int load_video_source(struct st20p_tx_ctx* ctx, const char* filename) {
   if (!filename || strlen(filename) == 0) {
-    printf("ST20P TX(%d): No source file, will use test pattern\n", ctx->idx);
+    LOG_INFO("ST20P TX(%d): No source file, will use test pattern", ctx->idx);
     return 0;
   }
   if (is_raw_yuv(filename)) {
     FILE* f = fopen(filename, "rb");
-    if (!f) { printf("ST20P TX(%d): Cannot open %s\n", ctx->idx, filename); return 0; }
+    if (!f) { LOG_ERROR("ST20P TX(%d): Cannot open %s", ctx->idx, filename); return 0; }
     fseek(f, 0, SEEK_END); ctx->source_size = ftell(f); fseek(f, 0, SEEK_SET);
     if (!ctx->source_size) { fclose(f); return 0; }
     ctx->source_buffer = malloc(ctx->source_size);
@@ -603,7 +604,7 @@ int load_video_source(struct st20p_tx_ctx* ctx, const char* filename) {
     const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(ctx->app->fmt);
     ctx->frame_size = (size_t)ctx->app->width * ctx->app->height
                       * (desc ? desc->comp[0].depth / 8 : 2) * 2 /* yuv422 */;
-    printf("ST20P TX(%d): Loaded %zu bytes from RAW YUV: %s\n",
+    LOG_INFO("ST20P TX(%d): Loaded %zu bytes from RAW YUV: %s",
            ctx->idx, ctx->source_size, filename);
     return 0;
   }
@@ -634,7 +635,7 @@ bool ffmpeg_decode_and_send(struct st20p_tx_ctx* ctx) {
     if (ret == AVERROR_EOF) {
       av_seek_frame(ctx->fmt_ctx, ctx->video_stream_idx, 0, AVSEEK_FLAG_BACKWARD);
       avcodec_flush_buffers(ctx->codec_ctx);
-      printf("ST20P TX(%d): FFmpeg loop restart\n", ctx->idx);
+      LOG_DEBUG("ST20P TX(%d): FFmpeg loop restart", ctx->idx);
       continue;
     }
     if (ret < 0) continue;

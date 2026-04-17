@@ -34,10 +34,17 @@ struct tx_app_config {
   char     fmt[32];         /* e.g. "yuv422p10le" */
   char     tx_url[256];
 
+  /* optional log file path (empty = console only) */
+  char log_file[256];
+
   /* tx_sessions array — count drives st20p_sessions */
   int session_count;
   struct tx_session_config sessions[MAX_TX_SESSIONS];
 };
+
+/* Quickly extract only the "log_file" value from a config file without a full parse.
+ * Returns 0 and fills out_buf on success, -1 if not found or on error. */
+int peek_config_log_file(const char* config_file, char* out_buf, size_t out_size);
 
 /* Parse JSON config file into tx_app_config */
 int parse_tx_config(const char* config_file, struct tx_app_config* config);
