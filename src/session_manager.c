@@ -1,11 +1,11 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  */
-
 #include "session_manager.h"
 #include "ffmpeg_decoder.h"
 #include "tx_app_context.h"
 #include "config_reader.h"
+#include "util/logger.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdatomic.h>
@@ -58,7 +58,7 @@ static void* st20p_tx_thread_shared(void* arg) {
   int crop_w = ctx->crop_width  > 0 ? ctx->crop_width  : (int)ctx->app->width;
   int crop_h = ctx->crop_height > 0 ? ctx->crop_height : (int)ctx->app->height;
 
-  printf("ST20P TX(%d): shared thread started (crop x=%d y=%d w=%d h=%d)\n",
+  LOG_INFO("ST20P TX(%d): shared thread started (crop x=%d y=%d w=%d h=%d)",
          ctx->idx, crop_x, crop_y, crop_w, crop_h);
 
   while (1) {
@@ -78,7 +78,7 @@ static void* st20p_tx_thread_shared(void* arg) {
     if (should_exit) break;
   }
 
-  printf("ST20P TX(%d): thread stopped, sent %d frames\n", ctx->idx, ctx->frames_sent);
+  LOG_INFO("ST20P TX(%d): thread stopped, sent %d frames", ctx->idx, ctx->frames_sent);
   return NULL;
 }
 
@@ -96,7 +96,7 @@ static void* st20p_tx_thread_shared(void* arg) {
 static void* st20p_tx_thread(void* arg) {
   struct st20p_tx_ctx* ctx = (struct st20p_tx_ctx*)arg;
 
-  printf("ST20P TX(%d): thread started\n", ctx->idx);
+  LOG_INFO("ST20P TX(%d): thread started", ctx->idx);
 
   while (!ctx->app->exit && !g_tx_app_exit) {
     if (ctx->use_ffmpeg) {
@@ -149,7 +149,7 @@ static void* st20p_tx_thread(void* arg) {
 
       ctx->frames_sent++;
       if (ctx->frames_sent % 100 == 0)
-        printf("ST20P TX(%d): sent %d frames via Kahawai\n", ctx->idx, ctx->frames_sent);
+        LOG_DEBUG("ST20P TX(%d): sent %d frames sents", ctx->idx, ctx->frames_sent);
 
     } else {
       /* Path C: synthetic test pattern — incrementing luma ramp + neutral chroma.
@@ -188,13 +188,13 @@ static void* st20p_tx_thread(void* arg) {
 
       ctx->frames_sent++;
       if (ctx->frames_sent % 100 == 0)
-        printf("ST20P TX(%d): sent %d frames via Kahawai\n", ctx->idx, ctx->frames_sent);
+        LOG_DEBUG("ST20P TX(%d): sent %d frames", ctx->idx, ctx->frames_sent);
 
       usleep(1000000 / ctx->app->fps);
     }
   }
 
-  printf("ST20P TX(%d): thread stopped, sent %d frames\n", ctx->idx, ctx->frames_sent);
+  LOG_INFO("ST20P TX(%d): thread stopped, sent %d frames", ctx->idx, ctx->frames_sent);
   return NULL;
 }
 
@@ -204,7 +204,7 @@ static void* st20p_tx_thread(void* arg) {
 static void* st30p_tx_thread(void* arg) {
   struct st30p_tx_ctx* ctx = (struct st30p_tx_ctx*)arg;
 
-  printf("ST30P TX(%d): thread started\n", ctx->idx);
+  LOG_INFO("ST30P TX(%d): thread started", ctx->idx);
 
   while (!ctx->app->exit && !g_tx_app_exit) {
     if (!ctx->out_fmt_ctx || !ctx->source_buffer || !ctx->source_size) {
@@ -231,12 +231,12 @@ static void* st30p_tx_thread(void* arg) {
     ctx->current_pos += chunk;
     ctx->frames_sent++;
     if (ctx->frames_sent % 1000 == 0)
-      printf("ST30P TX(%d): sent %d chunks\n", ctx->idx, ctx->frames_sent);
+      LOG_DEBUG("ST30P TX(%d): sent %d chunks", ctx->idx, ctx->frames_sent);
 
     usleep(1000);
   }
 
-  printf("ST30P TX(%d): thread stopped, sent %d chunks\n", ctx->idx, ctx->frames_sent);
+  LOG_INFO("ST30P TX(%d): thread stopped, sent %d chunks", ctx->idx, ctx->frames_sent);
   return NULL;
 }
 
@@ -256,7 +256,7 @@ int load_audio_source(struct st30p_tx_ctx* ctx, const char* filename) {
   ctx->current_pos   = 0;
   ctx->loop_playback = true;
   ctx->frame_size = 288; /* 1 ms @ 48 kHz stereo 24-bit (PCM_S24BE): 48 * 2 * 3 = 288 bytes */
-  printf("ST30P TX(%d): Loaded %zu bytes from %s\n", ctx->idx, ctx->source_size, filename);
+  LOG_INFO("ST30P TX(%d): Loaded %zu bytes from %s", ctx->idx, ctx->source_size, filename);
   return 0;
 }
 
@@ -271,7 +271,7 @@ static int open_audio_output(struct st30p_tx_ctx* ctx) {
 
   int ret = avformat_alloc_output_context2(&ctx->out_fmt_ctx, NULL, "rtp", url);
   if (ret < 0 || !ctx->out_fmt_ctx) {
-    printf("ST30P TX(%d): cannot alloc audio output ctx\n", ctx->idx);
+    LOG_ERROR("ST30P TX(%d): cannot alloc audio output ctx", ctx->idx);
     return -1;
   }
 
@@ -298,8 +298,8 @@ static int open_audio_output(struct st30p_tx_ctx* ctx) {
 
   ret = avformat_write_header(ctx->out_fmt_ctx, NULL);
   if (ret < 0)
-    printf("ST30P TX(%d): avformat_write_header warning\n", ctx->idx);
-  printf("ST30P TX(%d): audio output opened -> %s\n", ctx->idx, url);
+    LOG_WARN("ST30P TX(%d): avformat_write_header warning", ctx->idx);
+  LOG_INFO("ST30P TX(%d): audio output opened -> %s", ctx->idx, url);
   return 0;
 }
 
@@ -339,14 +339,14 @@ int create_st20p_tx_session(session_manager_t* manager, struct tx_app_context* a
                        : strip_w;
     ctx->crop_height = (int)app->height;
   }
-  printf("ST20P TX session %d: crop rect x=%d y=%d w=%d h=%d\n",
+  LOG_INFO("ST20P TX session %d: crop rect x=%d y=%d w=%d h=%d",
          session_idx, ctx->crop_x_offset, ctx->crop_y_offset,
          ctx->crop_width, ctx->crop_height);
 
   snprintf(ctx->session_name, sizeof(ctx->session_name), "st20p_tx_%d", session_idx);
 
   if (open_ffmpeg_output(ctx) < 0) {
-    printf("Error: Failed to open FFmpeg output for ST20P session %d\n", session_idx);
+    LOG_ERROR("Failed to open FFmpeg output for ST20P session %d", session_idx);
     return -1;
   }
 
@@ -359,7 +359,7 @@ int create_st20p_tx_session(session_manager_t* manager, struct tx_app_context* a
   if (manager->shared_dec) {
     /* Multi-session path: attach shared decoder -- TX thread will use barriers */
     ctx->shared_dec = manager->shared_dec;
-    printf("ST20P TX session %d: using shared decoder\n", session_idx);
+    LOG_INFO("ST20P TX session %d: using shared decoder", session_idx);
   } else if (strlen(app->tx_url) > 0) {
     /* Single-session path: each session owns its own decoder or raw buffer */
     load_video_source(ctx, app->tx_url);
@@ -379,12 +379,12 @@ int create_st30p_tx_session(session_manager_t* manager, struct tx_app_context* a
   snprintf(ctx->session_name, sizeof(ctx->session_name), "st30p_tx_%d", session_idx);
 
   if (open_audio_output(ctx) < 0) {
-    printf("Error: Failed to open audio output for ST30P session %d\n", session_idx);
+    LOG_ERROR("Failed to open audio output for ST30P session %d", session_idx);
     return -1;
   }
 
   ctx->frame_size = 288; /* 1 ms @ 48 kHz stereo 24-bit (PCM_S24BE): 48 * 2 * 3 = 288 bytes */
-  printf("ST30P TX session %d created\n", session_idx);
+  LOG_INFO("ST30P TX session %d created", session_idx);
   return 0;
 }
 
@@ -425,14 +425,14 @@ int session_manager_init(session_manager_t* manager, struct tx_app_context* app)
                          NULL, app->st20p_sessions + 1);
 
     if (open_shared_ffmpeg(manager->shared_dec, app->tx_url) < 0) {
-      printf("Error: Failed to open shared FFmpeg source\n");
+      LOG_ERROR("Failed to open shared FFmpeg source");
       pthread_barrier_destroy(&manager->shared_dec->barrier_decoded);
       pthread_barrier_destroy(&manager->shared_dec->barrier_copied);
       free(manager->shared_dec);
       manager->shared_dec = NULL;
       return -1;
     }
-    printf("Shared decoder ready for %d sessions\n", app->st20p_sessions);
+    LOG_INFO("Shared decoder ready for %d sessions", app->st20p_sessions);
   }
 
   if (app->st20p_sessions > 0) {
@@ -461,7 +461,7 @@ int session_manager_init(session_manager_t* manager, struct tx_app_context* app)
     }
   }
 
-  printf("TX Session Manager: %d video, %d audio sessions, shared_dec=%s\n",
+  LOG_INFO("TX Session Manager: %d video, %d audio sessions, shared_dec=%s",
          manager->st20p_count, manager->st30p_count,
          manager->shared_dec ? "YES" : "NO");
   return 0;
@@ -483,7 +483,7 @@ int session_manager_start(session_manager_t* manager) {
     /* Launch the single shared decode thread (runs shared_decode_thread()) */
     if (pthread_create(&manager->shared_dec->decode_thread, NULL,
                        shared_decode_thread, manager->shared_dec) != 0) {
-      printf("Error: Failed to create shared decode thread\n");
+      LOG_ERROR("Failed to create shared decode thread");
       return -1;
     }
   }
@@ -494,7 +494,7 @@ int session_manager_start(session_manager_t* manager) {
     void *(*thread_fn)(void *) = ctx->shared_dec ? st20p_tx_thread_shared : st20p_tx_thread;
 
     if (pthread_create(&ctx->thread, NULL, thread_fn, ctx) != 0) {
-      printf("Error: Failed to create ST20P TX thread %d\n", i);
+      LOG_ERROR("Failed to create ST20P TX thread %d", i);
       return -1;
     }
   }
@@ -502,13 +502,13 @@ int session_manager_start(session_manager_t* manager) {
   for (int i = 0; i < manager->st30p_count; i++) {
     struct st30p_tx_ctx* ctx = &manager->st30p_sessions[i];
     if (pthread_create(&ctx->thread, NULL, st30p_tx_thread, ctx) != 0) {
-      printf("Error: Failed to create ST30P TX thread %d\n", i);
+      LOG_ERROR("Failed to create ST30P TX thread %d", i);
       return -1;
     }
   }
 
   manager->running = true;
-  printf("TX Session Manager started\n");
+  LOG_INFO("TX Session Manager started");
   return 0;
 }
 
@@ -534,7 +534,7 @@ int session_manager_stop(session_manager_t* manager) {
     if (ctx->thread) { pthread_join(ctx->thread, NULL); ctx->thread = 0; }
   }
 
-  printf("TX Session Manager stopped\n");
+  LOG_INFO("TX Session Manager stopped");
   return 0;
 }
 

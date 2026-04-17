@@ -50,4 +50,7 @@ struct tx_app_context {
   /* Per-session network + crop config (from JSON tx_sessions[]) */
   struct tx_session_net session_net[MAX_TX_SESSIONS];
 
+  /* Optional log file path from config (empty = console logging only) */
+  char log_file[256];
+
 };

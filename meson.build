@@ -29,7 +29,8 @@ executable('TxApp',
     'src/tx_app_main.c',
     'src/config_reader.c',
     'src/session_manager.c',
-    'src/ffmpeg/ffmpeg_decoder.c'
+    'src/ffmpeg/ffmpeg_decoder.c',
+    'src/util/logger.c'
   ],
   include_directories: include_directories('include'),
   dependencies: all_deps,

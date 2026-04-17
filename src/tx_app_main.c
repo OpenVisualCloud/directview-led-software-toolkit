@@ -20,6 +20,7 @@
 #include "tx_app_context.h"
 #include "config_reader.h"
 #include "session_manager.h"
+#include "util/logger.h"
 
 /* Reference the shared exit flag defined in session_manager.c.
  * Worker threads check this flag; do not write it from a signal handler —
@@ -142,7 +143,7 @@ static int parse_args(struct tx_app_context* ctx, int argc, char** argv) {
           case 50: ctx->fps = 50; break;
           case 60: ctx->fps = 60; break;
           default:
-            printf("Error: Unsupported FPS %d\n", fps_val);
+            LOG_ERROR("Unsupported FPS %d", fps_val);
             return -1;
         }
         break;
@@ -163,7 +164,7 @@ static int parse_args(struct tx_app_context* ctx, int argc, char** argv) {
         else if (strcmp(optarg, "gbrp12le") == 0)
           ctx->fmt = AV_PIX_FMT_GBRP12LE;
         else {
-          printf("Error: Unsupported format %s\n", optarg);
+          LOG_ERROR("Unsupported format %s", optarg);
           return -1;
         }
         break;
@@ -174,7 +175,7 @@ static int parse_args(struct tx_app_context* ctx, int argc, char** argv) {
       case '2': {
         int sessions = atoi(optarg);
         if (sessions < 0 || sessions > MAX_TX_SESSIONS) {
-          printf("Error: --st20p_sessions must be in range 0-%d\n", MAX_TX_SESSIONS);
+          LOG_ERROR("--st20p_sessions must be in range 0-%d", MAX_TX_SESSIONS);
           return -1;
         }
         ctx->st20p_sessions = sessions;
@@ -183,7 +184,7 @@ static int parse_args(struct tx_app_context* ctx, int argc, char** argv) {
       case '3': {
         int sessions = atoi(optarg);
         if (sessions < 0 || sessions > MAX_TX_SESSIONS) {
-          printf("Error: --st30p_sessions must be in range 0-%d\n", MAX_TX_SESSIONS);
+          LOG_ERROR("--st30p_sessions must be in range 0-%d", MAX_TX_SESSIONS);
           return -1;
         }
         ctx->st30p_sessions = sessions;
@@ -202,7 +203,7 @@ static int parse_args(struct tx_app_context* ctx, int argc, char** argv) {
       case 'P': {
         int pt = atoi(optarg);
         if (pt < 96 || pt > 127) {
-          printf("Error: --payload_type must be in range 96-127 (dynamic RTP)\n");
+          LOG_ERROR("--payload_type must be in range 96-127 (dynamic RTP)");
           return -1;
         }
         ctx->payload_type = (uint8_t)pt;
@@ -223,14 +224,14 @@ static int parse_args(struct tx_app_context* ctx, int argc, char** argv) {
 static int resolve_ip_addrs(struct tx_app_context* ctx) {
   if (ctx->sip_addr_str[0] != '\0') {
     if (inet_pton(AF_INET, ctx->sip_addr_str, ctx->sip_addr) != 1) {
-      printf("Error: Invalid source IP address %s\n", ctx->sip_addr_str);
+      LOG_ERROR("Invalid source IP address %s", ctx->sip_addr_str);
       return -1;
     }
   } else {
-    printf("Info: No source IP provided, DHCP mode\n");
+    LOG_INFO("No source IP provided, DHCP mode");
   }
   if (inet_pton(AF_INET, ctx->dip_addr_str, ctx->dip_addr) != 1) {
-    printf("Error: Invalid destination IP address %s\n", ctx->dip_addr_str);
+    LOG_ERROR("Invalid destination IP address %s", ctx->dip_addr_str);
     return -1;
   }
   return 0;
@@ -241,74 +242,144 @@ int main(int argc, char** argv) {
   struct tx_app_context app;
   session_manager_t session_manager;
   int ret = 0;
-
+  FILE *log_fp = NULL;
   memset(&app, 0, sizeof(app));
 
-  /* Parse arguments */
+  /* Phase 1: minimal console logger so parse_args errors can be reported. */
+  logger_init_default();
+
+  /* Parse arguments (determines config_file path). */
   if (parse_args(&app, argc, argv) < 0) {
-    return -1;
+    ret = -1;
+    goto cleanup_logger;
   }
 
+  /* Phase 2: resolve log file destination BEFORE the full config load so that
+   * "Config loaded" and session-info messages go directly to the log file.
+   * Priority: config "log_file" > LOG_FILE env variable > console only. */
+  {
+    char peeked_log_file[256] = {0};
+    const char *log_file_path = NULL;
+
+    /* Try to peek log_file from config before the expensive full parse */
+    if (app.config_file[0] != '\0' &&
+        peek_config_log_file(app.config_file, peeked_log_file, sizeof(peeked_log_file)) == 0 &&
+        peeked_log_file[0] != '\0') {
+      log_file_path = peeked_log_file;
+    } else {
+      const char *env_log = getenv("LOG_FILE");
+      if (env_log && env_log[0] != '\0')
+        log_file_path = env_log;
+    }
+
+    if (log_file_path) {
+      bool redirected = false;
+      log_fp = fopen(log_file_path, "a");
+      if (log_fp) {
+        int r1 = dup2(fileno(log_fp), STDOUT_FILENO);
+        int r2 = dup2(fileno(log_fp), STDERR_FILENO);
+        if (r1 >= 0 && r2 >= 0) {
+          setvbuf(stdout, NULL, _IOLBF, 0);
+          setvbuf(stderr, NULL, _IOLBF, 0);
+          redirected = true;
+        } else {
+          fprintf(stderr, "Warning: dup2 failed for log redirection\n");
+        }
+      } else {
+        fprintf(stderr, "Warning: Could not open log file %s\n", log_file_path);
+      }
+
+      logger_cleanup();
+      logger_config_t log_config = {
+        .level = LOG_LEVEL_INFO,
+        .enable_console = !redirected,
+        .enable_file = true,
+        .enable_timestamp = true,
+        .enable_colors = false,
+        .log_file = log_file_path
+      };
+      if (logger_init(&log_config) < 0) {
+        fprintf(stderr, "Warning: Could not initialize logger to %s\n", log_file_path);
+        logger_init_default();
+      }
+    }
+    /* else: keep default console logger from Phase 1 */
+  }
+
+  LOG_INFO("TxApp initializing...");
+
   /* Load configuration from JSON if specified — must happen before IP resolve
-   * because config supplies sip/dip when CLI args are omitted */
+   * because config supplies sip/dip when CLI args are omitted. */
   if (app.config_file[0] != '\0') {
     if (load_and_apply_config(&app, app.config_file) < 0) {
-      printf("Error: Failed to load config file %s\n", app.config_file);
-      return -1;
+      LOG_ERROR("Failed to load config file %s", app.config_file);
+      ret = -1;
+      goto cleanup_logger;
     }
   }
 
   /* Resolve IP strings -> binary (after config may have overwritten them) */
-  if (resolve_ip_addrs(&app) < 0) return -1;
+  if (resolve_ip_addrs(&app) < 0) {
+    ret = -1;
+    goto cleanup_logger;
+  }
 
   /* Install signal handler — set g_app_ptr first so the handler can set app.exit */
   g_app_ptr = &app;
   signal(SIGINT, tx_app_sig_handler);
   signal(SIGTERM, tx_app_sig_handler);
 
-  /* Register all FFmpeg devices (required for the MTL Kahawai mtl_st20p muxer
+  /* Register all FFmpeg devices (required for the MTL mtl_st20p muxer
    * which lives in libavdevice, not libavformat) */
   avdevice_register_all();
 
   /* Initialize session manager */
   if (session_manager_init(&session_manager, &app) < 0) {
-    printf("Error: Failed to initialize session manager\n");
-    return -1;
+    LOG_ERROR("Failed to initialize session manager");
+    ret = -1;
+    goto cleanup_logger;
   }
 
   /* Start transmission sessions */
   if (session_manager_start(&session_manager) < 0) {
-    printf("Error: Failed to start sessions\n");
+    LOG_ERROR("Failed to start sessions");
     ret = -1;
     goto cleanup;
   }
 
-  printf("TxApp started successfully\n");
-  printf("Port: %s, DIP: %s, UDP: %d\n", app.port, app.dip_addr_str, app.udp_port);
-  printf("Video: %dx%d, ST20P sessions: %d, ST30P sessions: %d\n",
+  LOG_INFO("TxApp started successfully");
+  LOG_INFO("Port: %s, DIP: %s, UDP: %d", app.port, app.dip_addr_str, app.udp_port);
+  LOG_INFO("Video: %dx%d, ST20P sessions: %d, ST30P sessions: %d",
          app.width, app.height, app.st20p_sessions, app.st30p_sessions);
 
   if (app.test_time_s > 0) {
-    printf("Transmitting for %d seconds... Press Ctrl+C to stop\n", app.test_time_s);
+    LOG_INFO("Transmitting for %d seconds... Press Ctrl+C to stop", app.test_time_s);
     for (int i = 0; i < app.test_time_s && !app.exit; i++) {
       tx_app_apply_pending_signal_exit();
       sleep(1);
     }
   } else {
-    printf("Transmitting indefinitely... Press Ctrl+C to stop\n");
+    LOG_INFO("Transmitting indefinitely... Press Ctrl+C to stop");
     while (!app.exit) {
       tx_app_apply_pending_signal_exit();
       sleep(1);
     }
   }
 
-  printf("Stopping...\n");
+  LOG_INFO("Stopping...");
   app.exit = true;
 
 cleanup:
   /* Stop and cleanup session manager */
   session_manager_cleanup(&session_manager);
+  LOG_INFO("TxApp shutdown complete");
+cleanup_logger:
+  /* Cleanup logger */
+  logger_cleanup();
+  /* Close log file if opened */
+  if (log_fp) {
+    fclose(log_fp);
+  }
 
-  printf("TxApp shutdown complete\n");
   return ret;
 }
