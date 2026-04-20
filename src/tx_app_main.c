@@ -15,7 +15,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <libavutil/pixfmt.h>
 #include <libavdevice/avdevice.h>
 #include "tx_app_context.h"
 #include "config_reader.h"
@@ -50,166 +49,28 @@ static void tx_app_apply_pending_signal_exit(void) {
 }
 
 static void print_help(const char* prog_name) {
-  printf("Usage: %s [options]\n", prog_name);
-  printf("Options:\n");
-  printf("  -p, --port <pci>            DPDK NIC PCI BDF (e.g. 0000:af:00.0)\n");
-  printf("  -s, --sip <ip>              Source IP address\n");
-  printf("  -d, --dip <ip>              Destination IP address (default: 239.168.85.20)\n");
-  printf("  -u, --udp_port <port>       UDP port (default: 20000)\n");
-  printf("  -w, --width <width>         Video width (default: 1920)\n");
-  printf("  -h, --height <height>       Video height (default: 1080)\n");
-  printf("  -f, --fps <fps>             Frame rate (default: 25)\n");
-  printf("  -F, --fmt <format>          Pixel format: yuv422p10le(default), yuv420p,\n");
-  printf("                              yuv422p12le, yuv444p10le, yuv444p12le,\n");
-  printf("                              gbrp10le, gbrp12le\n");
-  printf("  -t, --tx_url <path>         Video source file path\n");
-  printf("  -2, --st20p_sessions <n>    Number of ST20P sessions (default: 1)\n");
-  printf("  -3, --st30p_sessions <n>    Number of ST30P sessions (default: 0)\n");
-  printf("  -T, --time <seconds>        Test duration (default: 0 = run indefinitely)\n");
-  printf("  -C, --config <file>         JSON config file\n");
-  printf("  -D, --dhcp                  Use DHCP for IP configuration\n");
-  printf("  -P, --payload_type <pt>     RTP payload type (default: 96)\n");
-  printf("  --help                      Show this help\n");
+  LOG_INFO("Usage: %s --config <file>", prog_name);
+  LOG_INFO("Options:");
+  LOG_INFO("  -C, --config <file>   JSON config file (required)");
+  LOG_INFO("  --help                Show this help");
 }
 
 static int parse_args(struct tx_app_context* ctx, int argc, char** argv) {
   static struct option long_options[] = {
-    {"port", required_argument, 0, 'p'},
-    {"sip", required_argument, 0, 's'},
-    {"dip", required_argument, 0, 'd'},
-    {"udp_port", required_argument, 0, 'u'},
-    {"width", required_argument, 0, 'w'},
-    {"height", required_argument, 0, 'h'},
-    {"fps", required_argument, 0, 'f'},
-    {"fmt", required_argument, 0, 'F'},
-    {"tx_url", required_argument, 0, 't'},
-    {"st20p_sessions", required_argument, 0, '2'},
-    {"st30p_sessions", required_argument, 0, '3'},
-    {"time", required_argument, 0, 'T'},
-    {"dhcp", no_argument, 0, 'D'},
     {"config", required_argument, 0, 'C'},
-    {"payload_type", required_argument, 0, 'P'},
-    {"help", no_argument, 0, '?'},
+    {"help",   no_argument,       0, '?'},
     {0, 0, 0, 0}
   };
 
-  /* Set defaults */
-  strncpy(ctx->port, "0000:af:01.0", sizeof(ctx->port) - 1);  /* placeholder — must be overridden with actual NIC PCI BDF */
-  ctx->port[sizeof(ctx->port) - 1] = '\0';
-  ctx->sip_addr_str[0] = '\0'; /* No default - must be provided */
-  strncpy(ctx->dip_addr_str, "239.168.85.20", sizeof(ctx->dip_addr_str));
-  ctx->udp_port = 20000;
-  ctx->width = 1920;
-  ctx->height = 1080;
-  ctx->fps = 25;
-  ctx->fmt = AV_PIX_FMT_YUV422P10LE;
-  ctx->st20p_sessions = 1;
-  ctx->st30p_sessions = 0;
-  ctx->force_dhcp = false;
-  ctx->test_time_s = 0;
-  ctx->tx_url[0] = '\0';
   ctx->config_file[0] = '\0';
-  ctx->payload_type = 96; /* default: RTP dynamic payload type */
 
   int c, option_index = 0;
-  while ((c = getopt_long(argc, argv, "p:s:d:u:w:h:f:F:t:2:3:T:DC:P:?", long_options, &option_index)) != -1) {
+  while ((c = getopt_long(argc, argv, "C:?", long_options, &option_index)) != -1) {
     switch (c) {
-      case 'p':
-        strncpy(ctx->port, optarg, sizeof(ctx->port) - 1);
-        ctx->port[sizeof(ctx->port) - 1] = '\0';
-        break;
-      case 's':
-        strncpy(ctx->sip_addr_str, optarg, sizeof(ctx->sip_addr_str) - 1);
-        ctx->sip_addr_str[sizeof(ctx->sip_addr_str) - 1] = '\0';
-        break;
-      case 'd':
-        strncpy(ctx->dip_addr_str, optarg, sizeof(ctx->dip_addr_str) - 1);
-        ctx->dip_addr_str[sizeof(ctx->dip_addr_str) - 1] = '\0';
-        break;
-      case 'u':
-        ctx->udp_port = atoi(optarg);
-        break;
-      case 'w':
-        ctx->width = atoi(optarg);
-        break;
-      case 'h':
-        ctx->height = atoi(optarg);
-        break;
-      case 'f': {
-        int fps_val = atoi(optarg);
-        switch (fps_val) {
-          case 25: ctx->fps = 25; break;
-          case 30: ctx->fps = 30; break;
-          case 50: ctx->fps = 50; break;
-          case 60: ctx->fps = 60; break;
-          default:
-            LOG_ERROR("Unsupported FPS %d", fps_val);
-            return -1;
-        }
-        break;
-      }
-      case 'F':
-        if (strcmp(optarg, "yuv422p10le") == 0)
-          ctx->fmt = AV_PIX_FMT_YUV422P10LE;
-        else if (strcmp(optarg, "yuv420p") == 0)
-          ctx->fmt = AV_PIX_FMT_YUV420P;
-        else if (strcmp(optarg, "yuv422p12le") == 0)
-          ctx->fmt = AV_PIX_FMT_YUV422P12LE;
-        else if (strcmp(optarg, "yuv444p10le") == 0)
-          ctx->fmt = AV_PIX_FMT_YUV444P10LE;
-        else if (strcmp(optarg, "yuv444p12le") == 0)
-          ctx->fmt = AV_PIX_FMT_YUV444P12LE;
-        else if (strcmp(optarg, "gbrp10le") == 0)
-          ctx->fmt = AV_PIX_FMT_GBRP10LE;
-        else if (strcmp(optarg, "gbrp12le") == 0)
-          ctx->fmt = AV_PIX_FMT_GBRP12LE;
-        else {
-          LOG_ERROR("Unsupported format %s", optarg);
-          return -1;
-        }
-        break;
-      case 't':
-        strncpy(ctx->tx_url, optarg, sizeof(ctx->tx_url) - 1);
-        ctx->tx_url[sizeof(ctx->tx_url) - 1] = '\0';
-        break;
-      case '2': {
-        int sessions = atoi(optarg);
-        if (sessions < 0 || sessions > MAX_TX_SESSIONS) {
-          LOG_ERROR("--st20p_sessions must be in range 0-%d", MAX_TX_SESSIONS);
-          return -1;
-        }
-        ctx->st20p_sessions = sessions;
-        break;
-      }
-      case '3': {
-        int sessions = atoi(optarg);
-        if (sessions < 0 || sessions > MAX_TX_SESSIONS) {
-          LOG_ERROR("--st30p_sessions must be in range 0-%d", MAX_TX_SESSIONS);
-          return -1;
-        }
-        ctx->st30p_sessions = sessions;
-        break;
-      }
-      case 'T':
-        ctx->test_time_s = atoi(optarg);
-        break;
-      case 'D':
-        ctx->force_dhcp = true;
-        break;
       case 'C':
         strncpy(ctx->config_file, optarg, sizeof(ctx->config_file) - 1);
         ctx->config_file[sizeof(ctx->config_file) - 1] = '\0';
         break;
-      case 'P': {
-        int pt = atoi(optarg);
-        if (pt < 96 || pt > 127) {
-          LOG_ERROR("--payload_type must be in range 96-127 (dynamic RTP)");
-          return -1;
-        }
-        ctx->payload_type = (uint8_t)pt;
-        break;
-      }
-
       case '?':
       default:
         print_help(argv[0]);
@@ -254,6 +115,12 @@ int main(int argc, char** argv) {
     goto cleanup_logger;
   }
 
+  if (app.config_file[0] == '\0') {
+    print_help(argv[0]);
+    ret = -1;
+    goto cleanup_logger;
+  }
+
   /* Phase 2: resolve log file destination BEFORE the full config load so that
    * "Config loaded" and session-info messages go directly to the log file.
    * Priority: config "log_file" > LOG_FILE env variable > console only. */
@@ -283,10 +150,10 @@ int main(int argc, char** argv) {
           setvbuf(stderr, NULL, _IOLBF, 0);
           redirected = true;
         } else {
-          fprintf(stderr, "Warning: dup2 failed for log redirection\n");
+          LOG_WARN("dup2 failed for log redirection");
         }
       } else {
-        fprintf(stderr, "Warning: Could not open log file %s\n", log_file_path);
+        LOG_WARN("Could not open log file %s", log_file_path);
       }
 
       logger_cleanup();
@@ -299,7 +166,7 @@ int main(int argc, char** argv) {
         .log_file = log_file_path
       };
       if (logger_init(&log_config) < 0) {
-        fprintf(stderr, "Warning: Could not initialize logger to %s\n", log_file_path);
+        LOG_WARN("Could not initialize logger to %s", log_file_path);
         logger_init_default();
       }
     }
@@ -349,8 +216,8 @@ int main(int argc, char** argv) {
 
   LOG_INFO("TxApp started successfully");
   LOG_INFO("Port: %s, DIP: %s, UDP: %d", app.port, app.dip_addr_str, app.udp_port);
-  LOG_INFO("Video: %dx%d, ST20P sessions: %d, ST30P sessions: %d",
-         app.width, app.height, app.st20p_sessions, app.st30p_sessions);
+  LOG_INFO("Video: %dx%d, ST20P sessions: %d",
+         app.width, app.height, app.st20p_sessions);
 
   if (app.test_time_s > 0) {
     LOG_INFO("Transmitting for %d seconds... Press Ctrl+C to stop", app.test_time_s);

@@ -27,12 +27,6 @@ _Atomic bool g_tx_app_exit = false;
  * Helpers
  * ========================================================================= */
 
-/* Used by open_audio_output() to build the RTP URL for the audio TX stream */
-static void build_output_url(char* buf, size_t bufsz,
-                              const char* dip, uint16_t udp_port) {
-  snprintf(buf, bufsz, "rtp://%s:%d", dip, (int)udp_port);
-}
-
 /* =========================================================================
  * Video TX thread — SHARED path (multi-session)
  * ========================================================================= */
@@ -199,111 +193,6 @@ static void* st20p_tx_thread(void* arg) {
 }
 
 /* =========================================================================
- * Audio TX thread (raw PCM over UDP/RTP)
- * ========================================================================= */
-static void* st30p_tx_thread(void* arg) {
-  struct st30p_tx_ctx* ctx = (struct st30p_tx_ctx*)arg;
-
-  LOG_INFO("ST30P TX(%d): thread started", ctx->idx);
-
-  while (!ctx->app->exit && !g_tx_app_exit) {
-    if (!ctx->out_fmt_ctx || !ctx->source_buffer || !ctx->source_size) {
-      usleep(1000);
-      continue;
-    }
-
-    size_t chunk = ctx->frame_size ? ctx->frame_size : 288;
-
-    if (ctx->current_pos + chunk > ctx->source_size)
-      ctx->current_pos = 0;
-
-    AVPacket* pkt = av_packet_alloc();
-    if (!pkt) { usleep(1000); continue; }
-
-    pkt->data = ctx->source_buffer + ctx->current_pos;
-    pkt->size = (int)((ctx->current_pos + chunk <= ctx->source_size)
-                       ? chunk : (ctx->source_size - ctx->current_pos));
-    pkt->stream_index = 0;
-
-    av_interleaved_write_frame(ctx->out_fmt_ctx, pkt);
-    av_packet_free(&pkt);
-
-    ctx->current_pos += chunk;
-    ctx->frames_sent++;
-    if (ctx->frames_sent % 1000 == 0)
-      LOG_DEBUG("ST30P TX(%d): sent %d chunks", ctx->idx, ctx->frames_sent);
-
-    usleep(1000);
-  }
-
-  LOG_INFO("ST30P TX(%d): thread stopped, sent %d chunks", ctx->idx, ctx->frames_sent);
-  return NULL;
-}
-
-/* =========================================================================
- * Audio source loading
- * ========================================================================= */
-int load_audio_source(struct st30p_tx_ctx* ctx, const char* filename) {
-  if (!filename || strlen(filename) == 0) return 0;
-  FILE* f = fopen(filename, "rb");
-  if (!f) return 0;
-  fseek(f, 0, SEEK_END); ctx->source_size = ftell(f); fseek(f, 0, SEEK_SET);
-  if (!ctx->source_size) { fclose(f); return 0; }
-  ctx->source_buffer = malloc(ctx->source_size);
-  if (!ctx->source_buffer) { fclose(f); return -1; }
-  ctx->source_size = fread(ctx->source_buffer, 1, ctx->source_size, f);
-  fclose(f);
-  ctx->current_pos   = 0;
-  ctx->loop_playback = true;
-  ctx->frame_size = 288; /* 1 ms @ 48 kHz stereo 24-bit (PCM_S24BE): 48 * 2 * 3 = 288 bytes */
-  LOG_INFO("ST30P TX(%d): Loaded %zu bytes from %s", ctx->idx, ctx->source_size, filename);
-  return 0;
-}
-
-/* =========================================================================
- * Open audio output (raw PCM over UDP/RTP)
- * ========================================================================= */
-static int open_audio_output(struct st30p_tx_ctx* ctx) {
-  char url[256];
-  build_output_url(url, sizeof(url),
-                   ctx->app->dip_addr_str,
-                   (uint16_t)(ctx->app->udp_port + 1 + ctx->idx * 2));
-
-  int ret = avformat_alloc_output_context2(&ctx->out_fmt_ctx, NULL, "rtp", url);
-  if (ret < 0 || !ctx->out_fmt_ctx) {
-    LOG_ERROR("ST30P TX(%d): cannot alloc audio output ctx", ctx->idx);
-    return -1;
-  }
-
-  ctx->out_stream = avformat_new_stream(ctx->out_fmt_ctx, NULL);
-  if (!ctx->out_stream) {
-    avformat_free_context(ctx->out_fmt_ctx); ctx->out_fmt_ctx = NULL;
-    return -1;
-  }
-
-  ctx->out_stream->codecpar->codec_type              = AVMEDIA_TYPE_AUDIO;
-  ctx->out_stream->codecpar->codec_id                = AV_CODEC_ID_PCM_S24BE;
-  ctx->out_stream->codecpar->sample_rate             = 48000;
-  ctx->out_stream->codecpar->ch_layout.nb_channels   = 2;
-  ctx->out_stream->time_base                         = (AVRational){1, 48000};
-
-  ctx->enc_pkt = av_packet_alloc();
-
-  ret = avio_open(&ctx->out_fmt_ctx->pb, url, AVIO_FLAG_WRITE);
-  if (ret < 0) {
-    av_packet_free(&ctx->enc_pkt);
-    avformat_free_context(ctx->out_fmt_ctx); ctx->out_fmt_ctx = NULL;
-    return -1;
-  }
-
-  ret = avformat_write_header(ctx->out_fmt_ctx, NULL);
-  if (ret < 0)
-    LOG_WARN("ST30P TX(%d): avformat_write_header warning", ctx->idx);
-  LOG_INFO("ST30P TX(%d): audio output opened -> %s", ctx->idx, url);
-  return 0;
-}
-
-/* =========================================================================
  * Session creation
  * ========================================================================= */
 /*
@@ -368,26 +257,6 @@ int create_st20p_tx_session(session_manager_t* manager, struct tx_app_context* a
   return 0;
 }
 
-int create_st30p_tx_session(session_manager_t* manager, struct tx_app_context* app,
-                             int session_idx) {
-  struct st30p_tx_ctx* ctx = &manager->st30p_sessions[session_idx];
-
-  memset(ctx, 0, sizeof(*ctx));
-  ctx->idx = session_idx;
-  ctx->app = app;
-
-  snprintf(ctx->session_name, sizeof(ctx->session_name), "st30p_tx_%d", session_idx);
-
-  if (open_audio_output(ctx) < 0) {
-    LOG_ERROR("Failed to open audio output for ST30P session %d", session_idx);
-    return -1;
-  }
-
-  ctx->frame_size = 288; /* 1 ms @ 48 kHz stereo 24-bit (PCM_S24BE): 48 * 2 * 3 = 288 bytes */
-  LOG_INFO("ST30P TX session %d created", session_idx);
-  return 0;
-}
-
 /* =========================================================================
  * session_manager_init / start / stop / cleanup
  * ========================================================================= */
@@ -448,21 +317,8 @@ int session_manager_init(session_manager_t* manager, struct tx_app_context* app)
     }
   }
 
-  if (app->st30p_sessions > 0) {
-    manager->st30p_sessions = calloc(app->st30p_sessions, sizeof(struct st30p_tx_ctx));
-    if (!manager->st30p_sessions) { session_manager_cleanup(manager); return -1; }
-    manager->st30p_count = app->st30p_sessions;
-
-    for (int i = 0; i < app->st30p_sessions; i++) {
-      if (create_st30p_tx_session(manager, app, i) < 0) {
-        session_manager_cleanup(manager);
-        return -1;
-      }
-    }
-  }
-
-  LOG_INFO("TX Session Manager: %d video, %d audio sessions, shared_dec=%s",
-         manager->st20p_count, manager->st30p_count,
+  LOG_INFO("TX Session Manager: %d video sessions, shared_dec=%s",
+         manager->st20p_count,
          manager->shared_dec ? "YES" : "NO");
   return 0;
 }
@@ -495,14 +351,19 @@ int session_manager_start(session_manager_t* manager) {
 
     if (pthread_create(&ctx->thread, NULL, thread_fn, ctx) != 0) {
       LOG_ERROR("Failed to create ST20P TX thread %d", i);
-      return -1;
-    }
-  }
-
-  for (int i = 0; i < manager->st30p_count; i++) {
-    struct st30p_tx_ctx* ctx = &manager->st30p_sessions[i];
-    if (pthread_create(&ctx->thread, NULL, st30p_tx_thread, ctx) != 0) {
-      LOG_ERROR("Failed to create ST30P TX thread %d", i);
+      /* Signal all already-started threads to exit and join them */
+      g_tx_app_exit = true;
+      if (manager->shared_dec) {
+        manager->shared_dec->exit = true;
+        if (manager->shared_dec->decode_thread) {
+          pthread_join(manager->shared_dec->decode_thread, NULL);
+          manager->shared_dec->decode_thread = 0;
+        }
+      }
+      for (int j = 0; j < i; j++) {
+        struct st20p_tx_ctx* c = &manager->st20p_sessions[j];
+        if (c->thread) { pthread_join(c->thread, NULL); c->thread = 0; }
+      }
       return -1;
     }
   }
@@ -526,11 +387,6 @@ int session_manager_stop(session_manager_t* manager) {
 
   for (int i = 0; i < manager->st20p_count; i++) {
     struct st20p_tx_ctx* ctx = &manager->st20p_sessions[i];
-    if (ctx->thread) { pthread_join(ctx->thread, NULL); ctx->thread = 0; }
-  }
-
-  for (int i = 0; i < manager->st30p_count; i++) {
-    struct st30p_tx_ctx* ctx = &manager->st30p_sessions[i];
     if (ctx->thread) { pthread_join(ctx->thread, NULL); ctx->thread = 0; }
   }
 
@@ -560,24 +416,7 @@ void session_manager_cleanup(session_manager_t* manager) {
     manager->shared_dec = NULL;
   }
 
-  if (manager->st30p_sessions) {
-    for (int i = 0; i < manager->st30p_count; i++) {
-      struct st30p_tx_ctx* ctx = &manager->st30p_sessions[i];
-      if (ctx->out_fmt_ctx) {
-        av_write_trailer(ctx->out_fmt_ctx);
-        avio_closep(&ctx->out_fmt_ctx->pb);
-        avformat_free_context(ctx->out_fmt_ctx);
-        ctx->out_fmt_ctx = NULL;
-      }
-      if (ctx->enc_pkt)       av_packet_free(&ctx->enc_pkt);
-      if (ctx->source_buffer) { free(ctx->source_buffer); ctx->source_buffer = NULL; }
-    }
-    free(manager->st30p_sessions);
-    manager->st30p_sessions = NULL;
-  }
-
   manager->st20p_count = 0;
-  manager->st30p_count = 0;
 }
 
 bool session_manager_is_running(const session_manager_t* manager) {

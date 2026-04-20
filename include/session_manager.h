@@ -93,36 +93,10 @@ struct st20p_tx_ctx {
   size_t   frame_size;
 };
 
-/* Audio TX session context */
-struct st30p_tx_ctx {
-  int idx;
-  pthread_t thread;
-  struct tx_app_context* app;
-  char session_name[32];
-
-  FILE* source_file;
-  uint8_t* source_buffer;
-  size_t source_size;
-  size_t current_pos;
-  bool loop_playback;
-
-  /* FFmpeg output (UDP) */
-  AVFormatContext*   out_fmt_ctx;
-  AVCodecContext*    enc_ctx;
-  AVStream*          out_stream;
-  AVPacket*          enc_pkt;
-
-  uint32_t frames_sent;
-  size_t   frame_size;
-};
-
 /* TX session manager */
 typedef struct {
   struct st20p_tx_ctx* st20p_sessions;
   int st20p_count;
-
-  struct st30p_tx_ctx* st30p_sessions;
-  int st30p_count;
 
   struct shared_decode_ctx* shared_dec;
 
@@ -136,9 +110,6 @@ void session_manager_cleanup(session_manager_t* manager);
 bool session_manager_is_running(const session_manager_t* manager);
 
 int create_st20p_tx_session(session_manager_t* manager, struct tx_app_context* app, int session_idx);
-int create_st30p_tx_session(session_manager_t* manager, struct tx_app_context* app, int session_idx);
-
-int load_audio_source(struct st30p_tx_ctx* ctx, const char* filename);
 
 /* load_video_source() and all FFmpeg decode/output functions are declared in
  * include/ffmpeg_decoder.h — which session_manager.h no longer includes directly. */

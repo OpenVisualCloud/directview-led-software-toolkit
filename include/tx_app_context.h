@@ -42,7 +42,6 @@ struct tx_app_context {
 
   /* Session controls */
   int st20p_sessions;
-  int st30p_sessions;
   bool exit;
   bool force_dhcp;
   int test_time_s;

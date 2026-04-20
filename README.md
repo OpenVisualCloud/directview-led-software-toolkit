@@ -101,7 +101,7 @@ When `log_file` is set, log output is written to that file in addition to the co
 
 ### Video Formats
 - **yuv422p10le**: YUV 4:2:2 10-bit little endian (default)
-- **yuv420p**: YUV 4:2:0 8-bit
+- **yuv420custom8**: YUV 4:2:0 8-bit
 - **yuv444p10le**: YUV 4:4:4 10-bit little endian
 - **gbrp10le**: RGB (GBR planar) 10-bit little endian
 
@@ -141,3 +141,9 @@ When `log_file` is set, log output is written to that file in addition to the co
    - Verify multicast routing
    - Check firewall settings
    - Ensure network card supports required bandwidth
+
+## Notices
+
+### FFmpeg
+
+FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ffmpeg.org/legal.html. You are solely responsible for determining if your use of FFmpeg requires any additional licenses. Intel is not responsible for obtaining any such licenses, nor liable for any licensing fees due, in connection with your use of FFmpeg.
