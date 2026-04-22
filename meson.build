@@ -36,5 +36,9 @@ executable('TxApp',
   dependencies: all_deps,
   c_args: ['-DALLOW_EXPERIMENTAL_API'],
   install: false
-
 )
+
+# =============================================================================
+# Tests (optional — only built when cmocka is available)
+# =============================================================================
+subdir('tests')

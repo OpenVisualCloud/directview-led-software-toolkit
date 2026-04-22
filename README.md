@@ -38,7 +38,7 @@ TxApp uses a JSON config file with three sections:
 | **video** | `width` | Frame width in pixels |
 | | `height` | Frame height in pixels |
 | | `fps` | Frames per second (25, 30, 50, 60) |
-| | `fmt` | Pixel format (`yuv422p10le`, `yuv420p`, `yuv444p10le`, `gbrp10le`) |
+| | `fmt` | Pixel format (`yuv422p10le`, `yuv420`, `yuv444p10le`, `gbrp10le`) |
 | | `tx_url` | Path to the source video file |
 | **tx_sessions[]** | `udp_port` | UDP port for the session |
 | | `payload_type` | RTP payload type (typically 96) |
@@ -101,7 +101,7 @@ When `log_file` is set, log output is written to that file in addition to the co
 
 ### Video Formats
 - **yuv422p10le**: YUV 4:2:2 10-bit little endian (default)
-- **yuv420custom8**: YUV 4:2:0 8-bit
+- **yuv420**: YUV 4:2:0 8-bit
 - **yuv444p10le**: YUV 4:4:4 10-bit little endian
 - **gbrp10le**: RGB (GBR planar) 10-bit little endian
 
