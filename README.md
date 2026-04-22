@@ -4,6 +4,12 @@
 
 TxApp is a simplified, standalone transmitter application using FFMPEG APIs and Media Transport Library (MTL) plugin. It provides clean TX-only functionality without the complexity of RX/TX interdependencies.
 
+## Notices
+
+### FFmpeg
+
+FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ffmpeg.org/legal.html. You are solely responsible for determining if your use of FFmpeg requires any additional licenses. Intel is not responsible for obtaining any such licenses, nor liable for any licensing fees due, in connection with your use of FFmpeg.
+
 ## Features
 
 - **ST20P Video Transmission**: Uncompressed video over SMPTE ST 2110-20
@@ -14,14 +20,37 @@ TxApp is a simplified, standalone transmitter application using FFMPEG APIs and 
 ## Building
 
 ### Prerequisites
-- MTL library installed (`libmtl`)
-- Meson build system
-- GCC compiler with pthread support
+
+#### Hardware Requirements
+- Intel 12th Generation CPU or above 
+- Intel Ethernet Controller I225 or above
+
+#### Software Requirements
+- [Ubuntu 22.04 LTS](https://releases.ubuntu.com/22.04)
+- [Media Transport Library (MTL) v26.01](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/v26.01/doc/build.md)
+  - Follow these steps
+    - [Install APT packages](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/v26.01/doc/build.md#111-ubuntudebian)
+    - Clone Media-Transport-Library
+      ```
+      git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git
+      git checkout v26.01
+      export mtl_source_code=${PWD}/Media-Transport-Library
+      ```
+    - [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/v26.01/doc/build.md#2-dpdk-build-and-install)
+    - [Build and install MTL](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/v26.01/doc/build.md#3-build-media-transport-library-and-app)
+- [FFmpeg 7.0 with MTL Plugin](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/v26.01/ecosystem/ffmpeg_plugin/README.md#1-build)
 
 ### Build Steps
+
+Once all dependencies are installed, clone this repository and run the build script:
+
 ```bash
+git clone https://github.com/intel-innersource/applications.media.ledvideowall.gardencove-next.transmitter-app
+cd applications.media.ledvideowall.gardencove-next.transmitter-app
 ./build.sh
 ```
+
+The built binary will be available at `build/TxApp`.
 
 ## Usage
 
@@ -112,8 +141,7 @@ When `log_file` is set, log output is written to that file in addition to the co
 - 60 fps
 
 ### Resolutions
-- Any resolution supported by ST 2110-20
-- Common: 1920x1080, 3840x2160, 1280x720
+- Tested with 1920x1080
 
 ## Performance Considerations
 
@@ -124,6 +152,60 @@ When `log_file` is set, log output is written to that file in addition to the co
 - **Efficient Threading**: Minimal context switching
 
 ## Troubleshooting
+
+### IOMMU / VFIO Kernel Parameters (GRUB)
+
+MTL requires IOMMU and VFIO kernel parameters to be set. If MTL fails to initialize or VFIO devices are not accessible, check that the following parameters are present in `/etc/default/grub`:
+
+```
+intel_iommu=on iommu=pt pcie_aspm=off pcie_port_pm=off vfio-pci.disable_idle_d3=1
+```
+
+To add them manually:
+
+1. Open `/etc/default/grub` in a text editor:
+   ```bash
+   sudo nano /etc/default/grub
+   ```
+
+2. Append the missing parameters to `GRUB_CMDLINE_LINUX_DEFAULT`, for example:
+   ```
+   GRUB_CMDLINE_LINUX_DEFAULT="quiet splash intel_iommu=on iommu=pt pcie_aspm=off pcie_port_pm=off vfio-pci.disable_idle_d3=1"
+   ```
+
+3. Update GRUB and reboot:
+   ```bash
+   sudo update-grub
+   sudo reboot
+   ```
+
+> **Note:** A reboot is required for the IOMMU/VFIO parameters to take effect.
+
+### VFIO Group Setup
+
+MTL uses VFIO to access the NIC. The current user must belong to the `vfio` group.
+
+1. Create the `vfio` group if it does not exist:
+   ```bash
+   sudo groupadd vfio
+   ```
+
+2. Add your user to the group:
+   ```bash
+   sudo usermod -aG vfio $USER
+   ```
+
+3. Apply the group membership without logging out:
+   ```bash
+   newgrp vfio
+   ```
+
+   Or log out and back in for the change to take effect permanently.
+
+4. Verify group membership:
+   ```bash
+   id -nG $USER
+   ```
 
 ### Common Issues
 
@@ -142,8 +224,3 @@ When `log_file` is set, log output is written to that file in addition to the co
    - Check firewall settings
    - Ensure network card supports required bandwidth
 
-## Notices
-
-### FFmpeg
-
-FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ffmpeg.org/legal.html. You are solely responsible for determining if your use of FFmpeg requires any additional licenses. Intel is not responsible for obtaining any such licenses, nor liable for any licensing fees due, in connection with your use of FFmpeg.
