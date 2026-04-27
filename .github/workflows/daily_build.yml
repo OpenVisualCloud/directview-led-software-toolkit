@@ -32,7 +32,7 @@ jobs:
           git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/intel-innersource/applications.media.ledvideowall.gardencove-next.transmitter-app.git .
           git checkout ${{ github.sha }}
 
-      - name: Install dependencies
+      - name: Verify dependencies
         run: |
           PKGS="meson ninja-build pkg-config build-essential libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libavdevice-dev"
           MISSING=""
@@ -40,11 +40,11 @@ jobs:
             dpkg -s "$pkg" &>/dev/null || MISSING="$MISSING $pkg"
           done
           if [ -n "$MISSING" ]; then
-            echo "Installing missing packages:$MISSING"
-            sudo apt-get update
-            sudo apt-get install -y $MISSING
+            echo "ERROR: The following packages are not installed on this self-hosted runner:$MISSING"
+            echo "Please install them on the runner with: sudo apt-get install -y $MISSING"
+            exit 1
           else
-            echo "All dependencies already installed, skipping."
+            echo "All dependencies already installed."
           fi
 
       - name: Set up MTL environment
