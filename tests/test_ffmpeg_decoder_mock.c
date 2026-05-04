@@ -1,25 +1,31 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  *
- * Mock-based unit tests for ffmpeg_decoder.c — exercises the functions
- * that were previously unreachable without MTL hardware or real video files.
+ * Mock-based unit tests for src/ffmpeg/ffmpeg_decoder.c.
  *
  * Strategy
  * --------
- * 1. open_ffmpeg_output() requires the "mtl_st20p" muxer which needs DPDK.
- *    We use --wrap=av_guess_format to return the "null" muxer instead.
- *    The null muxer is AVFMT_NOFILE and accepts write_header/write_frame
- *    silently, so the full function body runs.  av_opt_set calls on
- *    priv_data will silently fail (no matching options) but that's harmless.
+ * 1. open_shared_ffmpeg() and open_ffmpeg_source() (static) need a real
+ *    video file.  We generate a tiny MPEG2 file in /tmp at test startup.
  *
- * 2. open_shared_ffmpeg() and open_ffmpeg_source() (static) need a real
- *    video file.  We generate a tiny MPEG2 file in /tmp at test startup
- *    using the FFmpeg C API (3 frames, 16x16, yuv420p).
+ * 2. shared_decode_thread() is exercised with the generated video and
+ *    POSIX barriers acting as the TX-thread side.
  *
- * 3. shared_decode_thread() and ffmpeg_decode_and_send() are exercised
- *    with the generated video file and the wrapped null muxer output.
+ * --wrap=av_guess_format is present so this binary can link ffmpeg_tx.c
+ * (needed transitively through ffmpeg_frame_handler.c) without the
+ * mtl_st20p muxer; it is not the primary test subject here.
  *
- * Coverage target: bring ffmpeg_decoder.c from ~27% to ≥ 75%.
+ * Covered
+ * -------
+ *   open_shared_ffmpeg()   — success + bad file
+ *   load_video_source()    — real mp4, nonexistent mp4 (open_ffmpeg_source)
+ *   shared_decode_thread() — decodes one frame via barrier synchronisation
+ *   close_ffmpeg_source()  — full path
+ *   close_shared_ffmpeg()  — full path
+ *
+ * open_ffmpeg_tx(), close_ffmpeg_tx(), ffmpeg_tx_send_yuv_frame(),
+ * ffmpeg_tx_send_raw_yuv() and ffmpeg_decode_next_frame() are tested in
+ * test_ffmpeg_tx_mock.c.
  */
 
 #include <stdarg.h>
@@ -43,11 +49,15 @@
 #include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
 
-/* Provide the g_tx_app_exit symbol that ffmpeg_decoder.c extern-references */
-_Atomic bool g_tx_app_exit = false;
+/* Provide accessor function stubs that ffmpeg_decoder.c uses */
+static _Atomic bool g_test_exit = false;
+bool session_manager_should_exit(void) { return g_test_exit; }
+void session_manager_request_exit(void) { g_test_exit = true; }
+void session_manager_reset_exit(void) { g_test_exit = false; }
 
-#include "tx_app_context.h"
-#include "ffmpeg_decoder.h"
+#include "app_context.h"
+#include "ffmpeg/ffmpeg_decoder.h"
+#include "ffmpeg/ffmpeg_frame_handler.h"
 #include "util/logger.h"
 
 /* =========================================================================
@@ -189,83 +199,6 @@ static void fill_app_16x16(struct tx_app_context* app, int sessions)
 }
 
 /* =========================================================================
- * Test: fmt_name (static helper — called via open_ffmpeg_output LOG_INFO)
- * We exercise it indirectly by calling open_ffmpeg_output.
- * ========================================================================= */
-
-/* =========================================================================
- * Test: open_ffmpeg_output — happy path via wrapped null muxer
- * ========================================================================= */
-
-static void test_open_ffmpeg_output_success(void **state)
-{
-    (void)state;
-    struct tx_app_context app;
-    fill_app_16x16(&app, 1);
-
-    struct st20p_tx_ctx ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.idx         = 0;
-    ctx.app         = &app;
-    ctx.crop_width  = 16;
-    ctx.crop_height = 16;
-
-    int ret = open_ffmpeg_output(&ctx);
-    assert_int_equal(ret, 0);
-    assert_non_null(ctx.out_fmt_ctx);
-    assert_non_null(ctx.enc_frame);
-    assert_non_null(ctx.enc_pkt);
-    assert_non_null(ctx.out_stream);
-
-    close_ffmpeg_output(&ctx);
-    assert_null(ctx.out_fmt_ctx);
-}
-
-/* Test open_ffmpeg_output uses app-level defaults when session_net is zero */
-static void test_open_ffmpeg_output_uses_app_defaults(void **state)
-{
-    (void)state;
-    struct tx_app_context app;
-    fill_app_16x16(&app, 1);
-    /* Zero session_net → fallback to app->udp_port + idx*2 */
-    memset(app.session_net, 0, sizeof(app.session_net));
-
-    struct st20p_tx_ctx ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.idx         = 1;
-    ctx.app         = &app;
-    ctx.crop_width  = 16;
-    ctx.crop_height = 16;
-
-    int ret = open_ffmpeg_output(&ctx);
-    assert_int_equal(ret, 0);
-    assert_non_null(ctx.out_fmt_ctx);
-
-    close_ffmpeg_output(&ctx);
-}
-
-/* Test open_ffmpeg_output with crop_width=0 → falls back to app->width */
-static void test_open_ffmpeg_output_crop_fallback(void **state)
-{
-    (void)state;
-    struct tx_app_context app;
-    fill_app_16x16(&app, 1);
-
-    struct st20p_tx_ctx ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.idx         = 0;
-    ctx.app         = &app;
-    ctx.crop_width  = 0; /* fallback to app->width */
-    ctx.crop_height = 0; /* fallback to app->height */
-
-    int ret = open_ffmpeg_output(&ctx);
-    assert_int_equal(ret, 0);
-    assert_non_null(ctx.out_fmt_ctx);
-
-    close_ffmpeg_output(&ctx);
-}
-
-/* =========================================================================
  * Test: open_shared_ffmpeg — happy path with generated video
  * ========================================================================= */
 
@@ -331,116 +264,27 @@ static void test_load_video_source_mp4_calls_open_ffmpeg_source(void **state)
     close_ffmpeg_source(&ctx);
 }
 
-/* =========================================================================
- * Test: ffmpeg_decode_and_send — decodes from generated video
- *
- * Needs: ctx populated by open_ffmpeg_output + load_video_source (open_ffmpeg_source)
- * ========================================================================= */
-
-static void test_ffmpeg_decode_and_send_decodes_one_frame(void **state)
+static void test_load_video_source_nonexistent_mp4_returns_minus1(void **state)
 {
     (void)state;
+    /* A nonexistent .mp4 file causes avformat_open_input to fail inside
+     * open_ffmpeg_source (static) → returns -1 → load_video_source propagates -1. */
     struct tx_app_context app;
     fill_app_16x16(&app, 1);
-    app.exit = false;
-    g_tx_app_exit = false;
 
     struct st20p_tx_ctx ctx;
     memset(&ctx, 0, sizeof(ctx));
-    ctx.idx         = 0;
-    ctx.app         = &app;
-    ctx.crop_width  = 16;
-    ctx.crop_height = 16;
+    ctx.idx = 0;
+    ctx.app = &app;
 
-    /* Open the MTL-like output (uses null muxer via wrap) */
-    int ret = open_ffmpeg_output(&ctx);
-    assert_int_equal(ret, 0);
-
-    /* Open the generated video as input */
-    ret = load_video_source(&ctx, TEST_VIDEO_PATH);
-    assert_int_equal(ret, 0);
-    assert_true(ctx.use_ffmpeg);
-
-    /* Decode and send one frame — should succeed */
-    bool got = ffmpeg_decode_and_send(&ctx);
-    assert_true(got);
-    assert_int_equal(ctx.frames_sent, 1);
-
-    /* Decode another */
-    got = ffmpeg_decode_and_send(&ctx);
-    assert_true(got);
-    assert_int_equal(ctx.frames_sent, 2);
-
-    close_ffmpeg_source(&ctx);
-    close_ffmpeg_output(&ctx);
-}
-
-/* Test ffmpeg_decode_and_send with exit flag set → returns false */
-static void test_ffmpeg_decode_and_send_exits_on_flag(void **state)
-{
-    (void)state;
-    struct tx_app_context app;
-    fill_app_16x16(&app, 1);
-    app.exit = true; /* exit immediately */
-
-    struct st20p_tx_ctx ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.idx         = 0;
-    ctx.app         = &app;
-    ctx.crop_width  = 16;
-    ctx.crop_height = 16;
-
-    int ret = open_ffmpeg_output(&ctx);
-    assert_int_equal(ret, 0);
-
-    ret = load_video_source(&ctx, TEST_VIDEO_PATH);
-    assert_int_equal(ret, 0);
-
-    /* With app->exit=true, the while loop won't run */
-    bool got = ffmpeg_decode_and_send(&ctx);
-    assert_false(got);
-    assert_int_equal(ctx.frames_sent, 0);
-
-    close_ffmpeg_source(&ctx);
-    close_ffmpeg_output(&ctx);
-}
-
-/* Test ffmpeg_decode_and_send with crop_width=0 → fallback to app->width */
-static void test_ffmpeg_decode_and_send_crop_fallback(void **state)
-{
-    (void)state;
-    struct tx_app_context app;
-    fill_app_16x16(&app, 1);
-    app.exit = false;
-    g_tx_app_exit = false;
-
-    struct st20p_tx_ctx ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.idx         = 0;
-    ctx.app         = &app;
-    ctx.crop_width  = 0; /* fallback */
-    ctx.crop_height = 0;
-
-    int ret = open_ffmpeg_output(&ctx);
-    assert_int_equal(ret, 0);
-
-    ret = load_video_source(&ctx, TEST_VIDEO_PATH);
-    assert_int_equal(ret, 0);
-
-    bool got = ffmpeg_decode_and_send(&ctx);
-    assert_true(got);
-    assert_int_equal(ctx.frames_sent, 1);
-
-    close_ffmpeg_source(&ctx);
-    close_ffmpeg_output(&ctx);
+    int ret = load_video_source(&ctx, "/tmp/txapp_nonexistent_xyz.mp4");
+    assert_int_equal(ret, -1);
+    assert_false(ctx.use_ffmpeg);
+    assert_null(ctx.fmt_ctx);
 }
 
 /* =========================================================================
  * Test: shared_decode_thread — runs with generated video + barriers
- *
- * We set up the shared_decode_ctx with open_shared_ffmpeg, initialise the
- * barriers, start the thread, let it decode one frame, then signal exit
- * and join.  The barriers have count=2 (1 decode + 1 fake TX thread = us).
  * ========================================================================= */
 
 static void test_shared_decode_thread_decodes_frames(void **state)
@@ -448,7 +292,7 @@ static void test_shared_decode_thread_decodes_frames(void **state)
     (void)state;
     struct tx_app_context app;
     fill_app_16x16(&app, 1);
-    g_tx_app_exit = false;
+    g_test_exit = false;
 
     struct shared_decode_ctx dec;
     memset(&dec, 0, sizeof(dec));
@@ -463,6 +307,11 @@ static void test_shared_decode_thread_decodes_frames(void **state)
      * In this test, "we" are the single TX thread. */
     pthread_barrier_init(&dec.barrier_decoded, NULL, 2);
     pthread_barrier_init(&dec.barrier_copied,  NULL, 2);
+
+    /* Initialize and signal the startup gate so the thread proceeds */
+    pthread_mutex_init(&dec.start_mutex, NULL);
+    pthread_cond_init(&dec.start_cond, NULL);
+    dec.start_ready = true;
 
     pthread_t tid;
     ret = pthread_create(&tid, NULL, shared_decode_thread, &dec);
@@ -488,33 +337,9 @@ static void test_shared_decode_thread_decodes_frames(void **state)
 
     pthread_barrier_destroy(&dec.barrier_decoded);
     pthread_barrier_destroy(&dec.barrier_copied);
+    pthread_mutex_destroy(&dec.start_mutex);
+    pthread_cond_destroy(&dec.start_cond);
     close_shared_ffmpeg(&dec);
-}
-
-/* =========================================================================
- * Test: close_ffmpeg_output with full context (non-null everything)
- * ========================================================================= */
-
-static void test_close_ffmpeg_output_full(void **state)
-{
-    (void)state;
-    struct tx_app_context app;
-    fill_app_16x16(&app, 1);
-
-    struct st20p_tx_ctx ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.idx         = 0;
-    ctx.app         = &app;
-    ctx.crop_width  = 16;
-    ctx.crop_height = 16;
-
-    int ret = open_ffmpeg_output(&ctx);
-    assert_int_equal(ret, 0);
-
-    close_ffmpeg_output(&ctx);
-    assert_null(ctx.out_fmt_ctx);
-    assert_null(ctx.enc_frame);
-    assert_null(ctx.enc_pkt);
 }
 
 /* =========================================================================
@@ -586,28 +411,18 @@ int main(void)
     }
 
     const struct CMUnitTest tests[] = {
-        /* open_ffmpeg_output (via null muxer wrap) */
-        cmocka_unit_test(test_open_ffmpeg_output_success),
-        cmocka_unit_test(test_open_ffmpeg_output_uses_app_defaults),
-        cmocka_unit_test(test_open_ffmpeg_output_crop_fallback),
-
         /* open_shared_ffmpeg */
         cmocka_unit_test(test_open_shared_ffmpeg_success),
         cmocka_unit_test(test_open_shared_ffmpeg_bad_file_fails),
 
         /* load_video_source → open_ffmpeg_source (static) */
         cmocka_unit_test(test_load_video_source_mp4_calls_open_ffmpeg_source),
-
-        /* ffmpeg_decode_and_send */
-        cmocka_unit_test(test_ffmpeg_decode_and_send_decodes_one_frame),
-        cmocka_unit_test(test_ffmpeg_decode_and_send_exits_on_flag),
-        cmocka_unit_test(test_ffmpeg_decode_and_send_crop_fallback),
+        cmocka_unit_test(test_load_video_source_nonexistent_mp4_returns_minus1),
 
         /* shared_decode_thread */
         cmocka_unit_test(test_shared_decode_thread_decodes_frames),
 
         /* close paths with fully-populated contexts */
-        cmocka_unit_test(test_close_ffmpeg_output_full),
         cmocka_unit_test(test_close_ffmpeg_source_full),
         cmocka_unit_test(test_close_shared_ffmpeg_full),
     };

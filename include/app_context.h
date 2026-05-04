@@ -9,7 +9,7 @@
 #include <arpa/inet.h>
 #include <libavutil/pixfmt.h>
 
-#define MAX_TX_SESSIONS 8
+#define MAX_TX_SESSIONS (8)
 
 /* Per-session network and crop parameters (populated from JSON tx_sessions[]) */
 struct tx_session_net {

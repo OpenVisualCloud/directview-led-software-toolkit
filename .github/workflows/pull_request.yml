@@ -33,23 +33,39 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
-      - name: Build
+      - name: Build with FFMPEG TX APIs
         run: |
-          echo "Setting up meson build directory..."
-          meson setup build
+          echo "Building with FFMPEG TX APIs..."
+          ./scripts/build.sh
 
-          echo "Compiling TxApp..."
-          ninja -C build
-
-          echo "Build successful!"
-
-      - name: Verify build output
-        run: |
           if [ ! -f "./build/TxApp" ]; then
             echo "ERROR: Build artifact TxApp not found!"
             exit 1
           fi
-          echo "Build artifact verified: $(file ./build/TxApp)"
+          echo "Build with FFMPEG TX APIs succeess $(file ./build/TxApp)"
+
+      - name: Build with MTL TX APIs
+        run: |
+          echo "Building with MTL TX APIs..."
+          ./scripts/build.sh -Denable_mtl_tx=true
+
+          if [ ! -f "./build/TxApp" ]; then
+            echo "ERROR: Build artifact TxApp not found!"
+            exit 1
+          fi
+          echo "Build with MTL TX APIs succeess $(file ./build/TxApp)"
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: self-hosted
+
+    steps:
+      - name: Execute Unit Tests
+        run: |
+          echo "Executing Unit Tests..."
+          ./scripts/test.sh
+
+          echo "Unit Tests executed successfully"
 
   static-analysis:
     name: Static Analysis
@@ -88,7 +104,7 @@ jobs:
         run: |
           REPORT_DIR="$HOME/static-analysis/${{ github.repository }}/${{ github.run_id }}"
           mkdir -p "$REPORT_DIR"
-          shellcheck build.sh script/run.sh 2>&1 | tee "$REPORT_DIR/shellcheck-report.txt" || true
+          shellcheck scripts/build.sh scripts/run.sh 2>&1 | tee "$REPORT_DIR/shellcheck-report.txt" || true
           echo "shellcheck scan complete. Report saved to $REPORT_DIR/shellcheck-report.txt"
 
       - name: codespell

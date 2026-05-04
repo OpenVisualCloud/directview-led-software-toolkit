@@ -22,8 +22,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "config_reader.h"
-#include "tx_app_context.h"
+#include "util/config_reader.h"
+#include "app_context.h"
 
 /* --------------------------------------------------------------------------
  * Compile-time fixture path injected by meson.build via -DFIXTURE_DIR="..."
@@ -132,7 +132,7 @@ static void test_parse_3sessions_video_params(void **state)
     assert_int_equal((int)cfg.width,  1920);
     assert_int_equal((int)cfg.height, 1080);
     assert_int_equal(cfg.fps,         30);
-    assert_string_equal(cfg.fmt, "yuv420");
+    assert_string_equal(cfg.fmt, "yuv422p10le");
 }
 
 static void test_parse_3sessions_log_file(void **state)
@@ -223,10 +223,10 @@ static void test_parse_returns_minus1_when_sessions_array_empty(void **state)
     assert_int_equal(ret, -1);
 }
 
-static void test_parse_defaults_width_height_fps_when_video_missing(void **state)
+static void test_parse_returns_zero_fields_when_video_missing(void **state)
 {
     (void)state;
-    /* Config with no "video" block — parser should fall back to defaults */
+    /* Config with no "video" block — fields remain zero from memset */
     char *path = write_tmpfile(
         "{"
         "  \"interfaces\": [{\"name\":\"eth0\",\"sip\":\"1.2.3.4\",\"dip\":\"5.6.7.8\"}],"
@@ -240,9 +240,9 @@ static void test_parse_defaults_width_height_fps_when_video_missing(void **state
     unlink(path);
     free(path);
     assert_int_equal(ret, 0);
-    assert_int_equal((int)cfg.width,  1920);
-    assert_int_equal((int)cfg.height, 1080);
-    assert_int_equal(cfg.fps, 25);
+    assert_int_equal((int)cfg.width,  0);
+    assert_int_equal((int)cfg.height, 0);
+    assert_int_equal(cfg.fps, 0);
 }
 
 /* ==========================================================================
@@ -525,7 +525,7 @@ static void test_peek_log_file_fills_buffer_correctly(void **state)
  * parse_tx_config — default/fallback paths for missing/invalid session fields
  * ========================================================================== */
 
-static void test_parse_session_default_udp_port_when_missing(void **state)
+static void test_parse_session_missing_udp_port_fails(void **state)
 {
     (void)state;
     char *path = write_tmpfile(
@@ -539,12 +539,10 @@ static void test_parse_session_default_udp_port_when_missing(void **state)
     struct tx_app_config cfg;
     int ret = parse_tx_config(path, &cfg);
     unlink(path); free(path);
-    assert_int_equal(ret, 0);
-    /* Missing udp_port → default 20000 */
-    assert_int_equal(cfg.sessions[0].udp_port, 20000);
+    assert_int_equal(ret, -1);
 }
 
-static void test_parse_session_udp_port_exceeds_65535_uses_default(void **state)
+static void test_parse_session_udp_port_exceeds_65535_fails(void **state)
 {
     (void)state;
     char *path = write_tmpfile(
@@ -558,12 +556,10 @@ static void test_parse_session_udp_port_exceeds_65535_uses_default(void **state)
     struct tx_app_config cfg;
     int ret = parse_tx_config(path, &cfg);
     unlink(path); free(path);
-    assert_int_equal(ret, 0);
-    /* udp_port 70000 > 65535 → default 20000 */
-    assert_int_equal(cfg.sessions[0].udp_port, 20000);
+    assert_int_equal(ret, -1);
 }
 
-static void test_parse_session_default_payload_type_when_missing(void **state)
+static void test_parse_session_missing_payload_type_fails(void **state)
 {
     (void)state;
     char *path = write_tmpfile(
@@ -577,12 +573,10 @@ static void test_parse_session_default_payload_type_when_missing(void **state)
     struct tx_app_config cfg;
     int ret = parse_tx_config(path, &cfg);
     unlink(path); free(path);
-    assert_int_equal(ret, 0);
-    /* Missing payload_type → default 96 */
-    assert_int_equal(cfg.sessions[0].payload_type, 96);
+    assert_int_equal(ret, -1);
 }
 
-static void test_parse_session_no_crop_object_defaults_to_full_frame(void **state)
+static void test_parse_session_no_crop_object_fails(void **state)
 {
     (void)state;
     char *path = write_tmpfile(
@@ -595,12 +589,7 @@ static void test_parse_session_no_crop_object_defaults_to_full_frame(void **stat
     struct tx_app_config cfg;
     int ret = parse_tx_config(path, &cfg);
     unlink(path); free(path);
-    assert_int_equal(ret, 0);
-    /* No crop object → full-frame defaults */
-    assert_int_equal(cfg.sessions[0].crop_x, 0);
-    assert_int_equal(cfg.sessions[0].crop_y, 0);
-    assert_int_equal((int)cfg.sessions[0].crop_w, 1920);
-    assert_int_equal((int)cfg.sessions[0].crop_h, 1080);
+    assert_int_equal(ret, -1);
 }
 
 /* ==========================================================================
@@ -621,9 +610,9 @@ static void test_validate_duplicate_udp_ports_fails(void **state)
     (void)state;
     struct tx_app_config cfg;
     memset(&cfg, 0, sizeof(cfg));
-    strncpy(cfg.interface_name, "eth0",        sizeof(cfg.interface_name) - 1);
-    strncpy(cfg.interface_sip,  "192.168.1.1", sizeof(cfg.interface_sip)  - 1);
-    strncpy(cfg.interface_dip,  "239.0.0.1",   sizeof(cfg.interface_dip)  - 1);
+    strncpy(cfg.interface_name, "0000:06:00.0", sizeof(cfg.interface_name) - 1);
+    strncpy(cfg.interface_sip,  "192.168.1.1",  sizeof(cfg.interface_sip)  - 1);
+    strncpy(cfg.interface_dip,  "239.0.0.1",    sizeof(cfg.interface_dip)  - 1);
     cfg.width = 1920; cfg.height = 1080; cfg.fps = 25;
     strncpy(cfg.fmt, "yuv422p10le", sizeof(cfg.fmt) - 1);
     cfg.session_count = 2;
@@ -668,6 +657,299 @@ static void test_validate_tx_url_existing_file_passes(void **state)
     int ret = validate_tx_config(&cfg);
     unlink(path); free(path);
     assert_int_equal(ret, 0);
+}
+
+/* ==========================================================================
+ * Security validation tests (STRIDE mitigations)
+ * ========================================================================== */
+
+/* D-3: DIP must be in multicast range 224.0.0.0/4 */
+static void test_validate_non_multicast_dip_fails(void **state)
+{
+    (void)state;
+    struct tx_app_config cfg;
+    fill_valid_config(&cfg);
+    strncpy(cfg.interface_dip, "192.168.1.100", sizeof(cfg.interface_dip) - 1);
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+/* S-2: PCI BDF must match DDDD:DD:DD.D hex pattern */
+static void test_validate_invalid_bdf_format_fails(void **state)
+{
+    (void)state;
+    struct tx_app_config cfg;
+    fill_valid_config(&cfg);
+    strncpy(cfg.interface_name, "eth0", sizeof(cfg.interface_name) - 1);
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+static void test_validate_valid_bdf_passes(void **state)
+{
+    (void)state;
+    struct tx_app_config cfg;
+    fill_valid_config(&cfg);
+    strncpy(cfg.interface_name, "0000:af:00.1", sizeof(cfg.interface_name) - 1);
+    assert_int_equal(validate_tx_config(&cfg), 0);
+}
+
+/* D-3: UDP port must be >= 1024 (above privileged range) */
+static void test_validate_privileged_udp_port_fails(void **state)
+{
+    (void)state;
+    struct tx_app_config cfg;
+    fill_valid_config(&cfg);
+    cfg.sessions[0].udp_port = 80;
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+/* ==========================================================================
+ * JSON string escape sequences (extract_json_string handling)
+ * Exercised via peek_config_log_file which extracts the "log_file" string.
+ * ========================================================================== */
+
+/* \\\" inside a JSON string must decode to a literal double-quote */
+static void test_peek_log_file_handles_escaped_quote(void **state)
+{
+    (void)state;
+    char *path = write_tmpfile("{\"log_file\": \"my\\\"file.log\"}");
+    assert_non_null(path);
+    char buf[256] = {0};
+    int ret = peek_config_log_file(path, buf, sizeof(buf));
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_string_equal(buf, "my\"file.log");
+}
+
+/* \\\\ must decode to a single literal backslash */
+static void test_peek_log_file_handles_escaped_backslash(void **state)
+{
+    (void)state;
+    char *path = write_tmpfile("{\"log_file\": \"a\\\\b.log\"}");
+    assert_non_null(path);
+    char buf[256] = {0};
+    int ret = peek_config_log_file(path, buf, sizeof(buf));
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_string_equal(buf, "a\\b.log");
+}
+
+/* \\/ must decode to a literal forward slash (used for path separators) */
+static void test_peek_log_file_handles_escaped_forward_slash(void **state)
+{
+    (void)state;
+    char *path = write_tmpfile("{\"log_file\": \"\\/tmp\\/x.log\"}");
+    assert_non_null(path);
+    char buf[256] = {0};
+    int ret = peek_config_log_file(path, buf, sizeof(buf));
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_string_equal(buf, "/tmp/x.log");
+}
+
+/* \\n must decode to a literal newline character */
+static void test_peek_log_file_handles_escaped_newline(void **state)
+{
+    (void)state;
+    char *path = write_tmpfile("{\"log_file\": \"line1\\nline2\"}");
+    assert_non_null(path);
+    char buf[256] = {0};
+    int ret = peek_config_log_file(path, buf, sizeof(buf));
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_string_equal(buf, "line1\nline2");
+}
+
+/* \\t must decode to a literal tab character */
+static void test_peek_log_file_handles_escaped_tab(void **state)
+{
+    (void)state;
+    char *path = write_tmpfile("{\"log_file\": \"a\\tb\"}");
+    assert_non_null(path);
+    char buf[256] = {0};
+    int ret = peek_config_log_file(path, buf, sizeof(buf));
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_string_equal(buf, "a\tb");
+}
+
+/* Unknown escape sequence (e.g. \\z) keeps the literal escaped character */
+static void test_peek_log_file_unknown_escape_kept_literal(void **state)
+{
+    (void)state;
+    char *path = write_tmpfile("{\"log_file\": \"x\\zy.log\"}");
+    assert_non_null(path);
+    char buf[256] = {0};
+    int ret = peek_config_log_file(path, buf, sizeof(buf));
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_string_equal(buf, "xzy.log");
+}
+
+/* Bare control characters (e.g. raw 0x01) inside the JSON string are stripped */
+static void test_peek_log_file_strips_bare_control_chars(void **state)
+{
+    (void)state;
+    /* Embed an SOH (0x01) byte between 'a' and 'b' */
+    const char json[] = "{\"log_file\": \"a\x01""b.log\"}";
+    char *path = strdup("/tmp/txapp_ctrl_XXXXXX");
+    assert_non_null(path);
+    int fd = mkstemp(path);
+    assert_true(fd >= 0);
+    assert_int_equal(write(fd, json, sizeof(json) - 1), (ssize_t)(sizeof(json) - 1));
+    close(fd);
+
+    char buf[256] = {0};
+    int ret = peek_config_log_file(path, buf, sizeof(buf));
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_string_equal(buf, "ab.log");
+}
+
+/* ==========================================================================
+ * peek_config_log_file — NULL guards
+ * ========================================================================== */
+
+static void test_peek_log_file_null_path_returns_minus1(void **state)
+{
+    (void)state;
+    char buf[64] = {0};
+    assert_int_equal(peek_config_log_file(NULL, buf, sizeof(buf)), -1);
+}
+
+static void test_peek_log_file_null_buffer_returns_minus1(void **state)
+{
+    (void)state;
+    assert_int_equal(peek_config_log_file(FIXTURE_3SESSIONS, NULL, 64), -1);
+}
+
+/* ==========================================================================
+ * Crop bounds — overflow safety with very large crop values
+ * (Tests the unsigned-cast addition introduced for STRIDE mitigation.)
+ * ========================================================================== */
+
+static void test_validate_crop_x_plus_w_unsigned_overflow_safe(void **state)
+{
+    (void)state;
+    /* With signed int math, INT_MAX + 1 wraps to INT_MIN and would silently
+     * pass the comparison.  The unsigned cast must catch this. */
+    struct tx_app_config cfg;
+    fill_valid_config(&cfg);
+    cfg.sessions[0].crop_x = 2147483647; /* INT_MAX */
+    cfg.sessions[0].crop_w = 2;          /* even, so passes alignment */
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+static void test_validate_crop_y_plus_h_unsigned_overflow_safe(void **state)
+{
+    (void)state;
+    struct tx_app_config cfg;
+    fill_valid_config(&cfg);
+    cfg.sessions[0].crop_y = 2147483647; /* INT_MAX */
+    cfg.sessions[0].crop_h = 2;
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+/* D-3: 224.x.x.x is in the multicast range — passes (with a warning) */
+static void test_validate_low_multicast_dip_passes_with_warning(void **state)
+{
+    (void)state;
+    struct tx_app_config cfg;
+    fill_valid_config(&cfg);
+    strncpy(cfg.interface_dip, "224.0.0.50", sizeof(cfg.interface_dip) - 1);
+    /* In multicast range but outside the 239.0.0.0/8 administratively-scoped
+     * range — must still validate (a warning is logged). */
+    assert_int_equal(validate_tx_config(&cfg), 0);
+}
+
+/* D-3: 240.x.x.x is OUTSIDE the multicast range (224.0.0.0/4) — must fail */
+static void test_validate_above_multicast_dip_fails(void **state)
+{
+    (void)state;
+    struct tx_app_config cfg;
+    fill_valid_config(&cfg);
+    strncpy(cfg.interface_dip, "240.0.0.1", sizeof(cfg.interface_dip) - 1);
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+/* D-3: UDP port at the boundary (1024) must pass */
+static void test_validate_udp_port_boundary_1024_passes(void **state)
+{
+    (void)state;
+    struct tx_app_config cfg;
+    fill_valid_config(&cfg);
+    cfg.sessions[0].udp_port = 1024;
+    assert_int_equal(validate_tx_config(&cfg), 0);
+}
+
+/* D-3: UDP port 1023 (just below boundary) must fail */
+static void test_validate_udp_port_boundary_1023_fails(void **state)
+{
+    (void)state;
+    struct tx_app_config cfg;
+    fill_valid_config(&cfg);
+    cfg.sessions[0].udp_port = 1023;
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+/* S-2: BDF with too few digits in domain part must fail */
+static void test_validate_short_bdf_format_fails(void **state)
+{
+    (void)state;
+    struct tx_app_config cfg;
+    fill_valid_config(&cfg);
+    /* Missing leading "00" in domain — DDD:DD:DD.D instead of DDDD:DD:DD.D */
+    strncpy(cfg.interface_name, "000:06:00.0", sizeof(cfg.interface_name) - 1);
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+/* S-2: BDF with non-hex chars must fail */
+static void test_validate_nonhex_bdf_format_fails(void **state)
+{
+    (void)state;
+    struct tx_app_config cfg;
+    fill_valid_config(&cfg);
+    strncpy(cfg.interface_name, "ZZZZ:06:00.0", sizeof(cfg.interface_name) - 1);
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+/* ==========================================================================
+ * parse_tx_config — additional negative-value crop fields must be rejected
+ * (crop fields are now mandatory; missing/invalid values cause parse to fail)
+ * ========================================================================== */
+
+static void test_parse_session_negative_crop_x_fails(void **state)
+{
+    (void)state;
+    char *path = write_tmpfile(
+        "{"
+        "  \"interfaces\": [{\"name\":\"eth0\",\"sip\":\"1.2.3.4\",\"dip\":\"5.6.7.8\"}],"
+        "  \"video\": {\"width\":1920,\"height\":1080,\"fps\":25,\"fmt\":\"yuv422p10le\"},"
+        "  \"tx_sessions\": [{\"udp_port\":20000,\"payload_type\":96,"
+        "    \"crop\":{\"y\":0,\"w\":1920,\"h\":1080}}]"
+        "}");
+    assert_non_null(path);
+    struct tx_app_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    /* Missing crop "x" — extract_json_int returns -1, parse must fail */
+    assert_int_equal(ret, -1);
+}
+
+static void test_parse_session_zero_crop_w_fails(void **state)
+{
+    (void)state;
+    char *path = write_tmpfile(
+        "{"
+        "  \"interfaces\": [{\"name\":\"eth0\",\"sip\":\"1.2.3.4\",\"dip\":\"5.6.7.8\"}],"
+        "  \"video\": {\"width\":1920,\"height\":1080,\"fps\":25,\"fmt\":\"yuv422p10le\"},"
+        "  \"tx_sessions\": [{\"udp_port\":20000,\"payload_type\":96,"
+        "    \"crop\":{\"x\":0,\"y\":0,\"w\":0,\"h\":1080}}]"
+        "}");
+    assert_non_null(path);
+    struct tx_app_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, -1);
 }
 
 /* ==========================================================================
@@ -792,7 +1074,7 @@ static void test_load_and_apply_config_copies_log_file(void **state)
     char *path = write_tmpfile(
         "{"
         "  \"log_file\": \"myapp.log\","
-        "  \"interfaces\": [{\"name\":\"eth0\",\"sip\":\"1.2.3.4\",\"dip\":\"5.6.7.8\"}],"
+        "  \"interfaces\": [{\"name\":\"0000:06:00.0\",\"sip\":\"192.168.50.29\",\"dip\":\"239.168.85.20\"}],"
         "  \"video\": {\"width\":1920,\"height\":1080,\"fps\":25,\"fmt\":\"yuv422p10le\"},"
         "  \"tx_sessions\": [{\"udp_port\":20000,\"payload_type\":96,"
         "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]"
@@ -826,11 +1108,13 @@ int main(void)
         cmocka_unit_test(test_parse_3sessions_session2_crop),
         cmocka_unit_test(test_parse_returns_minus1_when_sessions_key_absent),
         cmocka_unit_test(test_parse_returns_minus1_when_sessions_array_empty),
-        cmocka_unit_test(test_parse_defaults_width_height_fps_when_video_missing),
-        cmocka_unit_test(test_parse_session_default_udp_port_when_missing),
-        cmocka_unit_test(test_parse_session_udp_port_exceeds_65535_uses_default),
-        cmocka_unit_test(test_parse_session_default_payload_type_when_missing),
-        cmocka_unit_test(test_parse_session_no_crop_object_defaults_to_full_frame),
+        cmocka_unit_test(test_parse_returns_zero_fields_when_video_missing),
+        cmocka_unit_test(test_parse_session_missing_udp_port_fails),
+        cmocka_unit_test(test_parse_session_udp_port_exceeds_65535_fails),
+        cmocka_unit_test(test_parse_session_missing_payload_type_fails),
+        cmocka_unit_test(test_parse_session_no_crop_object_fails),
+        cmocka_unit_test(test_parse_session_negative_crop_x_fails),
+        cmocka_unit_test(test_parse_session_zero_crop_w_fails),
 
         /* --- validate_tx_config --- */
         cmocka_unit_test(test_validate_valid_config_passes),
@@ -861,11 +1145,34 @@ int main(void)
         cmocka_unit_test(test_validate_tx_url_nonexistent_file_fails),
         cmocka_unit_test(test_validate_tx_url_existing_file_passes),
 
+        /* --- STRIDE security validation --- */
+        cmocka_unit_test(test_validate_non_multicast_dip_fails),
+        cmocka_unit_test(test_validate_invalid_bdf_format_fails),
+        cmocka_unit_test(test_validate_valid_bdf_passes),
+        cmocka_unit_test(test_validate_privileged_udp_port_fails),
+        cmocka_unit_test(test_validate_low_multicast_dip_passes_with_warning),
+        cmocka_unit_test(test_validate_above_multicast_dip_fails),
+        cmocka_unit_test(test_validate_udp_port_boundary_1024_passes),
+        cmocka_unit_test(test_validate_udp_port_boundary_1023_fails),
+        cmocka_unit_test(test_validate_short_bdf_format_fails),
+        cmocka_unit_test(test_validate_nonhex_bdf_format_fails),
+        cmocka_unit_test(test_validate_crop_x_plus_w_unsigned_overflow_safe),
+        cmocka_unit_test(test_validate_crop_y_plus_h_unsigned_overflow_safe),
+
         /* --- peek_config_log_file --- */
         cmocka_unit_test(test_peek_log_file_returns_value_from_3sessions),
         cmocka_unit_test(test_peek_log_file_returns_minus1_when_field_absent),
         cmocka_unit_test(test_peek_log_file_returns_minus1_for_nonexistent_file),
         cmocka_unit_test(test_peek_log_file_fills_buffer_correctly),
+        cmocka_unit_test(test_peek_log_file_null_path_returns_minus1),
+        cmocka_unit_test(test_peek_log_file_null_buffer_returns_minus1),
+        cmocka_unit_test(test_peek_log_file_handles_escaped_quote),
+        cmocka_unit_test(test_peek_log_file_handles_escaped_backslash),
+        cmocka_unit_test(test_peek_log_file_handles_escaped_forward_slash),
+        cmocka_unit_test(test_peek_log_file_handles_escaped_newline),
+        cmocka_unit_test(test_peek_log_file_handles_escaped_tab),
+        cmocka_unit_test(test_peek_log_file_unknown_escape_kept_literal),
+        cmocka_unit_test(test_peek_log_file_strips_bare_control_chars),
 
         /* --- load_and_apply_config --- */
         cmocka_unit_test(test_load_and_apply_config_null_app_returns_zero),

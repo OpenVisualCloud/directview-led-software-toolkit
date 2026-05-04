@@ -5,7 +5,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
-#include "tx_app_context.h"
+#include "app_context.h"
 
 // Forward declaration
 struct tx_app_context;
@@ -54,3 +54,7 @@ int validate_tx_config(const struct tx_app_config* config);
 
 /* Load JSON config and apply it to the app context */
 int load_and_apply_config(struct tx_app_context* app, const char* config_file);
+
+/* Convert sip_addr_str / dip_addr_str to packed binary (struct in_addr).
+ * Call once after load_and_apply_config().  Returns 0 on success, -1 on error. */
+int resolve_ip_addrs(struct tx_app_context* ctx);
