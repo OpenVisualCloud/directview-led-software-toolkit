@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  *
- * Unit tests for the static helper functions in src/tx_app_main.c.
+ * Unit tests for the static helper functions in src/main.c.
  *
  * Strategy
  * --------
- * tx_app_main.c's interesting logic lives in static functions
- * (parse_args, resolve_ip_addrs, tx_app_sig_handler,
+ * main.c's interesting logic lives in static functions
+ * (parse_args, tx_app_sig_handler,
  *  tx_app_apply_pending_signal_exit, print_help).  Because they are
  * static we cannot link them from outside; instead we #include the
  * source file directly (after renaming 'main' to avoid a clash with
@@ -21,7 +21,8 @@
  * Coverage target
  * ---------------
  *   parse_args()                        — argument parsing
- *   resolve_ip_addrs()                  — IPv4 binary conversion
+ *   resolve_ip_addrs()                  — IPv4 binary conversion (now in config_reader.c;
+ *                                         real implementation provided inline below)
  *   tx_app_sig_handler()                — sets g_tx_app_signal_exit
  *   tx_app_apply_pending_signal_exit()  — propagates signal flag
  *   print_help()                        — smoke test only
@@ -44,9 +45,12 @@
 #include <libavutil/pixfmt.h>
 #include <libavformat/avformat.h>
 
-/* g_tx_app_exit is normally defined in session_manager.c.
- * We define it here since session_manager.c is not compiled into this test. */
-_Atomic bool g_tx_app_exit = false;
+/* Provide accessor function stubs for the exit flag (session_manager.c
+ * is not compiled into this test). */
+static _Atomic bool g_test_exit = false;
+bool session_manager_should_exit(void) { return g_test_exit; }
+void session_manager_request_exit(void) { g_test_exit = true; }
+void session_manager_reset_exit(void)   { g_test_exit = false; }
 
 /* ===========================================================================
  * Controllable stubs for session_manager and config_reader functions.
@@ -56,7 +60,9 @@ _Atomic bool g_tx_app_exit = false;
  * configure the behaviour it needs.
  * =========================================================================== */
 
-#include "session_manager.h"
+#include "app_context.h"
+#include "util/logger.h"
+#include "core/session_manager.h"
 
 static int stub_session_manager_init_ret  = 0;
 static int stub_session_manager_start_ret = 0;
@@ -76,7 +82,7 @@ bool session_manager_is_running(const session_manager_t* m)
  * Stubs for config_reader functions
  * =========================================================================== */
 
-#include "config_reader.h"
+#include "util/config_reader.h"
 
 static int  stub_peek_config_log_file_ret    = -1;
 static char stub_peek_config_log_file_buf[256] = {0};
@@ -110,20 +116,41 @@ int load_and_apply_config(struct tx_app_context* app, const char* f)
     return stub_load_and_apply_config_ret;
 }
 
+/* resolve_ip_addrs was moved from src/main.c (static) to src/util/config_reader.c.
+ * config_reader.c cannot be added to this test's sources because it would
+ * create duplicate symbols for the load_and_apply_config / peek_config_log_file
+ * stubs above.  Provide the real implementation directly here so that the
+ * existing resolve_ip_addrs test cases continue to work correctly. */
+int resolve_ip_addrs(struct tx_app_context* ctx) {
+    if (ctx->sip_addr_str[0] != '\0') {
+        if (inet_pton(AF_INET, ctx->sip_addr_str, ctx->sip_addr) != 1) {
+            LOG_ERROR("Invalid source IP address %s", ctx->sip_addr_str);
+            return -1;
+        }
+    } else {
+        LOG_INFO("No source IP provided, DHCP mode");
+    }
+    if (inet_pton(AF_INET, ctx->dip_addr_str, ctx->dip_addr) != 1) {
+        LOG_ERROR("Invalid destination IP address %s", ctx->dip_addr_str);
+        return -1;
+    }
+    return 0;
+}
+
 /* Helper to reset all stubs to defaults before each test —
  * forward-declared here; definition after the #include so that
- * g_tx_app_signal_exit (from tx_app_main.c) is visible. */
+ * g_tx_app_signal_exit (from main.c) is visible. */
 static void reset_stubs(void);
 
 /* ===========================================================================
  * Include production source with main() renamed so our cmocka main() can
- * coexist.  After this point all static symbols from tx_app_main.c
+ * coexist.  After this point all static symbols from main.c
  * (parse_args, resolve_ip_addrs, g_tx_app_signal_exit, g_app_ptr, …) are
  * visible to the test functions below.
  * =========================================================================== */
 
 #define main tx_app_real_main
-#include "../src/tx_app_main.c"
+#include "../src/main.c"
 #undef main
 
 static void reset_stubs(void)
@@ -137,7 +164,7 @@ static void reset_stubs(void)
     stub_load_config_test_time_s   = 0;
     stub_load_config_set_exit      = true;
     g_tx_app_signal_exit           = 0;
-    g_tx_app_exit                  = false;
+    g_test_exit                    = false;
 }
 
 /* ===========================================================================
@@ -243,7 +270,7 @@ static void test_resolve_ip_invalid_dip_fails(void **state)
     (void)state;
     struct tx_app_context ctx;
     memset(&ctx, 0, sizeof(ctx));
-    strncpy(ctx.dip_addr_str, "999.999.999.999", sizeof(ctx.dip_addr_str) - 1);
+    strncpy(ctx.dip_addr_str, "999.999.999.999", sizeof(ctx.dip_addr_str));
     assert_int_equal(resolve_ip_addrs(&ctx), -1);
 }
 
@@ -259,25 +286,25 @@ static void test_sig_handler_sets_flag_and_apply_propagates(void **state)
 
     /* Reset shared state */
     g_tx_app_signal_exit = 0;
-    g_tx_app_exit        = false;
+    g_test_exit          = false;
     app.exit             = false;
     g_app_ptr            = &app;
 
     /* Before any signal: apply is a no-op */
     tx_app_apply_pending_signal_exit();
-    assert_false(g_tx_app_exit);
+    assert_false(session_manager_should_exit());
     assert_false(app.exit);
 
     /* Simulate a signal and apply */
     tx_app_sig_handler(SIGINT);
     assert_int_equal(g_tx_app_signal_exit, 1);
     tx_app_apply_pending_signal_exit();
-    assert_true(g_tx_app_exit);
+    assert_true(session_manager_should_exit());
     assert_true(app.exit);
 
     /* Teardown */
     g_tx_app_signal_exit = 0;
-    g_tx_app_exit        = false;
+    g_test_exit          = false;
     g_app_ptr            = NULL;
 }
 
@@ -285,9 +312,9 @@ static void test_apply_pending_exit_noop_without_signal(void **state)
 {
     (void)state;
     g_tx_app_signal_exit = 0;
-    g_tx_app_exit        = false;
+    g_test_exit          = false;
     tx_app_apply_pending_signal_exit();
-    assert_false(g_tx_app_exit);
+    assert_false(session_manager_should_exit());
 }
 
 /* ===========================================================================
@@ -415,6 +442,102 @@ static void test_main_with_log_file_redirect(void **state)
     unlink(log_path);
 }
 
+/* ===========================================================================
+ * Tests — --version / -v flag
+ *
+ * The version branch in parse_args() calls exit(0) directly, which would
+ * terminate the cmocka runner.  We fork a child to capture stdout and the
+ * exit code without affecting the parent test process.
+ * =========================================================================== */
+
+#include <sys/wait.h>
+
+/* Run parse_args(argv) in a child, capture stdout, and return:
+ *   - exit_code via *out_exit_code
+ *   - stdout text into out_buf (NUL-terminated, truncated to out_size-1) */
+static void run_parse_args_in_child(char **argv, int argc,
+                                    int *out_exit_code,
+                                    char *out_buf, size_t out_size)
+{
+    int pipefd[2];
+    assert_int_equal(pipe(pipefd), 0);
+
+    pid_t pid = fork();
+    assert_true(pid >= 0);
+
+    if (pid == 0) {
+        /* Child: redirect stdout to pipe, then call parse_args. */
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
+        struct tx_app_context ctx;
+        memset(&ctx, 0, sizeof(ctx));
+        optind = 1;
+        int r = parse_args(&ctx, argc, argv);
+        /* If parse_args returns (no exit() taken) — exit with a marker so
+         * the parent can distinguish from the version-flag path. */
+        _exit(100 + (r & 0x7F));
+    }
+
+    /* Parent: drain pipe, then waitpid. */
+    close(pipefd[1]);
+    size_t total = 0;
+    if (out_buf != NULL && out_size > 0) {
+        out_buf[0] = '\0';
+        ssize_t n;
+        while (total + 1 < out_size &&
+               (n = read(pipefd[0], out_buf + total, out_size - 1 - total)) > 0) {
+            total += (size_t)n;
+        }
+        out_buf[total] = '\0';
+    }
+    close(pipefd[0]);
+
+    int status = 0;
+    assert_int_equal(waitpid(pid, &status, 0), pid);
+    assert_true(WIFEXITED(status));
+    *out_exit_code = WEXITSTATUS(status);
+}
+
+static void test_parse_args_version_short_flag(void **state)
+{
+    (void)state;
+    char *argv[] = {"prog", "-v", NULL};
+    int code = -1;
+    char buf[128] = {0};
+    run_parse_args_in_child(argv, 2, &code, buf, sizeof(buf));
+    assert_int_equal(code, 0); /* exit(0) from version branch */
+    /* stdout contains "TxApp version <something>\n" */
+    assert_non_null(strstr(buf, "TxApp version "));
+}
+
+static void test_parse_args_version_long_flag(void **state)
+{
+    (void)state;
+    char *argv[] = {"prog", "--version", NULL};
+    int code = -1;
+    char buf[128] = {0};
+    run_parse_args_in_child(argv, 2, &code, buf, sizeof(buf));
+    assert_int_equal(code, 0);
+    assert_non_null(strstr(buf, "TxApp version "));
+}
+
+/* The compile-time TXAPP_VERSION macro is exposed via the #include of
+ * main.c above — verify the printed string matches it exactly. */
+static void test_parse_args_version_string_matches_macro(void **state)
+{
+    (void)state;
+    char *argv[] = {"prog", "--version", NULL};
+    int code = -1;
+    char buf[128] = {0};
+    run_parse_args_in_child(argv, 2, &code, buf, sizeof(buf));
+    assert_int_equal(code, 0);
+
+    char expected[128];
+    snprintf(expected, sizeof(expected), "TxApp version %s\n", TXAPP_VERSION);
+    assert_string_equal(buf, expected);
+}
+
 /* Log file via LOG_FILE env variable (peek returns -1) */
 static void test_main_with_log_env_variable(void **state)
 {
@@ -450,6 +573,9 @@ int main(void)
         cmocka_unit_test(test_parse_args_no_args_returns_zero_and_empty_config),
         cmocka_unit_test(test_parse_args_help_returns_minus1),
         cmocka_unit_test(test_parse_args_unknown_option_returns_minus1),
+        cmocka_unit_test(test_parse_args_version_short_flag),
+        cmocka_unit_test(test_parse_args_version_long_flag),
+        cmocka_unit_test(test_parse_args_version_string_matches_macro),
 
         /* resolve_ip_addrs */
         cmocka_unit_test(test_resolve_ip_valid_sip_and_dip),

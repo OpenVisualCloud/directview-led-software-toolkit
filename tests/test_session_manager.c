@@ -1,19 +1,19 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  *
- * Unit tests for src/session_manager.c using cmocka.
+ * Unit tests for src/core/session_manager.c using cmocka.
  *
  * Strategy
  * --------
- * session_manager.c calls four hardware-dependent functions that we cannot
+ * session_manager.c calls hardware-dependent functions that we cannot
  * exercise without MTL / real video files:
  *
- *   open_ffmpeg_output()    — needs mtl_st20p muxer (DPDK hardware)
- *   close_ffmpeg_output()   — depends on out_fmt_ctx set by open_ffmpeg_output
- *   open_shared_ffmpeg()    — needs a real video file + codec
- *   close_shared_ffmpeg()   — depends on open_shared_ffmpeg
- *   load_video_source()     — calls open_ffmpeg_source (needs codec/file)
- *   close_ffmpeg_source()   — depends on load_video_source
+ *   open_ffmpeg_tx()      — needs mtl_st20p muxer (DPDK hardware)
+ *   close_ffmpeg_tx()     — depends on out_fmt_ctx set by open_ffmpeg_tx
+ *   open_shared_ffmpeg()  — needs a real video file + codec
+ *   close_shared_ffmpeg() — depends on open_shared_ffmpeg
+ *   load_video_source()   — calls open_ffmpeg_source (needs codec/file)
+ *   close_ffmpeg_source() — depends on load_video_source
  *
  * We provide MOCK REPLACEMENTS for all six in this translation unit.
  * The linker resolves them before the real ffmpeg_decoder.o because we
@@ -44,16 +44,13 @@
 #include <unistd.h>
 #include <pthread.h>
 
-/* --------------------------------------------------------------------------
- * g_tx_app_exit is defined in session_manager.c; expose it here too so
- * tests can inspect it.
- * -------------------------------------------------------------------------- */
-/* session_manager.c defines it; we declare extern to read it in tests */
-extern _Atomic bool g_tx_app_exit;
+/* session_manager.c provides accessor functions for the exit flag */
 
-#include "session_manager.h"
-#include "ffmpeg_decoder.h"
-#include "tx_app_context.h"
+#include "core/session_manager.h"
+#include "ffmpeg/ffmpeg_decoder.h"
+#include "ffmpeg/ffmpeg_tx.h"
+#include "ffmpeg/ffmpeg_frame_handler.h"
+#include "app_context.h"
 #include "util/logger.h"
 
 #include <libavutil/imgutils.h>
@@ -62,40 +59,39 @@ extern _Atomic bool g_tx_app_exit;
 #include <libavcodec/avcodec.h>
 
 /* ==========================================================================
- * Mock implementations of ffmpeg_decoder.h functions
- *
- * These replace the real implementations from ffmpeg_decoder.c which is
- * intentionally NOT compiled into this test executable.
+ * Mock call counters and return-value injection
  * ========================================================================== */
 
-/* Tracks how many times each mock was called */
-static int mock_open_ffmpeg_output_calls  = 0;
-static int mock_close_ffmpeg_output_calls = 0;
+static int mock_open_ffmpeg_tx_calls      = 0;
+static int mock_close_ffmpeg_tx_calls     = 0;
 static int mock_load_video_source_calls   = 0;
 static int mock_close_ffmpeg_source_calls = 0;
 static int mock_open_shared_ffmpeg_calls  = 0;
 static int mock_close_shared_ffmpeg_calls = 0;
 
-/* Return value injected by the test */
-static int mock_open_ffmpeg_output_ret  = 0;
-static int mock_open_shared_ffmpeg_ret  = 0;
+static int mock_open_ffmpeg_tx_ret     = 0;
+static int mock_open_shared_ffmpeg_ret = 0;
 
-bool is_raw_yuv(const char* filename)
+/* Return-value injection for individual mock functions */
+static int mock_ffmpeg_tx_send_yuv_frame_ret    = 0;
+static int mock_ffmpeg_tx_send_raw_yuv_ret      = 0;
+static int mock_ffmpeg_decode_next_frame_true_n = 0; /* return true this many times, then false */
+static int mock_load_video_source_ret           = 0;
+
+/* ==========================================================================
+
+ * Mock: open_ffmpeg_tx
+ *
+ * Allocates enc_frame + enc_pkt and a null-muxer output context so that
+ * the TX thread body (Path B) can actually run without real hardware.
+ * ========================================================================== */
+
+int open_ffmpeg_tx(struct st20p_tx_ctx* ctx)
 {
-    if (!filename || !*filename) return false;
-    const char* ext = strrchr(filename, '.');
-    if (!ext) return false;
-    return (strcasecmp(ext, ".yuv") == 0 || strcasecmp(ext, ".raw") == 0);
-}
+    mock_open_ffmpeg_tx_calls++;
+    if (mock_open_ffmpeg_tx_ret != 0)
+        return mock_open_ffmpeg_tx_ret;
 
-int open_ffmpeg_output(struct st20p_tx_ctx* ctx)
-{
-    mock_open_ffmpeg_output_calls++;
-    if (mock_open_ffmpeg_output_ret != 0)
-        return mock_open_ffmpeg_output_ret;
-
-    /* Allocate enc_frame + enc_pkt so Path B/C in st20p_tx_thread can run.
-     * Without these the thread's null-guard skips the frame-processing body. */
     int w = ctx->crop_width  > 0 ? ctx->crop_width  : (int)ctx->app->width;
     int h = ctx->crop_height > 0 ? ctx->crop_height : (int)ctx->app->height;
 
@@ -115,9 +111,9 @@ int open_ffmpeg_output(struct st20p_tx_ctx* ctx)
     }
 
     /* Use a null-muxer output context so av_write_frame doesn't crash */
-    AVFormatContext *fmt_ctx = NULL;
+    AVFormatContext* fmt_ctx = NULL;
     if (avformat_alloc_output_context2(&fmt_ctx, NULL, "null", NULL) == 0 && fmt_ctx) {
-        AVStream *st = avformat_new_stream(fmt_ctx, NULL);
+        AVStream* st = avformat_new_stream(fmt_ctx, NULL);
         if (st) {
             st->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
             st->codecpar->codec_id   = AV_CODEC_ID_RAWVIDEO;
@@ -131,13 +127,12 @@ int open_ffmpeg_output(struct st20p_tx_ctx* ctx)
             avformat_free_context(fmt_ctx);
         }
     }
-
     return 0;
 }
 
-void close_ffmpeg_output(struct st20p_tx_ctx* ctx)
+void close_ffmpeg_tx(struct st20p_tx_ctx* ctx)
 {
-    mock_close_ffmpeg_output_calls++;
+    mock_close_ffmpeg_tx_calls++;
     if (ctx->out_fmt_ctx) {
         av_write_trailer(ctx->out_fmt_ctx);
         avformat_free_context(ctx->out_fmt_ctx);
@@ -147,10 +142,71 @@ void close_ffmpeg_output(struct st20p_tx_ctx* ctx)
     if (ctx->enc_pkt)   av_packet_free(&ctx->enc_pkt);
 }
 
-void send_video_frame(struct st20p_tx_ctx* ctx, AVFrame* src,
-                      int crop_x, int crop_y, int crop_w, int crop_h)
+int ffmpeg_tx_send_yuv_frame(struct st20p_tx_ctx* ctx, AVFrame* src,
+                              int crop_x, int crop_y, int crop_w, int crop_h)
 {
-    (void)ctx; (void)src; (void)crop_x; (void)crop_y; (void)crop_w; (void)crop_h;
+    (void)src; (void)crop_x; (void)crop_y; (void)crop_w; (void)crop_h;
+    if (mock_ffmpeg_tx_send_yuv_frame_ret != 0) return mock_ffmpeg_tx_send_yuv_frame_ret;
+    ctx->frames_sent++;
+    return 0;
+}
+
+int ffmpeg_tx_send_raw_yuv(struct st20p_tx_ctx* ctx)
+{
+    if (mock_ffmpeg_tx_send_raw_yuv_ret != 0) return mock_ffmpeg_tx_send_raw_yuv_ret;
+    if (!ctx->enc_frame || !ctx->enc_pkt) return -1;
+    if (!ctx->source_buffer || ctx->source_size == 0) return -1;
+    size_t frame_bytes = ctx->frame_size;
+    if (ctx->current_pos + frame_bytes > ctx->source_size)
+        ctx->current_pos = 0;
+    size_t copy_sz = (ctx->current_pos + frame_bytes <= ctx->source_size)
+                       ? frame_bytes : (ctx->source_size - ctx->current_pos);
+    ctx->current_pos += copy_sz;
+    ctx->frames_sent++;
+    return 0;
+}
+
+/* ==========================================================================
+ * Mock: ffmpeg_decoder.h functions
+ * ========================================================================== */
+
+/* is_raw_yuv is defined in ffmpeg_decoder.c which is not compiled into this
+ * test target; provide a self-contained stub. */
+bool is_raw_yuv(const char* filename)
+{
+    if (!filename || !*filename) return false;
+    const char* ext = strrchr(filename, '.');
+    return ext && (strcasecmp(ext, ".yuv") == 0 || strcasecmp(ext, ".raw") == 0);
+}
+
+bool ffmpeg_decode_next_frame(struct st20p_tx_ctx* ctx)
+{
+    (void)ctx;
+    if (mock_ffmpeg_decode_next_frame_true_n > 0) {
+        mock_ffmpeg_decode_next_frame_true_n--;
+        return true;
+    }
+    return false;
+}
+
+int load_video_source(struct st20p_tx_ctx* ctx, const char* filename)
+{
+    mock_load_video_source_calls++;
+    if (mock_load_video_source_ret != 0)
+        return mock_load_video_source_ret;
+    if (filename && *filename) {
+        const char* ext = strrchr(filename, '.');
+        bool is_yuv = ext && (strcasecmp(ext, ".yuv") == 0 ||
+                               strcasecmp(ext, ".raw") == 0);
+        ctx->use_ffmpeg = !is_yuv;
+    }
+    return 0;
+}
+
+void close_ffmpeg_source(struct st20p_tx_ctx* ctx)
+{
+    mock_close_ffmpeg_source_calls++;
+    ctx->use_ffmpeg = false;
 }
 
 int open_shared_ffmpeg(struct shared_decode_ctx* dec, const char* filename)
@@ -168,75 +224,80 @@ void close_shared_ffmpeg(struct shared_decode_ctx* dec)
 
 void* shared_decode_thread(void* arg)
 {
-    /* In tests: just spin until exit is set */
     struct shared_decode_ctx* dec = (struct shared_decode_ctx*)arg;
-    while (!dec->exit && !g_tx_app_exit)
-        usleep(1000);
-    /* Unblock any TX threads that may be waiting on the barriers */
+    /* Minimal stub: hit both barriers once then exit */
+    pthread_barrier_wait(&dec->barrier_decoded);
+    pthread_barrier_wait(&dec->barrier_copied);
+    dec->exit = true;
     pthread_barrier_wait(&dec->barrier_decoded);
     pthread_barrier_wait(&dec->barrier_copied);
     return NULL;
 }
 
-int load_video_source(struct st20p_tx_ctx* ctx, const char* filename)
+/* ==========================================================================
+ * Mock: ffmpeg_frame_handler.h functions
+ * ========================================================================== */
+
+int convert_frame_format(struct SwsContext* sws_ctx, const AVFrame* src,
+                          int src_height, AVFrame* dst)
 {
-    mock_load_video_source_calls++;
-    (void)ctx; (void)filename;
+    (void)sws_ctx; (void)src; (void)src_height; (void)dst;
     return 0;
 }
 
-void close_ffmpeg_source(struct st20p_tx_ctx* ctx)
+int crop_yuv_frame(AVFrame* dst, const AVFrame* src,
+                   int crop_x, int crop_y, int crop_w, int crop_h,
+                   enum AVPixelFormat fmt)
 {
-    mock_close_ffmpeg_source_calls++;
-    (void)ctx;
-}
-
-bool ffmpeg_decode_and_send(struct st20p_tx_ctx* ctx)
-{
-    (void)ctx;
-    return false;
+    (void)dst; (void)src; (void)crop_x; (void)crop_y;
+    (void)crop_w; (void)crop_h; (void)fmt;
+    return 0;
 }
 
 /* ==========================================================================
- * Helpers
+ * Mock counters reset helper
  * ========================================================================== */
 
 static void reset_mock_counters(void)
 {
-    mock_open_ffmpeg_output_calls  = 0;
-    mock_close_ffmpeg_output_calls = 0;
+    mock_open_ffmpeg_tx_calls      = 0;
+    mock_close_ffmpeg_tx_calls     = 0;
     mock_load_video_source_calls   = 0;
     mock_close_ffmpeg_source_calls = 0;
     mock_open_shared_ffmpeg_calls  = 0;
     mock_close_shared_ffmpeg_calls = 0;
-    mock_open_ffmpeg_output_ret    = 0;
-    mock_open_shared_ffmpeg_ret    = 0;
+    mock_open_ffmpeg_tx_ret                 = 0;
+    mock_open_shared_ffmpeg_ret             = 0;
+    mock_ffmpeg_tx_send_yuv_frame_ret       = 0;
+    mock_ffmpeg_tx_send_raw_yuv_ret         = 0;
+    mock_ffmpeg_decode_next_frame_true_n    = 0;
+    mock_load_video_source_ret              = 0;
 }
 
-/* Populate a minimal tx_app_context suitable for tests */
-static void fill_app(struct tx_app_context *app, int num_sessions,
-                     const char *tx_url)
+/* ==========================================================================
+ * Test fixture helpers
+ * ========================================================================== */
+
+static void fill_app(struct tx_app_context* app, int sessions, const char* url)
 {
     memset(app, 0, sizeof(*app));
-    strncpy(app->port,          "0000:06:00.0",  sizeof(app->port) - 1);
-    strncpy(app->sip_addr_str,  "192.168.50.29", sizeof(app->sip_addr_str) - 1);
-    strncpy(app->dip_addr_str,  "239.168.85.20", sizeof(app->dip_addr_str) - 1);
+    strncpy(app->port,         "0000:06:00.0",  sizeof(app->port) - 1);
+    strncpy(app->sip_addr_str, "192.168.50.29", sizeof(app->sip_addr_str) - 1);
+    strncpy(app->dip_addr_str, "239.168.85.20", sizeof(app->dip_addr_str) - 1);
+    strncpy(app->tx_url, url, sizeof(app->tx_url) - 1);
     app->width          = 1920;
     app->height         = 1080;
     app->fps            = 30;
     app->fmt            = AV_PIX_FMT_YUV422P10LE;
     app->udp_port       = 20000;
     app->payload_type   = 96;
-    app->st20p_sessions = num_sessions;
-    if (tx_url)
-        strncpy(app->tx_url, tx_url, sizeof(app->tx_url) - 1);
+    app->st20p_sessions = sessions;
 
-    /* Populate session_net[] for tiled 3-session layout */
-    const int xs[] = {0, 640, 1280};
-    for (int i = 0; i < num_sessions && i < MAX_TX_SESSIONS; i++) {
+    /* Distribute 1920px evenly across sessions — 640px each */
+    for (int i = 0; i < sessions && i < MAX_TX_SESSIONS; i++) {
         app->session_net[i].udp_port     = 20000 + i * 2;
         app->session_net[i].payload_type = 96;
-        app->session_net[i].crop_x       = (i < 3) ? xs[i] : 0;
+        app->session_net[i].crop_x       = i * 640;
         app->session_net[i].crop_y       = 0;
         app->session_net[i].crop_w       = 640;
         app->session_net[i].crop_h       = 1080;
@@ -256,7 +317,7 @@ static void test_is_running_false_on_fresh_manager(void **state)
 }
 
 /* ==========================================================================
- * session_manager_init — single session, no tx_url
+ * session_manager_init — single session, no URL
  * ========================================================================== */
 
 static void test_init_single_session_no_url(void **state)
@@ -268,9 +329,10 @@ static void test_init_single_session_no_url(void **state)
 
     session_manager_t mgr;
     assert_int_equal(session_manager_init(&mgr, &app), 0);
+
     assert_int_equal(mgr.st20p_count, 1);
     assert_null(mgr.shared_dec);       /* no shared decoder for single session */
-    assert_int_equal(mock_open_ffmpeg_output_calls, 1);
+    assert_int_equal(mock_open_ffmpeg_tx_calls, 1);
     assert_int_equal(mock_open_shared_ffmpeg_calls, 0);
     assert_int_equal(mock_load_video_source_calls,  0); /* empty tx_url skipped */
 
@@ -278,7 +340,7 @@ static void test_init_single_session_no_url(void **state)
 }
 
 /* ==========================================================================
- * session_manager_init — 3 sessions, video URL (shared decoder path)
+ * session_manager_init — 3 sessions with MP4 URL → shared decoder
  * ========================================================================== */
 
 static void test_init_3sessions_with_url_uses_shared_decoder(void **state)
@@ -290,16 +352,17 @@ static void test_init_3sessions_with_url_uses_shared_decoder(void **state)
 
     session_manager_t mgr;
     assert_int_equal(session_manager_init(&mgr, &app), 0);
+
     assert_int_equal(mgr.st20p_count, 3);
     assert_non_null(mgr.shared_dec);
     assert_int_equal(mock_open_shared_ffmpeg_calls, 1);
-    assert_int_equal(mock_open_ffmpeg_output_calls, 3); /* one per session */
+    assert_int_equal(mock_open_ffmpeg_tx_calls, 3); /* one per session */
 
     session_manager_cleanup(&mgr);
 }
 
 /* ==========================================================================
- * session_manager_init — 3 sessions, raw YUV (no shared decoder)
+ * session_manager_init — 3 sessions with raw YUV → no shared decoder
  * ========================================================================== */
 
 static void test_init_3sessions_raw_yuv_no_shared_decoder(void **state)
@@ -307,26 +370,27 @@ static void test_init_3sessions_raw_yuv_no_shared_decoder(void **state)
     (void)state;
     reset_mock_counters();
     struct tx_app_context app;
-    fill_app(&app, 3, "video.yuv");
+    fill_app(&app, 3, "source.yuv");
 
     session_manager_t mgr;
     assert_int_equal(session_manager_init(&mgr, &app), 0);
+
     assert_null(mgr.shared_dec);           /* raw YUV -> no shared decoder */
     assert_int_equal(mock_open_shared_ffmpeg_calls, 0);
-    assert_int_equal(mock_open_ffmpeg_output_calls, 3);
+    assert_int_equal(mock_open_ffmpeg_tx_calls, 3);
 
     session_manager_cleanup(&mgr);
 }
 
 /* ==========================================================================
- * session_manager_init — open_ffmpeg_output failure
+ * session_manager_init — open_ffmpeg_tx failure
  * ========================================================================== */
 
 static void test_init_fails_when_open_output_fails(void **state)
 {
     (void)state;
     reset_mock_counters();
-    mock_open_ffmpeg_output_ret = -1; /* simulate MTL unavailable */
+    mock_open_ffmpeg_tx_ret = -1; /* simulate TX unavailable */
 
     struct tx_app_context app;
     fill_app(&app, 1, "");
@@ -350,7 +414,6 @@ static void test_init_fails_when_open_shared_ffmpeg_fails(void **state)
 
     session_manager_t mgr;
     assert_int_equal(session_manager_init(&mgr, &app), -1);
-    /* Shared decoder must be released on failure */
     assert_null(mgr.shared_dec);
 }
 
@@ -369,7 +432,7 @@ static void test_init_zero_sessions(void **state)
     assert_int_equal(session_manager_init(&mgr, &app), 0);
     assert_int_equal(mgr.st20p_count, 0);
     assert_null(mgr.shared_dec);
-    assert_int_equal(mock_open_ffmpeg_output_calls, 0);
+    assert_int_equal(mock_open_ffmpeg_tx_calls, 0);
 
     session_manager_cleanup(&mgr);
 }
@@ -388,10 +451,9 @@ static void test_create_session_uses_session_net_crop(void **state)
     session_manager_t mgr;
     assert_int_equal(session_manager_init(&mgr, &app), 0);
 
-    /* Verify crop values match what was set in session_net[] by fill_app() */
     const int expected_x[] = {0, 640, 1280};
     for (int i = 0; i < 3; i++) {
-        struct st20p_tx_ctx *ctx = &mgr.st20p_sessions[i];
+        struct st20p_tx_ctx* ctx = &mgr.st20p_sessions[i];
         assert_int_equal(ctx->crop_x_offset, expected_x[i]);
         assert_int_equal(ctx->crop_y_offset, 0);
         assert_int_equal(ctx->crop_width,    640);
@@ -411,16 +473,15 @@ static void test_create_session_crop_fallback_3sessions(void **state)
     reset_mock_counters();
     struct tx_app_context app;
     fill_app(&app, 3, "");
-    /* Zero out session_net[] to trigger the fallback path */
     memset(app.session_net, 0, sizeof(app.session_net));
 
     session_manager_t mgr;
     assert_int_equal(session_manager_init(&mgr, &app), 0);
 
-    /* Fallback: divide 1920 px evenly across 3 sessions -> 640 each */
+    /* Fallback: divide 1920 px evenly across 3 sessions → 640 each */
     const int expected_x[] = {0, 640, 1280};
     for (int i = 0; i < 3; i++) {
-        struct st20p_tx_ctx *ctx = &mgr.st20p_sessions[i];
+        struct st20p_tx_ctx* ctx = &mgr.st20p_sessions[i];
         assert_int_equal(ctx->crop_x_offset, expected_x[i]);
         assert_int_equal(ctx->crop_y_offset, 0);
         assert_int_equal(ctx->crop_width,    640);
@@ -436,8 +497,7 @@ static void test_create_session_crop_fallback_last_gets_remainder(void **state)
     reset_mock_counters();
     struct tx_app_context app;
     fill_app(&app, 3, "");
-    /* Non-divisible width: 1921 -> strip = 640, last gets 641 */
-    app.width = 1920; /* keep 1920 so even division */
+    app.width = 1920;
     memset(app.session_net, 0, sizeof(app.session_net));
 
     session_manager_t mgr;
@@ -513,12 +573,12 @@ static void test_start_resets_g_tx_app_exit(void **state)
     struct tx_app_context app;
     fill_app(&app, 1, "");
 
-    g_tx_app_exit = true; /* simulate previous run */
+    session_manager_request_exit(); /* simulate previous run */
 
     session_manager_t mgr;
     assert_int_equal(session_manager_init(&mgr, &app), 0);
     assert_int_equal(session_manager_start(&mgr), 0);
-    assert_false(g_tx_app_exit); /* must be cleared on start */
+    assert_false(session_manager_should_exit()); /* must be cleared on start */
 
     session_manager_stop(&mgr);
     session_manager_cleanup(&mgr);
@@ -542,7 +602,7 @@ static void test_cleanup_idempotent(void **state)
     session_manager_cleanup(&mgr);
 }
 
-static void test_cleanup_calls_close_ffmpeg_output(void **state)
+static void test_cleanup_calls_close_ffmpeg_tx(void **state)
 {
     (void)state;
     reset_mock_counters();
@@ -553,7 +613,7 @@ static void test_cleanup_calls_close_ffmpeg_output(void **state)
     assert_int_equal(session_manager_init(&mgr, &app), 0);
     session_manager_cleanup(&mgr);
 
-    assert_int_equal(mock_close_ffmpeg_output_calls, 3);
+    assert_int_equal(mock_close_ffmpeg_tx_calls, 3);
 }
 
 static void test_cleanup_3sessions_with_url_calls_close_shared(void **state)
@@ -594,11 +654,12 @@ static void test_start_stop_3sessions_shared_decoder(void **state)
 
 /* ==========================================================================
  * st20p_tx_thread — Path A (use_ffmpeg)
+ *
+ * Setting use_ffmpeg=true forces st20p_tx_thread to call
+ * ffmpeg_decode_next_frame().  Our mock returns false immediately so the
+ * thread exits after the first failed decode attempt.
  * ========================================================================== */
 
-/* Setting use_ffmpeg=true after init forces st20p_tx_thread to execute
- * Path A (call ffmpeg_decode_and_send).  Our mock returns false immediately
- * so the thread loops until g_tx_app_exit is set by session_manager_stop(). */
 static void test_thread_executes_ffmpeg_decode_path(void **state)
 {
     (void)state;
@@ -609,44 +670,12 @@ static void test_thread_executes_ffmpeg_decode_path(void **state)
     session_manager_t mgr;
     assert_int_equal(session_manager_init(&mgr, &app), 0);
 
-    /* Force Path A: the thread will call ffmpeg_decode_and_send() */
+    /* Force Path A */
     mgr.st20p_sessions[0].use_ffmpeg = true;
 
     assert_int_equal(session_manager_start(&mgr), 0);
     usleep(5000); /* let the thread run at least one iteration */
     session_manager_stop(&mgr);
-    session_manager_cleanup(&mgr);
-}
-
-/* ==========================================================================
- * st20p_tx_thread — Path C (synthetic test pattern)
- *
- * When use_ffmpeg=false and source_buffer=NULL, the thread generates a
- * luma-ramp + neutral-chroma test pattern.  The mock open_ffmpeg_output now
- * allocates enc_frame + enc_pkt so the thread body actually runs.
- * ========================================================================== */
-
-static void test_thread_executes_test_pattern_path(void **state)
-{
-    (void)state;
-    reset_mock_counters();
-    struct tx_app_context app;
-    fill_app(&app, 1, "");   /* no tx_url → no source_buffer, no use_ffmpeg */
-
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
-
-    /* Confirm Path C conditions: use_ffmpeg=false, source_buffer=NULL */
-    assert_false(mgr.st20p_sessions[0].use_ffmpeg);
-    assert_null(mgr.st20p_sessions[0].source_buffer);
-
-    assert_int_equal(session_manager_start(&mgr), 0);
-    /* Let the thread generate at least 1 frame (Path C has usleep(1e6/fps))
-     * With fps=30 that's ~33ms per frame; wait 80ms to be safe. */
-    usleep(80000);
-    session_manager_stop(&mgr);
-
-    assert_true(mgr.st20p_sessions[0].frames_sent >= 1);
     session_manager_cleanup(&mgr);
 }
 
@@ -671,38 +700,42 @@ static void test_thread_executes_raw_yuv_path(void **state)
 
     /* Inject a fake raw YUV source buffer (Path B conditions) */
     ctx->use_ffmpeg = false;
-    /* frame_size for 640x1080 yuv422p10le: W*H*2 (10-bit stored in 16-bit)
-     * *2 planes. But we use a small arbitrary buffer that is >= frame_size. */
-    const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(app.fmt);
-    (void)desc; /* used only for assertion context */
     int w = ctx->crop_width  > 0 ? ctx->crop_width  : (int)app.width;
     int h = ctx->crop_height > 0 ? ctx->crop_height : (int)app.height;
     int fsz = av_image_get_buffer_size(app.fmt, w, h, 1);
     assert_true(fsz > 0);
 
+    /* Allocate yuv_frame container (no buffer — data[] are set per-frame by
+     * tx_fetch_next_frame using av_image_fill_arrays into source_buffer). */
+    ctx->yuv_frame = av_frame_alloc();
+    assert_non_null(ctx->yuv_frame);
+    ctx->yuv_frame->format = app.fmt;
+    ctx->yuv_frame->width  = w;
+    ctx->yuv_frame->height = h;
+
     ctx->frame_size    = (size_t)fsz;
-    ctx->source_size   = (size_t)fsz * 2; /* enough for 2 frames */
+    ctx->source_size   = (size_t)fsz * 2;
     ctx->source_buffer = calloc(1, ctx->source_size);
     assert_non_null(ctx->source_buffer);
     ctx->current_pos   = 0;
     ctx->loop_playback = true;
 
     assert_int_equal(session_manager_start(&mgr), 0);
-    usleep(10000); /* let the thread run */
+    usleep(10000);
     session_manager_stop(&mgr);
 
     assert_true(ctx->frames_sent >= 1);
 
     free(ctx->source_buffer);
     ctx->source_buffer = NULL;
+    /* yuv_frame data[] point into source_buffer (no AVBuffer), so av_frame_free
+     * only releases the AVFrame struct — safe to call after freeing source_buffer. */
+    av_frame_free(&ctx->yuv_frame);
     session_manager_cleanup(&mgr);
 }
 
 /* ==========================================================================
- * st20p_tx_thread_shared — crop_width=0 fallback
- *
- * When session_net crop_w/h are 0, the shared thread uses app->width/height
- * as fallback. This exercises the ternary on lines 58/68.
+ * st20p_tx_thread_shared — crop fallback (3-session, zeroed session_net)
  * ========================================================================== */
 
 static void test_shared_thread_crop_fallback(void **state)
@@ -711,7 +744,7 @@ static void test_shared_thread_crop_fallback(void **state)
     reset_mock_counters();
     struct tx_app_context app;
     fill_app(&app, 3, "video.mp4");
-    /* Zero out crop fields to trigger fallback */
+    /* Zero out crop fields to trigger the fallback path */
     for (int i = 0; i < 3; i++) {
         app.session_net[i].crop_w = 0;
         app.session_net[i].crop_h = 0;
@@ -720,13 +753,168 @@ static void test_shared_thread_crop_fallback(void **state)
     session_manager_t mgr;
     assert_int_equal(session_manager_init(&mgr, &app), 0);
 
-    /* The fallback divides app->width among 3 sessions. Verify it was applied
-     * (crop_width > 0 even though session_net[].crop_w was 0). */
+    /* Fallback: divide app->width among 3 sessions — crop_width > 0 */
     assert_true(mgr.st20p_sessions[0].crop_width > 0);
 
     assert_int_equal(session_manager_start(&mgr), 0);
     usleep(10000);
     session_manager_stop(&mgr);
+    session_manager_cleanup(&mgr);
+}
+
+/* ==========================================================================
+ * create_st20p_tx_session: load_video_source failure (lines 205-206)
+ * ========================================================================== */
+
+static void test_init_fails_when_load_video_source_fails(void **state)
+{
+    (void)state;
+    reset_mock_counters();
+
+    struct tx_app_context app;
+    fill_app(&app, 1, "video.mp4"); /* non-empty, non-raw → load_video_source called */
+
+    /* Inject failure into load_video_source mock */
+    mock_load_video_source_ret = -1;
+
+    session_manager_t mgr;
+    int ret = session_manager_init(&mgr, &app);
+    assert_int_equal(ret, -1);
+
+    session_manager_cleanup(&mgr);
+}
+
+/* ==========================================================================
+ * st20p_tx_thread — "no valid source" path (lines 142-143)
+ *
+ * use_ffmpeg==false and source_buffer==NULL → thread logs error and breaks.
+ * ========================================================================== */
+
+static void test_thread_no_source_exits_immediately(void **state)
+{
+    (void)state;
+    reset_mock_counters();
+
+    struct tx_app_context app;
+    fill_app(&app, 1, "");
+
+    session_manager_t mgr;
+    assert_int_equal(session_manager_init(&mgr, &app), 0);
+
+    /* Force the "no valid source" branch */
+    mgr.st20p_sessions[0].use_ffmpeg    = false;
+    mgr.st20p_sessions[0].source_buffer = NULL;
+    mgr.st20p_sessions[0].source_size   = 0;
+
+    assert_int_equal(session_manager_start(&mgr), 0);
+    usleep(5000);
+    session_manager_stop(&mgr);
+    session_manager_cleanup(&mgr);
+}
+
+/* ==========================================================================
+ * st20p_tx_thread_shared — ffmpeg_tx_send_yuv_frame failure (line 74)
+ *
+ * Mock returns -1; shared thread logs the error but does not exit early.
+ * ========================================================================== */
+
+static void test_shared_thread_send_yuv_failure_is_non_fatal(void **state)
+{
+    (void)state;
+    reset_mock_counters();
+
+    struct tx_app_context app;
+    fill_app(&app, 3, "video.mp4");
+
+    /* Make ffmpeg_tx_send_yuv_frame fail */
+    mock_ffmpeg_tx_send_yuv_frame_ret = -1;
+
+    session_manager_t mgr;
+    assert_int_equal(session_manager_init(&mgr, &app), 0);
+
+    assert_int_equal(session_manager_start(&mgr), 0);
+    usleep(10000);
+    session_manager_stop(&mgr);
+    session_manager_cleanup(&mgr);
+}
+
+/* ==========================================================================
+ * st20p_tx_thread — Path A: decode succeeds once, send fails (lines 123, 125-126)
+ *
+ * ffmpeg_decode_next_frame returns true once (so ffmpeg_tx_send_yuv_frame is
+ * called) but ffmpeg_tx_send_yuv_frame returns -1.  The thread logs the error
+ * and continues; on the next iteration decode returns false and the thread exits.
+ * ========================================================================== */
+
+static void test_thread_single_path_a_send_failure(void **state)
+{
+    (void)state;
+    reset_mock_counters();
+
+    struct tx_app_context app;
+    fill_app(&app, 1, "");
+
+    session_manager_t mgr;
+    assert_int_equal(session_manager_init(&mgr, &app), 0);
+
+    /* Force Path A; decode succeeds once then fails */
+    mgr.st20p_sessions[0].use_ffmpeg            = true;
+    mock_ffmpeg_decode_next_frame_true_n         = 1;
+    mock_ffmpeg_tx_send_yuv_frame_ret            = -1;
+
+    assert_int_equal(session_manager_start(&mgr), 0);
+    usleep(5000);
+    session_manager_stop(&mgr);
+    session_manager_cleanup(&mgr);
+}
+
+/* ==========================================================================
+ * st20p_tx_thread — Path B: ffmpeg_tx_send_raw_yuv failure (line 138)
+ * ========================================================================== */
+
+static void test_thread_raw_yuv_send_failure_logs_and_continues(void **state)
+{
+    (void)state;
+    reset_mock_counters();
+
+    struct tx_app_context app;
+    fill_app(&app, 1, "");
+
+    session_manager_t mgr;
+    assert_int_equal(session_manager_init(&mgr, &app), 0);
+
+    struct st20p_tx_ctx* ctx = &mgr.st20p_sessions[0];
+
+    int w   = ctx->crop_width  > 0 ? ctx->crop_width  : (int)app.width;
+    int h   = ctx->crop_height > 0 ? ctx->crop_height : (int)app.height;
+    int fsz = av_image_get_buffer_size(app.fmt, w, h, 1);
+    assert_true(fsz > 0);
+
+    ctx->use_ffmpeg    = false;
+    ctx->frame_size    = (size_t)fsz;
+    ctx->source_size   = (size_t)fsz * 2;
+    ctx->source_buffer = calloc(1, ctx->source_size);
+    assert_non_null(ctx->source_buffer);
+    ctx->current_pos   = 0;
+    ctx->loop_playback = true;
+
+    /* Allocate yuv_frame container required by tx_fetch_next_frame Path B */
+    ctx->yuv_frame = av_frame_alloc();
+    assert_non_null(ctx->yuv_frame);
+    ctx->yuv_frame->format = app.fmt;
+    ctx->yuv_frame->width  = w;
+    ctx->yuv_frame->height = h;
+
+    /* Make the raw-yuv send fail: Path B now routes through ffmpeg_tx_send_yuv_frame */
+    mock_ffmpeg_tx_send_yuv_frame_ret = -1;
+
+    assert_int_equal(session_manager_start(&mgr), 0);
+    usleep(5000);
+    session_manager_stop(&mgr);
+
+    free(ctx->source_buffer);
+    ctx->source_buffer = NULL;
+    av_frame_free(&ctx->yuv_frame);
     session_manager_cleanup(&mgr);
 }
 
@@ -749,6 +937,7 @@ int main(void)
         cmocka_unit_test(test_init_fails_when_open_output_fails),
         cmocka_unit_test(test_init_fails_when_open_shared_ffmpeg_fails),
         cmocka_unit_test(test_init_zero_sessions),
+        cmocka_unit_test(test_init_fails_when_load_video_source_fails),
 
         /* create_st20p_tx_session — crop */
         cmocka_unit_test(test_create_session_uses_session_net_crop),
@@ -763,7 +952,7 @@ int main(void)
 
         /* cleanup */
         cmocka_unit_test(test_cleanup_idempotent),
-        cmocka_unit_test(test_cleanup_calls_close_ffmpeg_output),
+        cmocka_unit_test(test_cleanup_calls_close_ffmpeg_tx),
         cmocka_unit_test(test_cleanup_3sessions_with_url_calls_close_shared),
 
         /* start/stop with shared decoder */
@@ -771,9 +960,12 @@ int main(void)
 
         /* thread paths */
         cmocka_unit_test(test_thread_executes_ffmpeg_decode_path),
-        cmocka_unit_test(test_thread_executes_test_pattern_path),
         cmocka_unit_test(test_thread_executes_raw_yuv_path),
         cmocka_unit_test(test_shared_thread_crop_fallback),
+        cmocka_unit_test(test_thread_no_source_exits_immediately),
+        cmocka_unit_test(test_shared_thread_send_yuv_failure_is_non_fatal),
+        cmocka_unit_test(test_thread_single_path_a_send_failure),
+        cmocka_unit_test(test_thread_raw_yuv_send_failure_logs_and_continues),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

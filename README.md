@@ -33,7 +33,9 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
     - Clone Media-Transport-Library
       ```
       git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git
+      cd Media-Transport-Library
       git checkout v26.01
+      cd ..
       export mtl_source_code=${PWD}/Media-Transport-Library
       ```
     - [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/v26.01/doc/build.md#2-dpdk-build-and-install)
@@ -47,12 +49,24 @@ Once all dependencies are installed, clone this repository and run the build scr
 ```bash
 git clone https://github.com/intel-innersource/applications.media.ledvideowall.gardencove-next.transmitter-app
 cd applications.media.ledvideowall.gardencove-next.transmitter-app
-./build.sh
+bash scripts/build.sh
+```
+
+To build with MTL TX support enabled:
+
+```bash
+bash scripts/build.sh -Denable_mtl_tx=true
 ```
 
 The built binary will be available at `build/TxApp`.
 
 ## Usage
+
+### Binding Ethernet Controller to DPDK PMD and Hugepage Setup 
+
+- Ensure VFIO group exists [follow](#vfio-group-setup)
+- [DPDK PMD Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/main/doc/run.md#3-dpdk-pmd-setup)
+- [Hugepage Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/main/doc/run.md#4-setup-hugepage)
 
 ### JSON Configuration
 
@@ -126,6 +140,21 @@ When `log_file` is set, log output is written to that file in addition to the co
 ./build/TxApp --config config/tx_1session.json
 ```
 
+## Command-Line Options
+
+| Option | Description |
+|--------|-------------|
+| `-C, --config <file>` | JSON config file (required) |
+| `-v, --version` | Show version and exit |
+| `--help` | Show help message |
+
+#### Show Version
+```bash
+./build/TxApp --version
+# or
+./build/TxApp -v
+```
+
 ## Supported Formats
 
 ### Video Formats
@@ -150,6 +179,26 @@ When `log_file` is set, log output is written to that file in addition to the co
 - **Zero-copy Design**: Minimal memory copying
 - **Hardware Acceleration**: Uses MTL's hardware features
 - **Efficient Threading**: Minimal context switching
+
+### Running Unit Tests
+
+Install dependencies if not present
+```
+sudo apt install libcmocka-dev
+pip install gcovr
+```
+
+To build and run all unit tests with coverage:
+
+```bash
+bash scripts/test.sh
+```
+
+To run tests without generating a coverage report:
+
+```bash
+bash scripts/test.sh --no-coverage
+```
 
 ## Troubleshooting
 
