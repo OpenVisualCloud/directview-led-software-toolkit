@@ -68,10 +68,10 @@ runs:
         fi
         echo "All required system libraries present."
 
-    - name: Check pkg-config runtime dependencies
+    - name: Check build dependencies via pkg-config
       shell: bash
       run: |
-        echo "===== pkg-config Runtime Dependency Check ====="
+        echo "===== Build Dependency Check (pkg-config) ====="
         if ! command -v pkg-config &>/dev/null; then
           echo "ERROR: pkg-config not found"
           exit 1
@@ -89,10 +89,10 @@ runs:
           fi
         done
         if [ -n "$MISSING" ]; then
-          echo "ERROR: Missing pkg-config dependencies:$MISSING"
+          echo "ERROR: Missing build dependencies (dev libraries not installed):$MISSING"
           exit 1
         fi
-        echo "All required pkg-config dependencies present."
+        echo "All required build dependencies present."
 
     - name: Check FFmpeg MTL plugin in avdevices
       shell: bash
