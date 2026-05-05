@@ -18,8 +18,9 @@ runs:
           echo "ERROR: dvledtx not found after FFMPEG build!"
           exit 1
         fi
-        cp ./build/dvledtx ./build/dvledtx-ffmpeg
-        echo "FFMPEG build saved: $(file ./build/dvledtx-ffmpeg)"
+        mkdir -p ./bins
+        cp ./build/dvledtx ./bins/dvledtx-ffmpeg
+        echo "FFMPEG build saved: $(file ./bins/dvledtx-ffmpeg)"
 
     - name: Build with MTL TX APIs
       shell: bash
@@ -30,8 +31,9 @@ runs:
           echo "ERROR: dvledtx not found after MTL build!"
           exit 1
         fi
-        cp ./build/dvledtx ./build/dvledtx-mtl
-        echo "MTL build saved: $(file ./build/dvledtx-mtl)"
+        mkdir -p ./bins
+        cp ./build/dvledtx ./bins/dvledtx-mtl
+        echo "MTL build saved: $(file ./bins/dvledtx-mtl)"
 
     - name: Binary size and symbol check
       shell: bash
@@ -39,7 +41,7 @@ runs:
         REPORT_DIR="$GITHUB_WORKSPACE/reports"
         mkdir -p "$REPORT_DIR"
 
-        for BINARY in ./build/dvledtx-ffmpeg ./build/dvledtx-mtl; do
+        for BINARY in ./bins/dvledtx-ffmpeg ./bins/dvledtx-mtl; do
           NAME=$(basename "$BINARY")
           echo "" | tee -a "$REPORT_DIR/binary-report.txt"
           echo "===== $NAME: Binary Size =====" | tee -a "$REPORT_DIR/binary-report.txt"
@@ -55,4 +57,3 @@ runs:
         done
 
         echo "Binary report saved to $REPORT_DIR/binary-report.txt"
-

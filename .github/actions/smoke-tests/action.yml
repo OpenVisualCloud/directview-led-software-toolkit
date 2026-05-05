@@ -15,7 +15,7 @@ runs:
         REPORT_DIR="$GITHUB_WORKSPACE/reports"
         mkdir -p "$REPORT_DIR"
 
-        for BINARY in ./build/dvledtx-ffmpeg ./build/dvledtx-mtl; do
+        for BINARY in ./bins/dvledtx-ffmpeg ./bins/dvledtx-mtl; do
           NAME=$(basename "$BINARY")
           echo "===== Smoke Test: $NAME ====="
           OUTFILE="$REPORT_DIR/smoke-test-${NAME}.txt"
