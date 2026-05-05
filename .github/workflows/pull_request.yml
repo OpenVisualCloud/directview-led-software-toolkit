@@ -16,9 +16,28 @@ on:
   workflow_dispatch:
 
 jobs:
+  environment-check:
+    name: Environment Check
+    runs-on: self-hosted
+
+    steps:
+      - name: Clean up previous run
+        run: |
+          find "${{ github.workspace }}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Environment check
+        uses: ./.github/actions/environment-check
+
   build:
     name: Pull Request
     runs-on: self-hosted
+    needs: [environment-check]
 
     steps:
       - name: Clean up previous run
@@ -32,9 +51,6 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-
-      - name: Environment check
-        uses: ./.github/actions/environment-check
 
       - name: Build dvledtx
         uses: ./.github/actions/build-dvledtx
@@ -53,6 +69,7 @@ jobs:
   unit-tests:
     name: Unit Tests
     runs-on: self-hosted
+    needs: [build]
 
     steps:
       - name: Clean up previous run
@@ -64,9 +81,6 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-
-      - name: Environment check
-        uses: ./.github/actions/environment-check
 
       - name: Run unit tests
         uses: ./.github/actions/unit-tests
@@ -82,6 +96,7 @@ jobs:
   static-analysis:
     name: Static Analysis
     runs-on: self-hosted
+    needs: [environment-check]
 
     steps:
       - name: Clean up previous run
@@ -93,9 +108,6 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-
-      - name: Environment check
-        uses: ./.github/actions/environment-check
 
       - name: Static analysis
         uses: ./.github/actions/static-analysis

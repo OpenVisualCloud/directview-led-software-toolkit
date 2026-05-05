@@ -49,6 +49,25 @@ runs:
         fi
         echo "All required pip packages present."
 
+    - name: Check static analysis tools
+      shell: bash
+      run: |
+        echo "===== Static Analysis Tools Check ====="
+        MISSING=""
+        for TOOL in cppcheck flawfinder shellcheck codespell; do
+          if command -v "$TOOL" &>/dev/null; then
+            echo "  [OK] $TOOL ($(command -v "$TOOL"))"
+          else
+            echo "  [MISSING] $TOOL"
+            MISSING="$MISSING $TOOL"
+          fi
+        done
+        if [ -n "$MISSING" ]; then
+          echo "ERROR: Missing static analysis tools:$MISSING"
+          exit 1
+        fi
+        echo "All required static analysis tools present."
+
     - name: Check system libraries
       shell: bash
       run: |
