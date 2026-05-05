@@ -123,3 +123,11 @@ jobs:
           name: daily-build-reports-${{ github.run_id }}
           path: ${{ github.workspace }}/reports/
           retention-days: 30
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: dvledtx-binary-${{ github.run_id }}
+          path: build/dvledtx
+          retention-days: 30

@@ -55,6 +55,14 @@ jobs:
           fi
           echo "Build with MTL TX APIs succeess $(file ./build/dvledtx)"
 
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dvledtx-binary-${{ github.run_id }}
+          path: build/dvledtx
+          retention-days: 30
+
   unit-tests:
     name: Unit Tests
     runs-on: self-hosted
@@ -63,9 +71,18 @@ jobs:
       - name: Execute Unit Tests
         run: |
           echo "Executing Unit Tests..."
-          ./scripts/test.sh
+          mkdir -p "$GITHUB_WORKSPACE/test-reports"
+          ./scripts/test.sh 2>&1 | tee "$GITHUB_WORKSPACE/test-reports/unit-test-results.txt"
 
           echo "Unit Tests executed successfully"
+
+      - name: Upload unit test reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-reports-${{ github.run_id }}
+          path: ${{ github.workspace }}/test-reports/
+          retention-days: 30
 
   static-analysis:
     name: Static Analysis
