@@ -3,8 +3,8 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: BSD-3-Clause
 #
-name: 'Smoke Test'
-description: 'Run a quick smoke test on the dvledtx binary. Result written to $GITHUB_WORKSPACE/reports/smoke-test.txt'
+name: 'Smoke Tests'
+description: 'Run smoke tests on dvledtx-ffmpeg and dvledtx-mtl binaries. Results written to $GITHUB_WORKSPACE/reports/'
 
 runs:
   using: composite
@@ -15,13 +15,18 @@ runs:
         REPORT_DIR="$GITHUB_WORKSPACE/reports"
         mkdir -p "$REPORT_DIR"
 
-        echo "Running dvledtx smoke test (5s timeout)..."
-        timeout 5s ./build/dvledtx --help > "$REPORT_DIR/smoke-test.txt" 2>&1 || true
+        for BINARY in ./build/dvledtx-ffmpeg ./build/dvledtx-mtl; do
+          NAME=$(basename "$BINARY")
+          echo "===== Smoke Test: $NAME ====="
+          OUTFILE="$REPORT_DIR/smoke-test-${NAME}.txt"
 
-        # Verify it produced output (i.e. it started and didn't segfault silently)
-        if [ ! -s "$REPORT_DIR/smoke-test.txt" ]; then
-          echo "ERROR: dvledtx produced no output during smoke test."
-          exit 1
-        fi
-        echo "Smoke test passed. Output:"
-        cat "$REPORT_DIR/smoke-test.txt"
+          timeout 5s "$BINARY" --help > "$OUTFILE" 2>&1 || true
+
+          if [ ! -s "$OUTFILE" ]; then
+            echo "ERROR: $NAME produced no output during smoke test."
+            exit 1
+          fi
+          echo "Smoke test passed for $NAME. Output:"
+          cat "$OUTFILE"
+        done
+
