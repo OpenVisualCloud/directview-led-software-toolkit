@@ -33,13 +33,11 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
-      - name: Build with FFMPEG TX APIs
-        uses: ./.github/actions/build-dvledtx
+      - name: Environment check
+        uses: ./.github/actions/environment-check
 
-      - name: Build with MTL TX APIs
+      - name: Build dvledtx
         uses: ./.github/actions/build-dvledtx
-        with:
-          enable_mtl_tx: 'true'
 
       - name: Smoke test
         uses: ./.github/actions/smoke-tests
@@ -67,6 +65,9 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
+      - name: Environment check
+        uses: ./.github/actions/environment-check
+
       - name: Run unit tests
         uses: ./.github/actions/unit-tests
 
@@ -92,6 +93,9 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
+
+      - name: Environment check
+        uses: ./.github/actions/environment-check
 
       - name: Static analysis
         uses: ./.github/actions/static-analysis

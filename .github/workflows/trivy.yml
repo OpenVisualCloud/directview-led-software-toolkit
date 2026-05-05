@@ -38,6 +38,9 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
+      - name: Environment check
+        uses: ./.github/actions/environment-check
+
       - name: Verify Trivy installation
         run: |
           if ! command -v trivy > /dev/null 2>&1; then

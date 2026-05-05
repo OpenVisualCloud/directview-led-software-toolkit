@@ -1,0 +1,62 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: 'Environment Check'
+description: 'Verify required libraries and tools are available on the runner'
+
+runs:
+  using: composite
+  steps:
+    - name: Check APT packages
+      shell: bash
+      run: |
+        echo "===== APT Package Check ====="
+        # TODO: Add required APT packages to this list
+        PKGS=""
+        # PKGS="pkg1 pkg2 pkg3"
+        MISSING=""
+        for pkg in $PKGS; do
+          dpkg -s "$pkg" &>/dev/null || MISSING="$MISSING $pkg"
+        done
+        if [ -n "$MISSING" ]; then
+          echo "ERROR: Missing packages:$MISSING"
+          echo "Install with: sudo apt-get install -y $MISSING"
+          exit 1
+        fi
+        echo "All required APT packages present."
+
+    - name: Check pkg-config libraries
+      shell: bash
+      run: |
+        echo "===== pkg-config Library Check ====="
+        # TODO: Add required pkg-config library names to this list
+        LIBS=""
+        # LIBS="libavformat libavcodec mtl"
+        MISSING=""
+        for lib in $LIBS; do
+          pkg-config --exists "$lib" 2>/dev/null || MISSING="$MISSING $lib"
+        done
+        if [ -n "$MISSING" ]; then
+          echo "ERROR: Missing pkg-config libraries:$MISSING"
+          exit 1
+        fi
+        echo "All required pkg-config libraries present."
+
+    - name: Check tools
+      shell: bash
+      run: |
+        echo "===== Tool Check ====="
+        # TODO: Add required tools/binaries to this list
+        TOOLS=""
+        # TOOLS="meson ninja pkg-config"
+        MISSING=""
+        for tool in $TOOLS; do
+          command -v "$tool" &>/dev/null || MISSING="$MISSING $tool"
+        done
+        if [ -n "$MISSING" ]; then
+          echo "ERROR: Missing tools:$MISSING"
+          exit 1
+        fi
+        echo "All required tools present."
