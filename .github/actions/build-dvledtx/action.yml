@@ -1,0 +1,36 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: 'Build dvledtx'
+description: 'Build the dvledtx binary using the build script'
+
+inputs:
+  enable_mtl_tx:
+    description: 'Enable MTL TX APIs (true/false)'
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Build DVLED Transmitter
+      shell: bash
+      run: |
+        if [ "${{ inputs.enable_mtl_tx }}" = "true" ]; then
+          echo "Building with MTL TX APIs..."
+          ./scripts/build.sh -Denable_mtl_tx=true
+        else
+          echo "Building with FFMPEG TX APIs..."
+          ./scripts/build.sh
+        fi
+
+    - name: Verify build output
+      shell: bash
+      run: |
+        if [ ! -f "./build/dvledtx" ]; then
+          echo "ERROR: Build artifact dvledtx not found!"
+          exit 1
+        fi
+        echo "Build artifact verified: $(file ./build/dvledtx)"
