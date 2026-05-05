@@ -3,7 +3,7 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: BSD-3-Clause
 #
-name: Transmitter App CI
+name: DVLED Transmitter App CI
 
 on:
   push:
