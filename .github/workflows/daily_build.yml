@@ -92,23 +92,7 @@ jobs:
           echo "Binary report saved to $REPORT_DIR/binary-report.txt"
 
       - name: Smoke test
-        run: |
-          REPORT_DIR="$GITHUB_WORKSPACE/reports"
-          mkdir -p "$REPORT_DIR"
-
-          echo "Running dvledtx smoke test (5s timeout)..."
-          timeout 5s ./build/dvledtx --help > "$REPORT_DIR/smoke-test.txt" 2>&1 || true
-
-          # Verify it produced output (i.e. it started and didn't segfault silently)
-          if [ ! -s "$REPORT_DIR/smoke-test.txt" ]; then
-            echo "ERROR: dvledtx produced no output during smoke test."
-            exit 1
-          fi
-          echo "Smoke test passed. Output:"
-          cat "$REPORT_DIR/smoke-test.txt"
-
-          # Copy binary into reports so everything is in one artifact
-          # cp ./build/dvledtx "$REPORT_DIR/dvledtx"
+        uses: ./.github/actions/smoke-test
 
       - name: Upload daily build reports
         uses: actions/upload-artifact@v4

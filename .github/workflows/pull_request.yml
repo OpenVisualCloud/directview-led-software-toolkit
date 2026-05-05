@@ -41,6 +41,9 @@ jobs:
         with:
           enable_mtl_tx: 'true'
 
+      - name: Smoke test
+        uses: ./.github/actions/smoke-test
+
       # - name: Upload binary
       #   uses: actions/upload-artifact@v4
       #   if: always()
@@ -73,7 +76,7 @@ jobs:
         with:
           name: pr-unit-tests-${{ github.run_id }}
           path: ${{ github.workspace }}/test-reports/
-          retention-days: 30
+          retention-days: 1
 
   static-analysis:
     name: Static Analysis
@@ -99,7 +102,7 @@ jobs:
         with:
           name: pr-static-analysis-${{ github.run_id }}
           path: ${{ github.workspace }}/reports/
-          retention-days: 30
+          retention-days: 1
 
   collect-artifacts:
     name: Collect All Artifacts
@@ -113,7 +116,7 @@ jobs:
         with:
           pattern: pr-*-${{ github.run_id }}
           path: all-artifacts
-          merge-multiple: false
+          merge-multiple: true
 
       - name: Upload combined artifact
         uses: actions/upload-artifact@v4
