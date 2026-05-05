@@ -59,7 +59,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: dvledtx-binary-${{ github.run_id }}
+          name: pr-binary-${{ github.run_id }}
           path: build/dvledtx
           retention-days: 30
 
@@ -80,7 +80,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: unit-test-reports-${{ github.run_id }}
+          name: pr-unit-tests-${{ github.run_id }}
           path: ${{ github.workspace }}/test-reports/
           retention-days: 30
 
@@ -138,6 +138,27 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: static-analysis-reports-${{ github.run_id }}
+          name: pr-static-analysis-${{ github.run_id }}
           path: ${{ github.workspace }}/reports/
+          retention-days: 30
+
+  collect-artifacts:
+    name: Collect All Artifacts
+    runs-on: self-hosted
+    needs: [build, unit-tests, static-analysis]
+    if: always()
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pr-*-${{ github.run_id }}
+          path: all-artifacts
+          merge-multiple: false
+
+      - name: Upload combined artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dvledtx-pr-artifacts-${{ github.run_id }}
+          path: all-artifacts/
           retention-days: 30

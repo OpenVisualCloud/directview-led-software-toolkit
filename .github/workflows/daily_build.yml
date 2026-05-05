@@ -116,18 +116,13 @@ jobs:
           echo "Smoke test passed. Output:"
           cat "$REPORT_DIR/smoke-test.txt"
 
+          # Copy binary into reports so everything is in one artifact
+          cp ./build/dvledtx "$REPORT_DIR/dvledtx"
+
       - name: Upload daily build reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: daily-build-reports-${{ github.run_id }}
+          name: dvledtx-build-artifacts-${{ github.run_id }}
           path: ${{ github.workspace }}/reports/
-          retention-days: 30
-
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
-        if: success()
-        with:
-          name: dvledtx-binary-${{ github.run_id }}
-          path: build/dvledtx
           retention-days: 30
