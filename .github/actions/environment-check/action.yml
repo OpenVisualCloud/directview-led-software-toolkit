@@ -1,0 +1,137 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: 'Environment Check'
+description: 'Verify required libraries and tools are available on the runner'
+
+runs:
+  using: composite
+  steps:
+    - name: Check APT packages
+      shell: bash
+      run: |
+        echo "===== APT Package Check ====="
+        PKGS="git gcc meson python3 python3-pip pkg-config libnuma-dev libjson-c-dev libpcap-dev libgtest-dev libssl-dev systemtap-sdt-dev llvm clang flex byacc libcmocka-dev"
+        MISSING=""
+        for pkg in $PKGS; do
+          if dpkg -s "$pkg" &>/dev/null; then
+            echo "  [OK] $pkg"
+          else
+            echo "  [MISSING] $pkg"
+            MISSING="$MISSING $pkg"
+          fi
+        done
+        if [ -n "$MISSING" ]; then
+          echo "ERROR: Missing packages:$MISSING"
+          exit 1
+        fi
+        echo "All required APT packages present."
+
+    - name: Check pip packages
+      shell: bash
+      run: |
+        echo "===== pip Package Check ====="
+        PIP_PKGS="pyelftools ninja gcovr"
+        MISSING=""
+        for pkg in $PIP_PKGS; do
+          if pip3 show "$pkg" &>/dev/null; then
+            echo "  [OK] $pkg"
+          else
+            echo "  [MISSING] $pkg"
+            MISSING="$MISSING $pkg"
+          fi
+        done
+        if [ -n "$MISSING" ]; then
+          echo "ERROR: Missing pip packages:$MISSING"
+          exit 1
+        fi
+        echo "All required pip packages present."
+
+    - name: Check static analysis tools
+      shell: bash
+      run: |
+        echo "===== Static Analysis Tools Check ====="
+        MISSING=""
+        for TOOL in cppcheck flawfinder shellcheck codespell; do
+          if command -v "$TOOL" &>/dev/null; then
+            echo "  [OK] $TOOL ($(command -v "$TOOL"))"
+          else
+            echo "  [MISSING] $TOOL"
+            MISSING="$MISSING $TOOL"
+          fi
+        done
+        if [ -n "$MISSING" ]; then
+          echo "ERROR: Missing static analysis tools:$MISSING"
+          exit 1
+        fi
+        echo "All required static analysis tools present."
+
+    - name: Check system libraries
+      shell: bash
+      run: |
+        echo "===== System Library Check ====="
+        MISSING=""
+        for LIB in m pthread; do
+          if ldconfig -p | grep -q "lib${LIB}\.so"; then
+            echo "  [OK] lib${LIB}"
+          else
+            echo "  [MISSING] lib${LIB}"
+            MISSING="$MISSING lib${LIB}"
+          fi
+        done
+        if [ -n "$MISSING" ]; then
+          echo "ERROR: Missing system libraries:$MISSING"
+          exit 1
+        fi
+        echo "All required system libraries present."
+
+    - name: Check build dependencies via pkg-config
+      shell: bash
+      run: |
+        echo "===== Build Dependency Check (pkg-config) ====="
+        if ! command -v pkg-config &>/dev/null; then
+          echo "ERROR: pkg-config not found"
+          exit 1
+        fi
+        echo "  [OK] pkg-config ($(pkg-config --version)) at $(command -v pkg-config)"
+
+        MISSING=""
+        for DEP in libavformat libavcodec libavutil libswscale libavdevice mtl; do
+          if pkg-config --exists "$DEP" 2>/dev/null; then
+            VER=$(pkg-config --modversion "$DEP" 2>/dev/null || echo "unknown")
+            echo "  [OK] $DEP ($VER)"
+          else
+            echo "  [MISSING] $DEP"
+            MISSING="$MISSING $DEP"
+          fi
+        done
+        if [ -n "$MISSING" ]; then
+          echo "ERROR: Missing build dependencies (dev libraries not installed):$MISSING"
+          exit 1
+        fi
+        echo "All required build dependencies present."
+
+    - name: Check FFmpeg MTL plugin in avdevices
+      shell: bash
+      run: |
+        echo "===== FFmpeg MTL Plugin Check ====="
+        if ! command -v ffmpeg &>/dev/null; then
+          echo "ERROR: ffmpeg binary not found"
+          exit 1
+        fi
+        echo "  ffmpeg: $(ffmpeg -version 2>&1 | head -1)"
+
+        DEVICES=$(ffmpeg -devices 2>&1)
+        if echo "$DEVICES" | grep -qi "mtl"; then
+          MTL_DEVICES=$(echo "$DEVICES" | grep -i "mtl")
+          echo "  [OK] MTL device(s) registered in FFmpeg avdevices:"
+          echo "$MTL_DEVICES" | sed 's/^/    /'
+        else
+          echo "  [MISSING] No MTL device found in FFmpeg avdevices."
+          echo "  Registered devices:"
+          echo "$DEVICES" | grep -E "^\s+(D |E | DE)" | sed 's/^/    /' || true
+          echo "ERROR: FFmpeg is not patched with the MTL plugin."
+          exit 1
+        fi

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  *
  * Unit tests for src/ffmpeg/ffmpeg_tx.c using cmocka.
@@ -62,7 +62,7 @@ const AVOutputFormat* __wrap_av_guess_format(const char* short_name,
  * Helpers
  * ========================================================================== */
 
-static void fill_app(struct tx_app_context* app) {
+static void fill_app(struct dvledtx_context* app) {
     memset(app, 0, sizeof(*app));
     strncpy(app->port,         "0000:06:00.0",  sizeof(app->port) - 1);
     strncpy(app->sip_addr_str, "192.168.50.29", sizeof(app->sip_addr_str) - 1);
@@ -82,7 +82,7 @@ static void fill_app(struct tx_app_context* app) {
     app->session_net[0].crop_h = 1080;
 }
 
-static void fill_ctx(struct st20p_tx_ctx* ctx, struct tx_app_context* app) {
+static void fill_ctx(struct st20p_tx_ctx* ctx, struct dvledtx_context* app) {
     memset(ctx, 0, sizeof(*ctx));
     ctx->idx        = 0;
     ctx->app        = app;
@@ -98,7 +98,7 @@ static void test_open_ffmpeg_tx_allocates_enc_frame_and_pkt(void **state) {
     (void)state;
     avdevice_register_all();
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app);
     struct st20p_tx_ctx ctx;
     fill_ctx(&ctx, &app);
@@ -142,7 +142,7 @@ static void test_ffmpeg_tx_send_yuv_frame_null_src_returns_minus1(void **state) 
     (void)state;
     avdevice_register_all();
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app);
     app.width  = 64;
     app.height = 16;
@@ -164,7 +164,7 @@ static void test_ffmpeg_tx_send_yuv_frame_success(void **state) {
     (void)state;
     avdevice_register_all();
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app);
     /* Use a tiny frame for the test to keep it fast */
     app.width  = 64;
@@ -211,7 +211,7 @@ static void test_ffmpeg_tx_send_raw_yuv_advances_position(void **state) {
     (void)state;
     avdevice_register_all();
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app);
     app.width  = 64;
     app.height = 16;
@@ -246,7 +246,7 @@ static void test_ffmpeg_tx_send_raw_yuv_wraps_at_end(void **state) {
     (void)state;
     avdevice_register_all();
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app);
     app.width  = 64;
     app.height = 16;

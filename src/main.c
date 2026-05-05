@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  */
 
@@ -28,26 +28,26 @@
 #include "core/session_manager.h"
 #include "util/logger.h"
 
-#define TXAPP_VERSION "0.1.0"
+#define DVLEDTX_VERSION "0.1.0"
 
 /* File-level application context pointer set before signals are installed. */
-static struct tx_app_context* g_app_ptr = NULL;
+static struct dvledtx_context* g_app_ptr = NULL;
 
 /* Async-signal-safe shutdown flag: only written by the signal handler,
- * only read by tx_app_apply_pending_signal_exit() in normal context. */
-static volatile sig_atomic_t g_tx_app_signal_exit = 0;
+ * only read by dvledtx_apply_pending_signal_exit() in normal context. */
+static volatile sig_atomic_t g_dvledtx_signal_exit = 0;
 
-static void tx_app_sig_handler(int sig) {
+static void dvledtx_sig_handler(int sig) {
   static const char msg[] = "Signal received, exit\n";
   (void)sig;
   (void)!write(STDERR_FILENO, msg, sizeof(msg) - 1);
-  g_tx_app_signal_exit = 1;
+  g_dvledtx_signal_exit = 1;
 }
 
 /* Propagate a pending signal-driven shutdown into the shared exit flags.
  * Must be called from non-signal context (e.g. the main polling loop). */
-static void tx_app_apply_pending_signal_exit(void) {
-  if (g_tx_app_signal_exit == 0) return;
+static void dvledtx_apply_pending_signal_exit(void) {
+  if (g_dvledtx_signal_exit == 0) return;
   session_manager_request_exit();
   if (g_app_ptr != NULL) g_app_ptr->exit = true;
 }
@@ -55,7 +55,7 @@ static void tx_app_apply_pending_signal_exit(void) {
 /* =========================================================================
  * E-1: Privilege drop — reduce capabilities after DPDK/MTL initialisation.
  *
- * TxApp requires CAP_SYS_ADMIN (VFIO) and CAP_IPC_LOCK (hugepages) during
+ * dvledtx requires CAP_SYS_ADMIN (VFIO) and CAP_IPC_LOCK (hugepages) during
  * mtl_init / session_manager_init.  Once the NIC is bound and hugepages are
  * locked, drop to the minimal set so that any subsequent exploit (e.g. via
  * libavcodec) does not grant kernel-level access.
@@ -161,7 +161,7 @@ static void print_help(const char* prog_name) {
   LOG_INFO("  --help                Show this help");
 }
 
-static int parse_args(struct tx_app_context* ctx, int argc, char** argv) {
+static int parse_args(struct dvledtx_context* ctx, int argc, char** argv) {
   static struct option long_options[] = {
     {"config",  required_argument, 0, 'C'},
     {"version", no_argument,       0, 'v'},
@@ -179,7 +179,7 @@ static int parse_args(struct tx_app_context* ctx, int argc, char** argv) {
         ctx->config_file[sizeof(ctx->config_file) - 1] = '\0';
         break;
       case 'v':
-        printf("TxApp version %s\n", TXAPP_VERSION);
+        printf("dvledtx version %s\n", DVLEDTX_VERSION);
         exit(0);
       case '?':
       default:
@@ -193,7 +193,7 @@ static int parse_args(struct tx_app_context* ctx, int argc, char** argv) {
 
 /* Main application */
 int main(int argc, char** argv) {
-  struct tx_app_context app;
+  struct dvledtx_context app;
   session_manager_t session_manager;
   int ret = 0;
   FILE *log_fp = NULL;
@@ -277,7 +277,7 @@ int main(int argc, char** argv) {
     /* else: keep default console logger from Phase 1 */
   }
 
-  LOG_INFO("TxApp initializing...");
+  LOG_INFO("dvledtx initializing...");
 
   /* Load configuration from JSON if specified — must happen before IP resolve
    * because config supplies sip/dip when CLI args are omitted. */
@@ -297,9 +297,9 @@ int main(int argc, char** argv) {
 
   /* Install signal handler — set g_app_ptr first so the handler can set app.exit */
   g_app_ptr = &app;
-  if (signal(SIGINT, tx_app_sig_handler) == SIG_ERR)
+  if (signal(SIGINT, dvledtx_sig_handler) == SIG_ERR)
     LOG_WARN("Failed to install SIGINT handler");
-  if (signal(SIGTERM, tx_app_sig_handler) == SIG_ERR)
+  if (signal(SIGTERM, dvledtx_sig_handler) == SIG_ERR)
     LOG_WARN("Failed to install SIGTERM handler");
 
   /* Register all FFmpeg devices (required for the MTL mtl_st20p muxer
@@ -330,7 +330,7 @@ int main(int argc, char** argv) {
     goto cleanup;
   }
 
-  LOG_INFO("TxApp started successfully");
+  LOG_INFO("dvledtx started successfully");
   LOG_INFO("Port: %s, DIP: %s, UDP: %d", app.port, app.dip_addr_str, app.udp_port);
   LOG_INFO("Video: %dx%d, ST20P sessions: %d",
          app.width, app.height, app.st20p_sessions);
@@ -338,13 +338,13 @@ int main(int argc, char** argv) {
   if (app.test_time_s > 0) {
     LOG_INFO("Transmitting for %d seconds... Press Ctrl+C to stop", app.test_time_s);
     for (int i = 0; i < app.test_time_s && app.exit == false; i++) {
-      tx_app_apply_pending_signal_exit();
+      dvledtx_apply_pending_signal_exit();
       sleep(1);
     }
   } else {
     LOG_INFO("Transmitting indefinitely... Press Ctrl+C to stop");
     while (app.exit == false) {
-      tx_app_apply_pending_signal_exit();
+      dvledtx_apply_pending_signal_exit();
       sleep(1);
     }
   }
@@ -354,13 +354,13 @@ int main(int argc, char** argv) {
 
   /* R-2: Log shutdown reason for audit trail */
   LOG_INFO("Shutdown reason: %s",
-           (g_tx_app_signal_exit != 0) ? "signal (SIGINT/SIGTERM)" :
+           (g_dvledtx_signal_exit != 0) ? "signal (SIGINT/SIGTERM)" :
            (app.test_time_s > 0 ? "test_time elapsed" : "application exit"));
 
 cleanup:
   /* Stop and cleanup session manager */
   session_manager_cleanup(&session_manager);
-  LOG_INFO("TxApp shutdown complete");
+  LOG_INFO("dvledtx shutdown complete");
 cleanup_logger:
   /* Cleanup logger */
   logger_cleanup();

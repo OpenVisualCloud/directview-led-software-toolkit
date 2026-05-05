@@ -1,6 +1,5 @@
-# Instructions For Reviewers
+## Description
 
-List any helpful information for reviewer
 
 ## Checklist
 
@@ -35,10 +34,3 @@ What kind of change does this PR introduce?
 - [ ] Documentation content changes
 - [ ] Testing
 - [ ] Other... Please describe:
-
-## Story or Task IDs
-
-Reference the Story or Task IDs for this PR:
-ITEP-
-
-

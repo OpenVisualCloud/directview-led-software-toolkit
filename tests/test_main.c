@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  *
  * Unit tests for the static helper functions in src/main.c.
@@ -6,8 +6,8 @@
  * Strategy
  * --------
  * main.c's interesting logic lives in static functions
- * (parse_args, tx_app_sig_handler,
- *  tx_app_apply_pending_signal_exit, print_help).  Because they are
+ * (parse_args, dvledtx_sig_handler,
+ *  dvledtx_apply_pending_signal_exit, print_help).  Because they are
  * static we cannot link them from outside; instead we #include the
  * source file directly (after renaming 'main' to avoid a clash with
  * the cmocka test runner's own main).
@@ -23,8 +23,8 @@
  *   parse_args()                        — argument parsing
  *   resolve_ip_addrs()                  — IPv4 binary conversion (now in config_reader.c;
  *                                         real implementation provided inline below)
- *   tx_app_sig_handler()                — sets g_tx_app_signal_exit
- *   tx_app_apply_pending_signal_exit()  — propagates signal flag
+ *   dvledtx_sig_handler()                — sets g_dvledtx_signal_exit
+ *   dvledtx_apply_pending_signal_exit()  — propagates signal flag
  *   print_help()                        — smoke test only
  */
 
@@ -41,7 +41,7 @@
 #include <getopt.h>
 #include <arpa/inet.h>
 
-/* FFmpeg types needed indirectly by tx_app_context.h */
+/* FFmpeg types needed indirectly by dvledtx_context.h */
 #include <libavutil/pixfmt.h>
 #include <libavformat/avformat.h>
 
@@ -67,7 +67,7 @@ void session_manager_reset_exit(void)   { g_test_exit = false; }
 static int stub_session_manager_init_ret  = 0;
 static int stub_session_manager_start_ret = 0;
 
-int session_manager_init(session_manager_t* m, struct tx_app_context* a)
+int session_manager_init(session_manager_t* m, struct dvledtx_context* a)
     { (void)m; (void)a; return stub_session_manager_init_ret; }
 int session_manager_start(session_manager_t* m)
     { (void)m; return stub_session_manager_start_ret; }
@@ -104,7 +104,7 @@ int peek_config_log_file(const char* f, char* buf, size_t sz)
     return stub_peek_config_log_file_ret;
 }
 
-int load_and_apply_config(struct tx_app_context* app, const char* f)
+int load_and_apply_config(struct dvledtx_context* app, const char* f)
 {
     (void)f;
     if (stub_load_and_apply_config_ret == 0 && stub_load_config_set_ips) {
@@ -121,7 +121,7 @@ int load_and_apply_config(struct tx_app_context* app, const char* f)
  * create duplicate symbols for the load_and_apply_config / peek_config_log_file
  * stubs above.  Provide the real implementation directly here so that the
  * existing resolve_ip_addrs test cases continue to work correctly. */
-int resolve_ip_addrs(struct tx_app_context* ctx) {
+int resolve_ip_addrs(struct dvledtx_context* ctx) {
     if (ctx->sip_addr_str[0] != '\0') {
         if (inet_pton(AF_INET, ctx->sip_addr_str, ctx->sip_addr) != 1) {
             LOG_ERROR("Invalid source IP address %s", ctx->sip_addr_str);
@@ -139,13 +139,13 @@ int resolve_ip_addrs(struct tx_app_context* ctx) {
 
 /* Helper to reset all stubs to defaults before each test —
  * forward-declared here; definition after the #include so that
- * g_tx_app_signal_exit (from main.c) is visible. */
+ * g_dvledtx_signal_exit (from main.c) is visible. */
 static void reset_stubs(void);
 
 /* ===========================================================================
  * Include production source with main() renamed so our cmocka main() can
  * coexist.  After this point all static symbols from main.c
- * (parse_args, resolve_ip_addrs, g_tx_app_signal_exit, g_app_ptr, …) are
+ * (parse_args, resolve_ip_addrs, g_dvledtx_signal_exit, g_app_ptr, …) are
  * visible to the test functions below.
  * =========================================================================== */
 
@@ -163,7 +163,7 @@ static void reset_stubs(void)
     stub_load_config_set_ips       = true;
     stub_load_config_test_time_s   = 0;
     stub_load_config_set_exit      = true;
-    g_tx_app_signal_exit           = 0;
+    g_dvledtx_signal_exit           = 0;
     g_test_exit                    = false;
 }
 
@@ -174,7 +174,7 @@ static void reset_stubs(void)
 static void test_parse_args_long_config_option(void **state)
 {
     (void)state;
-    struct tx_app_context ctx;
+    struct dvledtx_context ctx;
     memset(&ctx, 0, sizeof(ctx));
     optind = 1; /* reset getopt state between tests */
     char *argv[] = {"prog", "--config", "myfile.json", NULL};
@@ -185,7 +185,7 @@ static void test_parse_args_long_config_option(void **state)
 static void test_parse_args_short_config_option(void **state)
 {
     (void)state;
-    struct tx_app_context ctx;
+    struct dvledtx_context ctx;
     memset(&ctx, 0, sizeof(ctx));
     optind = 1;
     char *argv[] = {"prog", "-C", "another.json", NULL};
@@ -196,7 +196,7 @@ static void test_parse_args_short_config_option(void **state)
 static void test_parse_args_no_args_returns_zero_and_empty_config(void **state)
 {
     (void)state;
-    struct tx_app_context ctx;
+    struct dvledtx_context ctx;
     memset(&ctx, 0, sizeof(ctx));
     optind = 1;
     char *argv[] = {"prog", NULL};
@@ -207,7 +207,7 @@ static void test_parse_args_no_args_returns_zero_and_empty_config(void **state)
 static void test_parse_args_help_returns_minus1(void **state)
 {
     (void)state;
-    struct tx_app_context ctx;
+    struct dvledtx_context ctx;
     memset(&ctx, 0, sizeof(ctx));
     optind = 1;
     char *argv[] = {"prog", "--help", NULL};
@@ -217,7 +217,7 @@ static void test_parse_args_help_returns_minus1(void **state)
 static void test_parse_args_unknown_option_returns_minus1(void **state)
 {
     (void)state;
-    struct tx_app_context ctx;
+    struct dvledtx_context ctx;
     memset(&ctx, 0, sizeof(ctx));
     optind  = 1;
     opterr  = 0; /* suppress getopt error output for unknown option */
@@ -234,7 +234,7 @@ static void test_parse_args_unknown_option_returns_minus1(void **state)
 static void test_resolve_ip_valid_sip_and_dip(void **state)
 {
     (void)state;
-    struct tx_app_context ctx;
+    struct dvledtx_context ctx;
     memset(&ctx, 0, sizeof(ctx));
     strncpy(ctx.sip_addr_str, "192.168.50.29", sizeof(ctx.sip_addr_str) - 1);
     strncpy(ctx.dip_addr_str, "239.168.85.20", sizeof(ctx.dip_addr_str) - 1);
@@ -247,7 +247,7 @@ static void test_resolve_ip_valid_sip_and_dip(void **state)
 static void test_resolve_ip_empty_sip_dhcp_mode(void **state)
 {
     (void)state;
-    struct tx_app_context ctx;
+    struct dvledtx_context ctx;
     memset(&ctx, 0, sizeof(ctx));
     /* sip_addr_str is empty → DHCP mode branch; only dip is resolved */
     strncpy(ctx.dip_addr_str, "239.168.85.20", sizeof(ctx.dip_addr_str) - 1);
@@ -258,7 +258,7 @@ static void test_resolve_ip_empty_sip_dhcp_mode(void **state)
 static void test_resolve_ip_invalid_sip_fails(void **state)
 {
     (void)state;
-    struct tx_app_context ctx;
+    struct dvledtx_context ctx;
     memset(&ctx, 0, sizeof(ctx));
     strncpy(ctx.sip_addr_str, "not.an.ip.addr", sizeof(ctx.sip_addr_str) - 1);
     strncpy(ctx.dip_addr_str, "239.168.85.20",  sizeof(ctx.dip_addr_str) - 1);
@@ -268,42 +268,42 @@ static void test_resolve_ip_invalid_sip_fails(void **state)
 static void test_resolve_ip_invalid_dip_fails(void **state)
 {
     (void)state;
-    struct tx_app_context ctx;
+    struct dvledtx_context ctx;
     memset(&ctx, 0, sizeof(ctx));
     strncpy(ctx.dip_addr_str, "999.999.999.999", sizeof(ctx.dip_addr_str));
     assert_int_equal(resolve_ip_addrs(&ctx), -1);
 }
 
 /* ===========================================================================
- * Tests — signal handler + tx_app_apply_pending_signal_exit
+ * Tests — signal handler + dvledtx_apply_pending_signal_exit
  * =========================================================================== */
 
 static void test_sig_handler_sets_flag_and_apply_propagates(void **state)
 {
     (void)state;
-    struct tx_app_context app;
+    struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
 
     /* Reset shared state */
-    g_tx_app_signal_exit = 0;
+    g_dvledtx_signal_exit = 0;
     g_test_exit          = false;
     app.exit             = false;
     g_app_ptr            = &app;
 
     /* Before any signal: apply is a no-op */
-    tx_app_apply_pending_signal_exit();
+    dvledtx_apply_pending_signal_exit();
     assert_false(session_manager_should_exit());
     assert_false(app.exit);
 
     /* Simulate a signal and apply */
-    tx_app_sig_handler(SIGINT);
-    assert_int_equal(g_tx_app_signal_exit, 1);
-    tx_app_apply_pending_signal_exit();
+    dvledtx_sig_handler(SIGINT);
+    assert_int_equal(g_dvledtx_signal_exit, 1);
+    dvledtx_apply_pending_signal_exit();
     assert_true(session_manager_should_exit());
     assert_true(app.exit);
 
     /* Teardown */
-    g_tx_app_signal_exit = 0;
+    g_dvledtx_signal_exit = 0;
     g_test_exit          = false;
     g_app_ptr            = NULL;
 }
@@ -311,9 +311,9 @@ static void test_sig_handler_sets_flag_and_apply_propagates(void **state)
 static void test_apply_pending_exit_noop_without_signal(void **state)
 {
     (void)state;
-    g_tx_app_signal_exit = 0;
+    g_dvledtx_signal_exit = 0;
     g_test_exit          = false;
-    tx_app_apply_pending_signal_exit();
+    dvledtx_apply_pending_signal_exit();
     assert_false(session_manager_should_exit());
 }
 
@@ -324,7 +324,7 @@ static void test_apply_pending_exit_noop_without_signal(void **state)
 static void test_print_help_does_not_crash(void **state)
 {
     (void)state;
-    print_help("TxApp"); /* output goes to log; just verify no crash */
+    print_help("dvledtx"); /* output goes to log; just verify no crash */
 }
 
 /* ===========================================================================
@@ -340,7 +340,7 @@ static void test_main_no_config_returns_minus1(void **state)
     (void)state;
     reset_stubs();
     optind = 1;
-    char *argv[] = {"TxApp", NULL};
+    char *argv[] = {"dvledtx", NULL};
     int ret = tx_app_real_main(1, argv);
     assert_int_equal(ret, -1);
 }
@@ -353,7 +353,7 @@ static void test_main_happy_path_exits_immediately(void **state)
     reset_stubs();
     stub_load_config_set_exit = true; /* exit loop immediately */
     optind = 1;
-    char *argv[] = {"TxApp", "--config", "test.json", NULL};
+    char *argv[] = {"dvledtx", "--config", "test.json", NULL};
     int ret = tx_app_real_main(3, argv);
     assert_int_equal(ret, 0);
 }
@@ -367,7 +367,7 @@ static void test_main_test_time_path(void **state)
     stub_load_config_test_time_s = 1;
     stub_load_config_set_exit    = true; /* for loop exits on first check */
     optind = 1;
-    char *argv[] = {"TxApp", "-C", "test.json", NULL};
+    char *argv[] = {"dvledtx", "-C", "test.json", NULL};
     int ret = tx_app_real_main(3, argv);
     assert_int_equal(ret, 0);
 }
@@ -379,7 +379,7 @@ static void test_main_config_load_fails(void **state)
     reset_stubs();
     stub_load_and_apply_config_ret = -1;
     optind = 1;
-    char *argv[] = {"TxApp", "--config", "bad.json", NULL};
+    char *argv[] = {"dvledtx", "--config", "bad.json", NULL};
     int ret = tx_app_real_main(3, argv);
     assert_int_equal(ret, -1);
 }
@@ -391,7 +391,7 @@ static void test_main_session_init_fails(void **state)
     reset_stubs();
     stub_session_manager_init_ret = -1;
     optind = 1;
-    char *argv[] = {"TxApp", "--config", "test.json", NULL};
+    char *argv[] = {"dvledtx", "--config", "test.json", NULL};
     int ret = tx_app_real_main(3, argv);
     assert_int_equal(ret, -1);
 }
@@ -403,7 +403,7 @@ static void test_main_session_start_fails(void **state)
     reset_stubs();
     stub_session_manager_start_ret = -1;
     optind = 1;
-    char *argv[] = {"TxApp", "--config", "test.json", NULL};
+    char *argv[] = {"dvledtx", "--config", "test.json", NULL};
     int ret = tx_app_real_main(3, argv);
     assert_int_equal(ret, -1);
 }
@@ -415,7 +415,7 @@ static void test_main_resolve_ip_fails(void **state)
     reset_stubs();
     stub_load_config_set_ips = false; /* don't set valid IPs → dip empty → fails */
     optind = 1;
-    char *argv[] = {"TxApp", "--config", "test.json", NULL};
+    char *argv[] = {"dvledtx", "--config", "test.json", NULL};
     int ret = tx_app_real_main(3, argv);
     assert_int_equal(ret, -1);
 }
@@ -426,7 +426,7 @@ static void test_main_with_log_file_redirect(void **state)
     (void)state;
     reset_stubs();
     stub_peek_config_log_file_ret = 0;
-    char log_path[] = "/tmp/txapp_test_log_XXXXXX";
+    char log_path[] = "/tmp/dvledtx_test_log_XXXXXX";
     int log_fd = mkstemp(log_path);
     assert_true(log_fd >= 0);
     close(log_fd);
@@ -434,7 +434,7 @@ static void test_main_with_log_file_redirect(void **state)
             sizeof(stub_peek_config_log_file_buf) - 1);
     stub_load_config_set_exit = true;
     optind = 1;
-    char *argv[] = {"TxApp", "--config", "test.json", NULL};
+    char *argv[] = {"dvledtx", "--config", "test.json", NULL};
     int ret = tx_app_real_main(3, argv);
     /* May succeed or fail depending on dup2 behaviour in test env;
      * the key goal is to exercise the log redirection code path */
@@ -470,7 +470,7 @@ static void run_parse_args_in_child(char **argv, int argc,
         close(pipefd[0]);
         dup2(pipefd[1], STDOUT_FILENO);
         close(pipefd[1]);
-        struct tx_app_context ctx;
+        struct dvledtx_context ctx;
         memset(&ctx, 0, sizeof(ctx));
         optind = 1;
         int r = parse_args(&ctx, argc, argv);
@@ -507,8 +507,8 @@ static void test_parse_args_version_short_flag(void **state)
     char buf[128] = {0};
     run_parse_args_in_child(argv, 2, &code, buf, sizeof(buf));
     assert_int_equal(code, 0); /* exit(0) from version branch */
-    /* stdout contains "TxApp version <something>\n" */
-    assert_non_null(strstr(buf, "TxApp version "));
+    /* stdout contains "dvledtx version <something>\n" */
+    assert_non_null(strstr(buf, "dvledtx version "));
 }
 
 static void test_parse_args_version_long_flag(void **state)
@@ -519,10 +519,10 @@ static void test_parse_args_version_long_flag(void **state)
     char buf[128] = {0};
     run_parse_args_in_child(argv, 2, &code, buf, sizeof(buf));
     assert_int_equal(code, 0);
-    assert_non_null(strstr(buf, "TxApp version "));
+    assert_non_null(strstr(buf, "dvledtx version "));
 }
 
-/* The compile-time TXAPP_VERSION macro is exposed via the #include of
+/* The compile-time DVLEDTX_VERSION macro is exposed via the #include of
  * main.c above — verify the printed string matches it exactly. */
 static void test_parse_args_version_string_matches_macro(void **state)
 {
@@ -534,7 +534,7 @@ static void test_parse_args_version_string_matches_macro(void **state)
     assert_int_equal(code, 0);
 
     char expected[128];
-    snprintf(expected, sizeof(expected), "TxApp version %s\n", TXAPP_VERSION);
+    snprintf(expected, sizeof(expected), "dvledtx version %s\n", DVLEDTX_VERSION);
     assert_string_equal(buf, expected);
 }
 
@@ -545,13 +545,13 @@ static void test_main_with_log_env_variable(void **state)
     reset_stubs();
     stub_peek_config_log_file_ret = -1;
     stub_load_config_set_exit = true;
-    char env_log_path[] = "/tmp/txapp_test_env_log_XXXXXX";
+    char env_log_path[] = "/tmp/dvledtx_test_env_log_XXXXXX";
     int env_fd = mkstemp(env_log_path);
     assert_true(env_fd >= 0);
     close(env_fd);
     setenv("LOG_FILE", env_log_path, 1);
     optind = 1;
-    char *argv[] = {"TxApp", "--config", "test.json", NULL};
+    char *argv[] = {"dvledtx", "--config", "test.json", NULL};
     int ret = tx_app_real_main(3, argv);
     (void)ret;
     unsetenv("LOG_FILE");

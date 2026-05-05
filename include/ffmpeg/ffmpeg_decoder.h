@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  */
 
@@ -34,7 +34,7 @@ int  open_shared_ffmpeg(struct shared_decode_ctx* dec, const char* filename);
 void close_shared_ffmpeg(struct shared_decode_ctx* dec);
 
 /* Thread entry point — passed directly to pthread_create().
- * Runs the decode+barrier loop until dec->exit or g_tx_app_exit are set. */
+ * Runs the decode+barrier loop until dec->exit or g_dvledtx_exit are set. */
 void* shared_decode_thread(void* arg);
 
 /* -------------------------------------------------------------------------

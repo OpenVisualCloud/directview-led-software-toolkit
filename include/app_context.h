@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  */
 
@@ -22,7 +22,7 @@ struct tx_session_net {
 };
 
 /* Application context for TX sessions */
-struct tx_app_context {
+struct dvledtx_context {
   /* Configuration */
   char port[64];        /* DPDK NIC PCI BDF/address for MTL output (e.g. 0000:af:00.0), not a Linux interface name */
   char tx_url[256];

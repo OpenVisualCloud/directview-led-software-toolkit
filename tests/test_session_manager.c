@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  *
  * Unit tests for src/core/session_manager.c using cmocka.
@@ -24,7 +24,7 @@
  * ---------------------------
  *   session_manager_init()         — allocation, shared-decoder decision logic,
  *                                    crop-fallback calculation
- *   session_manager_start()        — g_tx_app_exit reset, thread launch
+ *   session_manager_start()        — g_dvledtx_exit reset, thread launch
  *   session_manager_stop()         — thread join, running flag
  *   session_manager_cleanup()      — resource release, idempotency
  *   session_manager_is_running()   — simple accessor
@@ -278,7 +278,7 @@ static void reset_mock_counters(void)
  * Test fixture helpers
  * ========================================================================== */
 
-static void fill_app(struct tx_app_context* app, int sessions, const char* url)
+static void fill_app(struct dvledtx_context* app, int sessions, const char* url)
 {
     memset(app, 0, sizeof(*app));
     strncpy(app->port,         "0000:06:00.0",  sizeof(app->port) - 1);
@@ -324,7 +324,7 @@ static void test_init_single_session_no_url(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 1, "");
 
     session_manager_t mgr;
@@ -347,7 +347,7 @@ static void test_init_3sessions_with_url_uses_shared_decoder(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 3, "video.mp4");
 
     session_manager_t mgr;
@@ -369,7 +369,7 @@ static void test_init_3sessions_raw_yuv_no_shared_decoder(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 3, "source.yuv");
 
     session_manager_t mgr;
@@ -392,7 +392,7 @@ static void test_init_fails_when_open_output_fails(void **state)
     reset_mock_counters();
     mock_open_ffmpeg_tx_ret = -1; /* simulate TX unavailable */
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 1, "");
 
     session_manager_t mgr;
@@ -409,7 +409,7 @@ static void test_init_fails_when_open_shared_ffmpeg_fails(void **state)
     reset_mock_counters();
     mock_open_shared_ffmpeg_ret = -1;
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 3, "video.mp4");
 
     session_manager_t mgr;
@@ -425,7 +425,7 @@ static void test_init_zero_sessions(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 0, "");
 
     session_manager_t mgr;
@@ -445,7 +445,7 @@ static void test_create_session_uses_session_net_crop(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 3, "");
 
     session_manager_t mgr;
@@ -471,7 +471,7 @@ static void test_create_session_crop_fallback_3sessions(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 3, "");
     memset(app.session_net, 0, sizeof(app.session_net));
 
@@ -495,7 +495,7 @@ static void test_create_session_crop_fallback_last_gets_remainder(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 3, "");
     app.width = 1920;
     memset(app.session_net, 0, sizeof(app.session_net));
@@ -518,7 +518,7 @@ static void test_create_session_idx_assigned(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 3, "");
 
     session_manager_t mgr;
@@ -538,7 +538,7 @@ static void test_start_sets_running_true(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 1, "");
 
     session_manager_t mgr;
@@ -554,7 +554,7 @@ static void test_stop_sets_running_false(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 1, "");
 
     session_manager_t mgr;
@@ -566,11 +566,11 @@ static void test_stop_sets_running_false(void **state)
     session_manager_cleanup(&mgr);
 }
 
-static void test_start_resets_g_tx_app_exit(void **state)
+static void test_start_resets_g_dvledtx_exit(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 1, "");
 
     session_manager_request_exit(); /* simulate previous run */
@@ -592,7 +592,7 @@ static void test_cleanup_idempotent(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 1, "");
 
     session_manager_t mgr;
@@ -606,7 +606,7 @@ static void test_cleanup_calls_close_ffmpeg_tx(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 3, "");
 
     session_manager_t mgr;
@@ -620,7 +620,7 @@ static void test_cleanup_3sessions_with_url_calls_close_shared(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 3, "video.mp4");
 
     session_manager_t mgr;
@@ -638,7 +638,7 @@ static void test_start_stop_3sessions_shared_decoder(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 3, "video.mp4");
 
     session_manager_t mgr;
@@ -664,7 +664,7 @@ static void test_thread_executes_ffmpeg_decode_path(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 1, "");
 
     session_manager_t mgr;
@@ -690,7 +690,7 @@ static void test_thread_executes_raw_yuv_path(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 1, "");
 
     session_manager_t mgr;
@@ -742,7 +742,7 @@ static void test_shared_thread_crop_fallback(void **state)
 {
     (void)state;
     reset_mock_counters();
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 3, "video.mp4");
     /* Zero out crop fields to trigger the fallback path */
     for (int i = 0; i < 3; i++) {
@@ -771,7 +771,7 @@ static void test_init_fails_when_load_video_source_fails(void **state)
     (void)state;
     reset_mock_counters();
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 1, "video.mp4"); /* non-empty, non-raw → load_video_source called */
 
     /* Inject failure into load_video_source mock */
@@ -795,7 +795,7 @@ static void test_thread_no_source_exits_immediately(void **state)
     (void)state;
     reset_mock_counters();
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 1, "");
 
     session_manager_t mgr;
@@ -823,7 +823,7 @@ static void test_shared_thread_send_yuv_failure_is_non_fatal(void **state)
     (void)state;
     reset_mock_counters();
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 3, "video.mp4");
 
     /* Make ffmpeg_tx_send_yuv_frame fail */
@@ -851,7 +851,7 @@ static void test_thread_single_path_a_send_failure(void **state)
     (void)state;
     reset_mock_counters();
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 1, "");
 
     session_manager_t mgr;
@@ -877,7 +877,7 @@ static void test_thread_raw_yuv_send_failure_logs_and_continues(void **state)
     (void)state;
     reset_mock_counters();
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app(&app, 1, "");
 
     session_manager_t mgr;
@@ -948,7 +948,7 @@ int main(void)
         /* start / stop */
         cmocka_unit_test(test_start_sets_running_true),
         cmocka_unit_test(test_stop_sets_running_false),
-        cmocka_unit_test(test_start_resets_g_tx_app_exit),
+        cmocka_unit_test(test_start_resets_g_dvledtx_exit),
 
         /* cleanup */
         cmocka_unit_test(test_cleanup_idempotent),

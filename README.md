@@ -1,8 +1,8 @@
-# TxApp - TX-Only Media Transport Application
+﻿# Direct View LED Software Toolkit
 
 ## Overview
 
-TxApp is a simplified, standalone transmitter application using FFMPEG APIs and Media Transport Library (MTL) plugin. It provides clean TX-only functionality without the complexity of RX/TX interdependencies.
+Direct View LED Software Toolkit is a simplified, standalone transmitter application using FFMPEG APIs and Media Transport Library (MTL) plugin. It provides clean TX-only functionality without the complexity of RX/TX interdependencies.
 
 ## Notices
 
@@ -47,8 +47,8 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
 Once all dependencies are installed, clone this repository and run the build script:
 
 ```bash
-git clone https://github.com/intel-innersource/applications.media.ledvideowall.gardencove-next.transmitter-app
-cd applications.media.ledvideowall.gardencove-next.transmitter-app
+git clone https://github.com/OpenVisualCloud/directview-led-software-toolkit
+cd directview-led-software-toolkit
 bash scripts/build.sh
 ```
 
@@ -58,7 +58,7 @@ To build with MTL TX support enabled:
 bash scripts/build.sh -Denable_mtl_tx=true
 ```
 
-The built binary will be available at `build/TxApp`.
+The built binary will be available at `build/dvledtx`.
 
 ## Usage
 
@@ -70,11 +70,11 @@ The built binary will be available at `build/TxApp`.
 
 ### JSON Configuration
 
-TxApp uses a JSON config file with three sections:
+dvledtx uses a JSON config file with three sections:
 
 | Section | Field | Description |
 |---------|-------|-------------|
-| **log_file** | `log_file` | (Optional) Path/name of the log output file (e.g. `TxApp.log`). If omitted, logging goes to console only. |
+| **log_file** | `log_file` | (Optional) Path/name of the log output file (e.g. `dvledtx.log`). If omitted, logging goes to console only. |
 | **interfaces** | `name` | PCI BDF address of the NIC (e.g. `0000:06:00.0`) |
 | | `sip` | Source IP address |
 | | `dip` | Destination multicast IP address |
@@ -90,7 +90,7 @@ TxApp uses a JSON config file with three sections:
 Example (`config/tx_1session.json`):
 ```json
 {
-  "log_file": "TxApp.log",
+  "log_file": "dvledtx.log",
   "interfaces": [
     { "name": "0000:06:00.0", "sip": "192.168.50.29", "dip": "239.168.85.20" }
   ],
@@ -109,7 +109,7 @@ Multiple sessions can be defined in `tx_sessions` to transmit different crop reg
 
 ## Logging
 
-TxApp includes a built-in logger with configurable output targets and log levels.
+dvledtx includes a built-in logger with configurable output targets and log levels.
 
 ### Log File
 
@@ -117,7 +117,7 @@ Specify a log file in the JSON config with the top-level `log_file` field:
 
 ```json
 {
-  "log_file": "TxApp.log",
+  "log_file": "dvledtx.log",
   ...
 }
 ```
@@ -137,7 +137,7 @@ When `log_file` is set, log output is written to that file in addition to the co
 
 #### Using JSON Configuration (recommended)
 ```bash
-./build/TxApp --config config/tx_1session.json
+./build/dvledtx --config config/tx_1session.json
 ```
 
 ## Command-Line Options
@@ -150,9 +150,9 @@ When `log_file` is set, log output is written to that file in addition to the co
 
 #### Show Version
 ```bash
-./build/TxApp --version
+./build/dvledtx --version
 # or
-./build/TxApp -v
+./build/dvledtx -v
 ```
 
 ## Supported Formats

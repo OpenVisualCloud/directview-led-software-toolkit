@@ -1,0 +1,18 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: 'Run Unit Tests'
+description: 'Execute unit tests and save results to reports/'
+
+runs:
+  using: composite
+  steps:
+    - name: Execute unit tests
+      shell: bash
+      run: |
+        echo "Executing Unit Tests..."
+        mkdir -p "$GITHUB_WORKSPACE/reports"
+        ./scripts/test.sh 2>&1 | tee "$GITHUB_WORKSPACE/reports/unit-test-results.txt"
+        echo "Unit Tests executed successfully"
