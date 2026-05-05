@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  */
 
@@ -7,7 +7,7 @@
 /*
  * mtl_tx.h — public API for the direct MTL pipeline TX path.
  *
- * When -DENABLE_MTL_TX is set, TxApp transmits frames by calling the MTL
+ * When -DENABLE_MTL_TX is set, dvledtx transmits frames by calling the MTL
  * pipeline API directly (st20p_tx_get_frame / st20p_tx_put_frame) instead
  * of going through the FFmpeg libavdevice mtl_st20p muxer.
  *
@@ -32,7 +32,7 @@
 #include <libavutil/frame.h>
 
 /* Forward declarations */
-struct tx_app_context;
+struct dvledtx_context;
 struct st20p_tx_ctx;
 typedef struct session_manager_s session_manager_t;
 
@@ -83,7 +83,7 @@ void mtl_copy_crop_to_frame(struct st_frame* dst, AVFrame* src,
  *   Stores the handle in manager->mtl.
  * Returns 0 on success, -1 on failure.
  */
-int  mtl_tx_init(session_manager_t* manager, struct tx_app_context* app);
+int  mtl_tx_init(session_manager_t* manager, struct dvledtx_context* app);
 
 /*
  * mtl_tx_uninit() — release the MTL library instance stored in manager->mtl.
@@ -100,7 +100,7 @@ void mtl_tx_uninit(session_manager_t* manager);
  * Returns 0 on success, -1 on failure.
  */
 int  mtl_tx_session_create(session_manager_t* manager, struct st20p_tx_ctx* ctx,
-                            struct tx_app_context* app, int session_idx);
+                            struct dvledtx_context* app, int session_idx);
 
 /*
  * mtl_tx_session_free() — call st20p_tx_free() and clear ctx->handle.

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  *
  * Unit tests for config_reader.c using cmocka.
@@ -41,7 +41,7 @@
  * -------------------------------------------------------------------------- */
 static char *write_tmpfile(const char *content)
 {
-    char *path = strdup("/tmp/txapp_test_XXXXXX");
+    char *path = strdup("/tmp/dvledtx_test_XXXXXX");
     if (!path) return NULL;
     int fd = mkstemp(path);
     if (fd < 0) { free(path); return NULL; }
@@ -54,10 +54,10 @@ static char *write_tmpfile(const char *content)
 }
 
 /* --------------------------------------------------------------------------
- * Helper: populate a fully-valid tx_app_config (no tx_url so the
+ * Helper: populate a fully-valid dvledtx_config (no tx_url so the
  * file-existence check inside validate_tx_config is skipped).
  * -------------------------------------------------------------------------- */
-static void fill_valid_config(struct tx_app_config *cfg)
+static void fill_valid_config(struct dvledtx_config *cfg)
 {
     memset(cfg, 0, sizeof(*cfg));
     strncpy(cfg->interface_name, "0000:06:00.0",   sizeof(cfg->interface_name) - 1);
@@ -84,7 +84,7 @@ static void fill_valid_config(struct tx_app_config *cfg)
 static void test_parse_returns_minus1_for_null_path(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     /* fopen(NULL) returns NULL on Linux/glibc; logger is a no-op when
      * uninitialized, so this is safe to call. */
     assert_int_equal(parse_tx_config(NULL, &cfg), -1);
@@ -93,15 +93,15 @@ static void test_parse_returns_minus1_for_null_path(void **state)
 static void test_parse_returns_minus1_for_missing_file(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     assert_int_equal(
-        parse_tx_config("/tmp/txapp_no_such_file_xyz.json", &cfg), -1);
+        parse_tx_config("/tmp/dvledtx_no_such_file_xyz.json", &cfg), -1);
 }
 
 static void test_parse_3sessions_session_count(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     assert_int_equal(parse_tx_config(FIXTURE_3SESSIONS, &cfg), 0);
     assert_int_equal(cfg.session_count, 3);
 }
@@ -109,7 +109,7 @@ static void test_parse_3sessions_session_count(void **state)
 static void test_parse_1session_session_count(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     assert_int_equal(parse_tx_config(FIXTURE_1SESSION, &cfg), 0);
     assert_int_equal(cfg.session_count, 1);
 }
@@ -117,7 +117,7 @@ static void test_parse_1session_session_count(void **state)
 static void test_parse_3sessions_interface_fields(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     assert_int_equal(parse_tx_config(FIXTURE_3SESSIONS, &cfg), 0);
     assert_string_equal(cfg.interface_name, "0000:06:00.0");
     assert_string_equal(cfg.interface_sip,  "192.168.50.29");
@@ -127,7 +127,7 @@ static void test_parse_3sessions_interface_fields(void **state)
 static void test_parse_3sessions_video_params(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     assert_int_equal(parse_tx_config(FIXTURE_3SESSIONS, &cfg), 0);
     assert_int_equal((int)cfg.width,  1920);
     assert_int_equal((int)cfg.height, 1080);
@@ -138,15 +138,15 @@ static void test_parse_3sessions_video_params(void **state)
 static void test_parse_3sessions_log_file(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     assert_int_equal(parse_tx_config(FIXTURE_3SESSIONS, &cfg), 0);
-    assert_string_equal(cfg.log_file, "TxApp.log");
+    assert_string_equal(cfg.log_file, "dvledtx.log");
 }
 
 static void test_parse_3sessions_session0_crop(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     assert_int_equal(parse_tx_config(FIXTURE_3SESSIONS, &cfg), 0);
 
     const struct tx_session_config *s = &cfg.sessions[0];
@@ -161,7 +161,7 @@ static void test_parse_3sessions_session0_crop(void **state)
 static void test_parse_3sessions_session1_crop(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     assert_int_equal(parse_tx_config(FIXTURE_3SESSIONS, &cfg), 0);
 
     const struct tx_session_config *s = &cfg.sessions[1];
@@ -176,7 +176,7 @@ static void test_parse_3sessions_session1_crop(void **state)
 static void test_parse_3sessions_session2_crop(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     assert_int_equal(parse_tx_config(FIXTURE_3SESSIONS, &cfg), 0);
 
     const struct tx_session_config *s = &cfg.sessions[2];
@@ -198,7 +198,7 @@ static void test_parse_returns_minus1_when_sessions_key_absent(void **state)
         "}");
     assert_non_null(path);
 
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     int ret = parse_tx_config(path, &cfg);
     unlink(path);
     free(path);
@@ -216,7 +216,7 @@ static void test_parse_returns_minus1_when_sessions_array_empty(void **state)
         "}");
     assert_non_null(path);
 
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     int ret = parse_tx_config(path, &cfg);
     unlink(path);
     free(path);
@@ -235,7 +235,7 @@ static void test_parse_returns_zero_fields_when_video_missing(void **state)
         "}");
     assert_non_null(path);
 
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     int ret = parse_tx_config(path, &cfg);
     unlink(path);
     free(path);
@@ -252,7 +252,7 @@ static void test_parse_returns_zero_fields_when_video_missing(void **state)
 static void test_validate_valid_config_passes(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     assert_int_equal(validate_tx_config(&cfg), 0);
 }
@@ -260,7 +260,7 @@ static void test_validate_valid_config_passes(void **state)
 static void test_validate_missing_interface_name_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.interface_name[0] = '\0';
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -269,7 +269,7 @@ static void test_validate_missing_interface_name_fails(void **state)
 static void test_validate_missing_dip_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.interface_dip[0] = '\0';
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -278,7 +278,7 @@ static void test_validate_missing_dip_fails(void **state)
 static void test_validate_invalid_sip_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     strncpy(cfg.interface_sip, "not.an.ip.address", sizeof(cfg.interface_sip) - 1);
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -287,7 +287,7 @@ static void test_validate_invalid_sip_fails(void **state)
 static void test_validate_invalid_dip_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     strncpy(cfg.interface_dip, "999.999.999.999", sizeof(cfg.interface_dip) - 1);
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -296,7 +296,7 @@ static void test_validate_invalid_dip_fails(void **state)
 static void test_validate_zero_width_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.width = 0;
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -305,7 +305,7 @@ static void test_validate_zero_width_fails(void **state)
 static void test_validate_zero_height_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.height = 0;
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -314,7 +314,7 @@ static void test_validate_zero_height_fails(void **state)
 static void test_validate_odd_width_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.width = 1921;
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -325,7 +325,7 @@ static void test_validate_supported_fps_values_all_pass(void **state)
     (void)state;
     const int valid_fps[] = {25, 30, 50, 60};
     for (size_t i = 0; i < sizeof(valid_fps) / sizeof(valid_fps[0]); i++) {
-        struct tx_app_config cfg;
+        struct dvledtx_config cfg;
         fill_valid_config(&cfg);
         cfg.fps = valid_fps[i];
         assert_int_equal(validate_tx_config(&cfg), 0);
@@ -335,7 +335,7 @@ static void test_validate_supported_fps_values_all_pass(void **state)
 static void test_validate_unsupported_fps_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.fps = 24;
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -344,7 +344,7 @@ static void test_validate_unsupported_fps_fails(void **state)
 static void test_validate_unsupported_fmt_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     strncpy(cfg.fmt, "rgb24", sizeof(cfg.fmt) - 1);
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -355,7 +355,7 @@ static void test_validate_all_supported_fmts_pass(void **state)
     (void)state;
     const char *fmts[] = {"yuv422p10le", "yuv420", "yuv444p10le", "gbrp10le"};
     for (size_t i = 0; i < sizeof(fmts) / sizeof(fmts[0]); i++) {
-        struct tx_app_config cfg;
+        struct dvledtx_config cfg;
         fill_valid_config(&cfg);
         strncpy(cfg.fmt, fmts[i], sizeof(cfg.fmt) - 1);
         assert_int_equal(validate_tx_config(&cfg), 0);
@@ -365,7 +365,7 @@ static void test_validate_all_supported_fmts_pass(void **state)
 static void test_validate_zero_udp_port_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.sessions[0].udp_port = 0;
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -374,7 +374,7 @@ static void test_validate_zero_udp_port_fails(void **state)
 static void test_validate_payload_type_below_96_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.sessions[0].payload_type = 95;
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -383,7 +383,7 @@ static void test_validate_payload_type_below_96_fails(void **state)
 static void test_validate_payload_type_above_127_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.sessions[0].payload_type = 128;
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -392,7 +392,7 @@ static void test_validate_payload_type_above_127_fails(void **state)
 static void test_validate_payload_type_boundary_96_passes(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.sessions[0].payload_type = 96;
     assert_int_equal(validate_tx_config(&cfg), 0);
@@ -401,7 +401,7 @@ static void test_validate_payload_type_boundary_96_passes(void **state)
 static void test_validate_payload_type_boundary_127_passes(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.sessions[0].payload_type = 127;
     assert_int_equal(validate_tx_config(&cfg), 0);
@@ -410,7 +410,7 @@ static void test_validate_payload_type_boundary_127_passes(void **state)
 static void test_validate_crop_x_plus_w_exceeds_width_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.sessions[0].crop_x = 100;
     cfg.sessions[0].crop_w = 1920; /* 100 + 1920 = 2020 > 1920 */
@@ -420,7 +420,7 @@ static void test_validate_crop_x_plus_w_exceeds_width_fails(void **state)
 static void test_validate_crop_y_plus_h_exceeds_height_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.sessions[0].crop_y = 100;
     cfg.sessions[0].crop_h = 1080; /* 100 + 1080 = 1180 > 1080 */
@@ -430,7 +430,7 @@ static void test_validate_crop_y_plus_h_exceeds_height_fails(void **state)
 static void test_validate_odd_crop_w_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.sessions[0].crop_w = 641;
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -439,7 +439,7 @@ static void test_validate_odd_crop_w_fails(void **state)
 static void test_validate_zero_session_count_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.session_count = 0;
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -449,7 +449,7 @@ static void test_validate_3sessions_tiled_layout_passes(void **state)
 {
     (void)state;
     /* Mirrors tx_3sessions.json: three 640-wide horizontal tiles */
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     memset(&cfg, 0, sizeof(cfg));
     strncpy(cfg.interface_name, "0000:06:00.0",   sizeof(cfg.interface_name) - 1);
     strncpy(cfg.interface_sip,  "192.168.50.29",  sizeof(cfg.interface_sip)  - 1);
@@ -482,7 +482,7 @@ static void test_peek_log_file_returns_value_from_3sessions(void **state)
     (void)state;
     char buf[256] = {0};
     assert_int_equal(peek_config_log_file(FIXTURE_3SESSIONS, buf, sizeof(buf)), 0);
-    assert_string_equal(buf, "TxApp.log");
+    assert_string_equal(buf, "dvledtx.log");
 }
 
 static void test_peek_log_file_returns_minus1_when_field_absent(void **state)
@@ -504,7 +504,7 @@ static void test_peek_log_file_returns_minus1_for_nonexistent_file(void **state)
     (void)state;
     char buf[256] = {0};
     assert_int_equal(
-        peek_config_log_file("/tmp/txapp_no_such_file_xyz.json", buf, sizeof(buf)), -1);
+        peek_config_log_file("/tmp/dvledtx_no_such_file_xyz.json", buf, sizeof(buf)), -1);
 }
 
 static void test_peek_log_file_fills_buffer_correctly(void **state)
@@ -536,7 +536,7 @@ static void test_parse_session_missing_udp_port_fails(void **state)
         "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]"
         "}");
     assert_non_null(path);
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     int ret = parse_tx_config(path, &cfg);
     unlink(path); free(path);
     assert_int_equal(ret, -1);
@@ -553,7 +553,7 @@ static void test_parse_session_udp_port_exceeds_65535_fails(void **state)
         "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]"
         "}");
     assert_non_null(path);
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     int ret = parse_tx_config(path, &cfg);
     unlink(path); free(path);
     assert_int_equal(ret, -1);
@@ -570,7 +570,7 @@ static void test_parse_session_missing_payload_type_fails(void **state)
         "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]"
         "}");
     assert_non_null(path);
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     int ret = parse_tx_config(path, &cfg);
     unlink(path); free(path);
     assert_int_equal(ret, -1);
@@ -586,7 +586,7 @@ static void test_parse_session_no_crop_object_fails(void **state)
         "  \"tx_sessions\": [{\"udp_port\":20000,\"payload_type\":96}]"
         "}");
     assert_non_null(path);
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     int ret = parse_tx_config(path, &cfg);
     unlink(path); free(path);
     assert_int_equal(ret, -1);
@@ -599,7 +599,7 @@ static void test_parse_session_no_crop_object_fails(void **state)
 static void test_validate_resolution_exceeds_max_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.width = 8000; /* > 7680 limit */
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -608,7 +608,7 @@ static void test_validate_resolution_exceeds_max_fails(void **state)
 static void test_validate_duplicate_udp_ports_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     memset(&cfg, 0, sizeof(cfg));
     strncpy(cfg.interface_name, "0000:06:00.0", sizeof(cfg.interface_name) - 1);
     strncpy(cfg.interface_sip,  "192.168.1.1",  sizeof(cfg.interface_sip)  - 1);
@@ -629,7 +629,7 @@ static void test_validate_duplicate_udp_ports_fails(void **state)
 static void test_validate_crop_x_misaligned_for_yuv422_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     /* yuv422p10le has x_align=2; crop_x=1 is not a multiple of 2 */
     cfg.sessions[0].crop_x = 1;
@@ -640,9 +640,9 @@ static void test_validate_crop_x_misaligned_for_yuv422_fails(void **state)
 static void test_validate_tx_url_nonexistent_file_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
-    strncpy(cfg.tx_url, "/tmp/txapp_no_such_video_xyz.mp4", sizeof(cfg.tx_url) - 1);
+    strncpy(cfg.tx_url, "/tmp/dvledtx_no_such_video_xyz.mp4", sizeof(cfg.tx_url) - 1);
     assert_int_equal(validate_tx_config(&cfg), -1);
 }
 
@@ -651,7 +651,7 @@ static void test_validate_tx_url_existing_file_passes(void **state)
     (void)state;
     char *path = write_tmpfile("dummy video placeholder");
     assert_non_null(path);
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     strncpy(cfg.tx_url, path, sizeof(cfg.tx_url) - 1);
     int ret = validate_tx_config(&cfg);
@@ -667,7 +667,7 @@ static void test_validate_tx_url_existing_file_passes(void **state)
 static void test_validate_non_multicast_dip_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     strncpy(cfg.interface_dip, "192.168.1.100", sizeof(cfg.interface_dip) - 1);
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -677,7 +677,7 @@ static void test_validate_non_multicast_dip_fails(void **state)
 static void test_validate_invalid_bdf_format_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     strncpy(cfg.interface_name, "eth0", sizeof(cfg.interface_name) - 1);
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -686,7 +686,7 @@ static void test_validate_invalid_bdf_format_fails(void **state)
 static void test_validate_valid_bdf_passes(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     strncpy(cfg.interface_name, "0000:af:00.1", sizeof(cfg.interface_name) - 1);
     assert_int_equal(validate_tx_config(&cfg), 0);
@@ -696,7 +696,7 @@ static void test_validate_valid_bdf_passes(void **state)
 static void test_validate_privileged_udp_port_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.sessions[0].udp_port = 80;
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -791,7 +791,7 @@ static void test_peek_log_file_strips_bare_control_chars(void **state)
     (void)state;
     /* Embed an SOH (0x01) byte between 'a' and 'b' */
     const char json[] = "{\"log_file\": \"a\x01""b.log\"}";
-    char *path = strdup("/tmp/txapp_ctrl_XXXXXX");
+    char *path = strdup("/tmp/dvledtx_ctrl_XXXXXX");
     assert_non_null(path);
     int fd = mkstemp(path);
     assert_true(fd >= 0);
@@ -832,7 +832,7 @@ static void test_validate_crop_x_plus_w_unsigned_overflow_safe(void **state)
     (void)state;
     /* With signed int math, INT_MAX + 1 wraps to INT_MIN and would silently
      * pass the comparison.  The unsigned cast must catch this. */
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.sessions[0].crop_x = 2147483647; /* INT_MAX */
     cfg.sessions[0].crop_w = 2;          /* even, so passes alignment */
@@ -842,7 +842,7 @@ static void test_validate_crop_x_plus_w_unsigned_overflow_safe(void **state)
 static void test_validate_crop_y_plus_h_unsigned_overflow_safe(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.sessions[0].crop_y = 2147483647; /* INT_MAX */
     cfg.sessions[0].crop_h = 2;
@@ -853,7 +853,7 @@ static void test_validate_crop_y_plus_h_unsigned_overflow_safe(void **state)
 static void test_validate_low_multicast_dip_passes_with_warning(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     strncpy(cfg.interface_dip, "224.0.0.50", sizeof(cfg.interface_dip) - 1);
     /* In multicast range but outside the 239.0.0.0/8 administratively-scoped
@@ -865,7 +865,7 @@ static void test_validate_low_multicast_dip_passes_with_warning(void **state)
 static void test_validate_above_multicast_dip_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     strncpy(cfg.interface_dip, "240.0.0.1", sizeof(cfg.interface_dip) - 1);
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -875,7 +875,7 @@ static void test_validate_above_multicast_dip_fails(void **state)
 static void test_validate_udp_port_boundary_1024_passes(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.sessions[0].udp_port = 1024;
     assert_int_equal(validate_tx_config(&cfg), 0);
@@ -885,7 +885,7 @@ static void test_validate_udp_port_boundary_1024_passes(void **state)
 static void test_validate_udp_port_boundary_1023_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     cfg.sessions[0].udp_port = 1023;
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -895,7 +895,7 @@ static void test_validate_udp_port_boundary_1023_fails(void **state)
 static void test_validate_short_bdf_format_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     /* Missing leading "00" in domain — DDD:DD:DD.D instead of DDDD:DD:DD.D */
     strncpy(cfg.interface_name, "000:06:00.0", sizeof(cfg.interface_name) - 1);
@@ -906,7 +906,7 @@ static void test_validate_short_bdf_format_fails(void **state)
 static void test_validate_nonhex_bdf_format_fails(void **state)
 {
     (void)state;
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     strncpy(cfg.interface_name, "ZZZZ:06:00.0", sizeof(cfg.interface_name) - 1);
     assert_int_equal(validate_tx_config(&cfg), -1);
@@ -928,7 +928,7 @@ static void test_parse_session_negative_crop_x_fails(void **state)
         "    \"crop\":{\"y\":0,\"w\":1920,\"h\":1080}}]"
         "}");
     assert_non_null(path);
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     int ret = parse_tx_config(path, &cfg);
     unlink(path); free(path);
     /* Missing crop "x" — extract_json_int returns -1, parse must fail */
@@ -946,7 +946,7 @@ static void test_parse_session_zero_crop_w_fails(void **state)
         "    \"crop\":{\"x\":0,\"y\":0,\"w\":0,\"h\":1080}}]"
         "}");
     assert_non_null(path);
-    struct tx_app_config cfg;
+    struct dvledtx_config cfg;
     int ret = parse_tx_config(path, &cfg);
     unlink(path); free(path);
     assert_int_equal(ret, -1);
@@ -965,7 +965,7 @@ static void test_load_and_apply_config_null_app_returns_zero(void **state)
 static void test_load_and_apply_config_null_file_returns_zero(void **state)
 {
     (void)state;
-    struct tx_app_context app;
+    struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
     assert_int_equal(load_and_apply_config(&app, NULL), 0);
 }
@@ -973,7 +973,7 @@ static void test_load_and_apply_config_null_file_returns_zero(void **state)
 static void test_load_and_apply_config_empty_file_returns_zero(void **state)
 {
     (void)state;
-    struct tx_app_context app;
+    struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
     assert_int_equal(load_and_apply_config(&app, ""), 0);
 }
@@ -981,10 +981,10 @@ static void test_load_and_apply_config_empty_file_returns_zero(void **state)
 static void test_load_and_apply_config_nonexistent_file_returns_minus1(void **state)
 {
     (void)state;
-    struct tx_app_context app;
+    struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
     assert_int_equal(
-        load_and_apply_config(&app, "/tmp/txapp_no_such_config_xyz.json"), -1);
+        load_and_apply_config(&app, "/tmp/dvledtx_no_such_config_xyz.json"), -1);
 }
 
 /* Minimal valid one-session JSON (no tx_url, file-open check skipped) */
@@ -1002,7 +1002,7 @@ static void test_load_and_apply_config_populates_app_context(void **state)
     (void)state;
     char *path = write_tmpfile(ONE_SESSION_JSON("yuv422p10le"));
     assert_non_null(path);
-    struct tx_app_context app;
+    struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
     int ret = load_and_apply_config(&app, path);
     unlink(path); free(path);
@@ -1022,7 +1022,7 @@ static void test_load_and_apply_config_fmt_yuv444p(void **state)
     (void)state;
     char *path = write_tmpfile(ONE_SESSION_JSON("yuv444p10le"));
     assert_non_null(path);
-    struct tx_app_context app;
+    struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
     int ret = load_and_apply_config(&app, path);
     unlink(path); free(path);
@@ -1035,7 +1035,7 @@ static void test_load_and_apply_config_fmt_gbrp10le(void **state)
     (void)state;
     char *path = write_tmpfile(ONE_SESSION_JSON("gbrp10le"));
     assert_non_null(path);
-    struct tx_app_context app;
+    struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
     int ret = load_and_apply_config(&app, path);
     unlink(path); free(path);
@@ -1048,7 +1048,7 @@ static void test_load_and_apply_config_fmt_yuv420(void **state)
     (void)state;
     char *path = write_tmpfile(ONE_SESSION_JSON("yuv420"));
     assert_non_null(path);
-    struct tx_app_context app;
+    struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
     int ret = load_and_apply_config(&app, path);
     unlink(path); free(path);
@@ -1061,7 +1061,7 @@ static void test_load_and_apply_config_unknown_fmt_fails(void **state)
     (void)state;
     char *path = write_tmpfile(ONE_SESSION_JSON("rgb24"));
     assert_non_null(path);
-    struct tx_app_context app;
+    struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
     int ret = load_and_apply_config(&app, path);
     unlink(path); free(path);
@@ -1080,7 +1080,7 @@ static void test_load_and_apply_config_copies_log_file(void **state)
         "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]"
         "}");
     assert_non_null(path);
-    struct tx_app_context app;
+    struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
     int ret = load_and_apply_config(&app, path);
     unlink(path); free(path);

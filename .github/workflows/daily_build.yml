@@ -1,7 +1,7 @@
-#
-# Apache v2 license
+﻿#
+# BSD 3-Clause License
 # Copyright (C) 2026 Intel Corporation
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BSD-3-Clause
 #
 name: Daily Build
 
@@ -29,7 +29,7 @@ jobs:
 
       - name: Checkout repository
         run: |
-          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/intel-innersource/applications.media.ledvideowall.gardencove-next.transmitter-app.git .
+          git clone https://github.com/OpenVisualCloud/directview-led-software-toolkit.git .
           git checkout ${{ github.sha }}
 
       - name: Verify dependencies
@@ -63,24 +63,24 @@ jobs:
           echo "Found MTL pkgconfig at: $MTL_PC_DIR"
           echo "PKG_CONFIG_PATH=${MTL_PC_DIR}:${PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
 
-      - name: Build TxApp
+      - name: Build dvledtx
         run: |
           echo "Setting up meson build directory..."
           meson setup build
 
-          echo "Compiling TxApp..."
+          echo "Compiling dvledtx..."
           ninja -C build
 
           echo "Build successful!"
-          echo "Binary: ./build/TxApp"
+          echo "Binary: ./build/dvledtx"
 
       - name: Verify build output
         run: |
-          if [ ! -f "./build/TxApp" ]; then
-            echo "ERROR: Build artifact TxApp not found!"
+          if [ ! -f "./build/dvledtx" ]; then
+            echo "ERROR: Build artifact dvledtx not found!"
             exit 1
           fi
-          echo "Build artifact verified: $(file ./build/TxApp)"
+          echo "Build artifact verified: $(file ./build/dvledtx)"
 
       - name: Binary size and symbol check
         run: |
@@ -88,15 +88,15 @@ jobs:
           mkdir -p "$REPORT_DIR"
 
           echo "=== size ===" | tee "$REPORT_DIR/binary-report.txt"
-          size ./build/TxApp | tee -a "$REPORT_DIR/binary-report.txt"
+          size ./build/dvledtx | tee -a "$REPORT_DIR/binary-report.txt"
 
           echo "" | tee -a "$REPORT_DIR/binary-report.txt"
           echo "=== readelf: shared library dependencies ===" | tee -a "$REPORT_DIR/binary-report.txt"
-          readelf -d ./build/TxApp | grep NEEDED | tee -a "$REPORT_DIR/binary-report.txt"
+          readelf -d ./build/dvledtx | grep NEEDED | tee -a "$REPORT_DIR/binary-report.txt"
 
           echo "" | tee -a "$REPORT_DIR/binary-report.txt"
           echo "=== nm: undefined external symbols ===" | tee -a "$REPORT_DIR/binary-report.txt"
-          nm -u ./build/TxApp | tee -a "$REPORT_DIR/binary-report.txt"
+          nm -u ./build/dvledtx | tee -a "$REPORT_DIR/binary-report.txt"
 
           echo "Binary report saved to $REPORT_DIR/binary-report.txt"
 
@@ -105,12 +105,12 @@ jobs:
           REPORT_DIR="$HOME/daily-build/${{ github.repository }}/${{ github.run_id }}"
           mkdir -p "$REPORT_DIR"
 
-          echo "Running TxApp smoke test (5s timeout)..."
-          timeout 5s ./build/TxApp --help > "$REPORT_DIR/smoke-test.txt" 2>&1 || true
+          echo "Running dvledtx smoke test (5s timeout)..."
+          timeout 5s ./build/dvledtx --help > "$REPORT_DIR/smoke-test.txt" 2>&1 || true
 
           # Verify it produced output (i.e. it started and didn't segfault silently)
           if [ ! -s "$REPORT_DIR/smoke-test.txt" ]; then
-            echo "ERROR: TxApp produced no output during smoke test."
+            echo "ERROR: dvledtx produced no output during smoke test."
             exit 1
           fi
           echo "Smoke test passed. Output:"

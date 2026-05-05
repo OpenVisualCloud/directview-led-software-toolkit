@@ -1,7 +1,7 @@
 #
-# Apache v2 license
+# BSD 3-Clause License
 # Copyright (C) 2026 Intel Corporation
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BSD-3-Clause
 #
 name: Transmitter App CI
 
@@ -21,7 +21,7 @@ jobs:
 
       - name: Checkout repository
         run: |
-          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/intel-innersource/applications.media.ledvideowall.gardencove-next.transmitter-app.git .
+          git clone https://github.com/OpenVisualCloud/directview-led-software-toolkit.git .
           git checkout ${{ github.sha }}
 
       - name: cppcheck

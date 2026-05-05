@@ -1,6 +1,8 @@
-#!/bin/bash
+﻿#!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright 2026 Intel Corporation
 
-# Unit test runner for TxApp
+# Unit test runner for dvledtx
 # Usage: bash scripts/test.sh [--no-coverage]
 #
 # Runs all cmocka unit tests under tests/ and prints a pass/fail summary.

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  */
 
@@ -186,7 +186,7 @@ void mtl_copy_crop_to_frame(struct st_frame* dst, AVFrame* src,
  *
  * mtl_tx_uninit() — release the MTL library instance.
  */
-int mtl_tx_init(session_manager_t* manager, struct tx_app_context* app) {
+int mtl_tx_init(session_manager_t* manager, struct dvledtx_context* app) {
   struct mtl_init_params mtl_params;
   memset(&mtl_params, 0, sizeof(mtl_params));
 
@@ -230,7 +230,7 @@ void mtl_tx_uninit(session_manager_t* manager) {
  * mtl_tx_session_free() — call st20p_tx_free() and clear ctx->handle.
  */
 int mtl_tx_session_create(session_manager_t* manager, struct st20p_tx_ctx* ctx,
-                           struct tx_app_context* app, int session_idx) {
+                           struct dvledtx_context* app, int session_idx) {
   struct st20p_tx_ops ops;
   memset(&ops, 0, sizeof(ops));
 

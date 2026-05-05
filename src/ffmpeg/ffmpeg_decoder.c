@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  */
 
@@ -318,7 +318,7 @@ static void close_ffmpeg_decoder(
  * Open/close shared FFmpeg decoder (multi-session input path)
  * ========================================================================= */
 int open_shared_ffmpeg(struct shared_decode_ctx* dec, const char* filename) {
-  struct tx_app_context* app = dec->app;
+  struct dvledtx_context* app = dec->app;
   return open_ffmpeg_decoder(
     filename, "Shared decode",
     app->fmt, (int)app->width, (int)app->height,

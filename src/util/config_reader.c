@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  */
 
@@ -187,20 +187,20 @@ int peek_config_log_file(const char* config_file, char* out_buf, size_t out_size
 }
 
 /* -------------------------------------------------------------------------
- * parse_tx_config — parse the JSON config file into tx_app_config.
+ * parse_tx_config — parse the JSON config file into dvledtx_config.
  *
  * Expected JSON structure:
  *   {
  *     "interfaces": [ { "name": "...", "sip": "...", "dip": "..." } ],
  *     "video": { "width": N, "height": N, "fps": N, "fmt": "...", "tx_url": "..." },
- *     "log_file": "/path/to/TxApp.log",  (optional — omit for console-only logging)
+ *     "log_file": "/path/to/dvledtx.log",  (optional — omit for console-only logging)
  *     "tx_sessions": [
  *       { "udp_port": N, "payload_type": N, "crop": { "x":N, "y":N, "w":N, "h":N } },
  *       ...
  *     ]
  *   }
  * -------------------------------------------------------------------------*/
-int parse_tx_config(const char* config_file, struct tx_app_config* config) {
+int parse_tx_config(const char* config_file, struct dvledtx_config* config) {
     FILE* fp = fopen(config_file, "r");
     if (fp == NULL) {
         LOG_ERROR("Cannot open config file %s", config_file);
@@ -346,7 +346,7 @@ int parse_tx_config(const char* config_file, struct tx_app_config* config) {
     return 0;
 }
 
-int validate_tx_config(const struct tx_app_config* config) {
+int validate_tx_config(const struct dvledtx_config* config) {
     /* Interface validation */
     if (config->interface_name[0] == '\0') {
         LOG_ERROR("interfaces[0].name is required");
@@ -545,11 +545,11 @@ int validate_tx_config(const struct tx_app_config* config) {
     return 0;
 }
 
-int load_and_apply_config(struct tx_app_context* app, const char* config_file) {
+int load_and_apply_config(struct dvledtx_context* app, const char* config_file) {
     if (app == NULL || config_file == NULL || config_file[0] == '\0')
         return 0; /* no config file — keep CLI defaults */
 
-    struct tx_app_config config;
+    struct dvledtx_config config;
     if (parse_tx_config(config_file, &config) != 0) {
         LOG_WARN("Failed to parse config file %s", config_file);
         return -1;
@@ -604,7 +604,7 @@ int load_and_apply_config(struct tx_app_context* app, const char* config_file) {
     }
 
     /* Use first session's udp_port as the legacy app->udp_port
-     * (used only for the status print in tx_app_main.c) */
+     * (used only for the status print in dvledtx_main.c) */
     app->udp_port     = config.sessions[0].udp_port;
     app->payload_type = config.sessions[0].payload_type;
 
@@ -640,7 +640,7 @@ int load_and_apply_config(struct tx_app_context* app, const char* config_file) {
  * sip_addr_str is optional (empty → DHCP mode, binary left zeroed).
  * dip_addr_str is mandatory — the multicast destination IP must be valid.
  * -------------------------------------------------------------------------*/
-int resolve_ip_addrs(struct tx_app_context* ctx) {
+int resolve_ip_addrs(struct dvledtx_context* ctx) {
     if (ctx->sip_addr_str[0] != '\0') {
         if (inet_pton(AF_INET, ctx->sip_addr_str, ctx->sip_addr) != 1) {
             LOG_ERROR("Invalid source IP address %s", ctx->sip_addr_str);

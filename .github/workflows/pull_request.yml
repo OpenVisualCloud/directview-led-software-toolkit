@@ -1,7 +1,7 @@
-#
-# Apache v2 license
+﻿#
+# BSD 3-Clause License
 # Copyright (C) 2026 Intel Corporation
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BSD-3-Clause
 #
 name: Pull Request
 
@@ -17,7 +17,7 @@ on:
 
 jobs:
   build:
-    name: Build TxApp
+    name: Build dvledtx
     runs-on: self-hosted
 
     steps:
@@ -38,22 +38,22 @@ jobs:
           echo "Building with FFMPEG TX APIs..."
           ./scripts/build.sh
 
-          if [ ! -f "./build/TxApp" ]; then
-            echo "ERROR: Build artifact TxApp not found!"
+          if [ ! -f "./build/dvledtx" ]; then
+            echo "ERROR: Build artifact dvledtx not found!"
             exit 1
           fi
-          echo "Build with FFMPEG TX APIs succeess $(file ./build/TxApp)"
+          echo "Build with FFMPEG TX APIs succeess $(file ./build/dvledtx)"
 
       - name: Build with MTL TX APIs
         run: |
           echo "Building with MTL TX APIs..."
           ./scripts/build.sh -Denable_mtl_tx=true
 
-          if [ ! -f "./build/TxApp" ]; then
-            echo "ERROR: Build artifact TxApp not found!"
+          if [ ! -f "./build/dvledtx" ]; then
+            echo "ERROR: Build artifact dvledtx not found!"
             exit 1
           fi
-          echo "Build with MTL TX APIs succeess $(file ./build/TxApp)"
+          echo "Build with MTL TX APIs succeess $(file ./build/dvledtx)"
 
   unit-tests:
     name: Unit Tests
