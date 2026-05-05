@@ -26,7 +26,7 @@ jobs:
 
       - name: cppcheck
         run: |
-          REPORT_DIR="$HOME/static-analysis/${{ github.repository }}/${{ github.run_id }}"
+          REPORT_DIR="$GITHUB_WORKSPACE/reports"
           mkdir -p "$REPORT_DIR"
           cppcheck \
             --enable=warning,style,performance,portability \
@@ -37,21 +37,21 @@ jobs:
 
       - name: flawfinder
         run: |
-          REPORT_DIR="$HOME/static-analysis/${{ github.repository }}/${{ github.run_id }}"
+          REPORT_DIR="$GITHUB_WORKSPACE/reports"
           mkdir -p "$REPORT_DIR"
           flawfinder --minlevel=3 --dataonly src include 2>&1 | tee "$REPORT_DIR/flawfinder-report.txt" || true
           echo "flawfinder scan complete. Report saved to $REPORT_DIR/flawfinder-report.txt"
 
       - name: shellcheck scripts
         run: |
-          REPORT_DIR="$HOME/static-analysis/${{ github.repository }}/${{ github.run_id }}"
+          REPORT_DIR="$GITHUB_WORKSPACE/reports"
           mkdir -p "$REPORT_DIR"
           shellcheck scripts/build.sh scripts/run.sh 2>&1 | tee "$REPORT_DIR/shellcheck-report.txt" || true
           echo "shellcheck scan complete. Report saved to $REPORT_DIR/shellcheck-report.txt"
 
       - name: codespell
         run: |
-          REPORT_DIR="$HOME/static-analysis/${{ github.repository }}/${{ github.run_id }}"
+          REPORT_DIR="$GITHUB_WORKSPACE/reports"
           mkdir -p "$REPORT_DIR"
           codespell \
             --skip="./.git,./build" \
@@ -64,5 +64,5 @@ jobs:
         if: always()
         with:
           name: static-analysis-reports-${{ github.run_id }}
-          path: ${{ env.HOME }}/static-analysis/${{ github.repository }}/${{ github.run_id }}/
+          path: ${{ github.workspace }}/reports/
           retention-days: 30

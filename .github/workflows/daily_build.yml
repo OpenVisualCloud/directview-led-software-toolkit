@@ -84,7 +84,7 @@ jobs:
 
       - name: Binary size and symbol check
         run: |
-          REPORT_DIR="$HOME/daily-build/${{ github.repository }}/${{ github.run_id }}"
+          REPORT_DIR="$GITHUB_WORKSPACE/reports"
           mkdir -p "$REPORT_DIR"
 
           echo "=== size ===" | tee "$REPORT_DIR/binary-report.txt"
@@ -102,7 +102,7 @@ jobs:
 
       - name: Smoke test
         run: |
-          REPORT_DIR="$HOME/daily-build/${{ github.repository }}/${{ github.run_id }}"
+          REPORT_DIR="$GITHUB_WORKSPACE/reports"
           mkdir -p "$REPORT_DIR"
 
           echo "Running dvledtx smoke test (5s timeout)..."
@@ -116,17 +116,10 @@ jobs:
           echo "Smoke test passed. Output:"
           cat "$REPORT_DIR/smoke-test.txt"
 
-      - name: Purge old reports
-        run: |
-          echo "Purging static-analysis and daily-build reports older than 30 days..."
-          find "$HOME/static-analysis/" -mindepth 1 -mtime +30 -exec rm -rf {} + 2>/dev/null || true
-          find "$HOME/daily-build/" -mindepth 1 -mtime +30 -exec rm -rf {} + 2>/dev/null || true
-          echo "Purge complete."
-
       - name: Upload daily build reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: daily-build-reports-${{ github.run_id }}
-          path: ${{ env.HOME }}/daily-build/${{ github.repository }}/${{ github.run_id }}/
+          path: ${{ github.workspace }}/reports/
           retention-days: 30
