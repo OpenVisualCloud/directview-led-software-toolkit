@@ -1,8 +1,8 @@
-﻿# Directview LED Software Toolkit
+﻿# Direct View LED Software Toolkit
 
 ## Overview
 
-Directview LED Software Toolkit is a simplified, standalone transmitter application using FFMPEG APIs and Media Transport Library (MTL) plugin. It provides clean TX-only functionality without the complexity of RX/TX interdependencies.
+Direct View LED Software Toolkit is a simplified, standalone transmitter application using FFMPEG APIs and Media Transport Library (MTL) plugin. It provides clean TX-only functionality without the complexity of RX/TX interdependencies.
 
 ## Notices
 
