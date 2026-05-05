@@ -3,7 +3,7 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: BSD-3-Clause
 #
-name: DVLED Transmitter App CI
+name: DVLED App CI
 
 on:
   push:
@@ -12,7 +12,7 @@ on:
 
 jobs:
   static-analysis:
-    name: CI_Tests_Static_Analysis
+    name: Continuous Integration
     runs-on: self-hosted
     steps:
       - name: Clean up previous run

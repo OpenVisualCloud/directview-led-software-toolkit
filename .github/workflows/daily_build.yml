@@ -19,6 +19,7 @@ on:
 jobs:
   build:
     name: Daily Build
+
     runs-on: self-hosted
 
     steps:
@@ -68,7 +69,7 @@ jobs:
         uses: ./.github/actions/build-dvledtx
 
       - name: Run unit tests
-        uses: ./.github/actions/run-unit-tests
+        uses: ./.github/actions/unit-tests
 
       - name: Static analysis
         uses: ./.github/actions/static-analysis
@@ -92,7 +93,7 @@ jobs:
           echo "Binary report saved to $REPORT_DIR/binary-report.txt"
 
       - name: Smoke test
-        uses: ./.github/actions/smoke-test
+        uses: ./.github/actions/smoke-tests
 
       - name: Upload daily build reports
         uses: actions/upload-artifact@v4

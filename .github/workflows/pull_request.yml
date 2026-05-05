@@ -17,7 +17,7 @@ on:
 
 jobs:
   build:
-    name: Build DVLED Transmitter
+    name: Pull Request
     runs-on: self-hosted
 
     steps:
@@ -42,7 +42,7 @@ jobs:
           enable_mtl_tx: 'true'
 
       - name: Smoke test
-        uses: ./.github/actions/smoke-test
+        uses: ./.github/actions/smoke-tests
 
       # - name: Upload binary
       #   uses: actions/upload-artifact@v4
@@ -68,7 +68,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run unit tests
-        uses: ./.github/actions/run-unit-tests
+        uses: ./.github/actions/unit-tests
 
       - name: Upload unit test reports
         uses: actions/upload-artifact@v4

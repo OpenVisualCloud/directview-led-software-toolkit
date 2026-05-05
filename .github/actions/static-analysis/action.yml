@@ -14,36 +14,40 @@ runs:
       run: |
         REPORT_DIR="$GITHUB_WORKSPACE/reports"
         mkdir -p "$REPORT_DIR"
+        echo "===== cppcheck Static Analysis ====="
         cppcheck \
           --enable=warning,style,performance,portability \
           --std=c11 --force --inline-suppr \
           --suppress=missingIncludeSystem \
           -Iinclude src 2>&1 | tee "$REPORT_DIR/cppcheck-report.txt" || true
-        echo "cppcheck scan complete. Report saved to $REPORT_DIR/cppcheck-report.txt"
+        echo "cppcheck scan complete. Report: $REPORT_DIR/cppcheck-report.txt"
 
     - name: flawfinder
       shell: bash
       run: |
         REPORT_DIR="$GITHUB_WORKSPACE/reports"
         mkdir -p "$REPORT_DIR"
+        echo "===== flawfinder Security Analysis ====="
         flawfinder --minlevel=3 --dataonly src include 2>&1 | tee "$REPORT_DIR/flawfinder-report.txt" || true
-        echo "flawfinder scan complete. Report saved to $REPORT_DIR/flawfinder-report.txt"
+        echo "flawfinder scan complete. Report: $REPORT_DIR/flawfinder-report.txt"
 
     - name: shellcheck scripts
       shell: bash
       run: |
         REPORT_DIR="$GITHUB_WORKSPACE/reports"
         mkdir -p "$REPORT_DIR"
+        echo "===== shellcheck Script Analysis ====="
         shellcheck scripts/build.sh scripts/test.sh 2>&1 | tee "$REPORT_DIR/shellcheck-report.txt" || true
-        echo "shellcheck scan complete. Report saved to $REPORT_DIR/shellcheck-report.txt"
+        echo "shellcheck scan complete. Report: $REPORT_DIR/shellcheck-report.txt"
 
     - name: codespell
       shell: bash
       run: |
         REPORT_DIR="$GITHUB_WORKSPACE/reports"
         mkdir -p "$REPORT_DIR"
+        echo "===== codespell Spell Check ====="
         codespell \
           --skip="./.git,./build" \
           --ignore-words-list=mtl,st20p,st30p \
           . 2>&1 | tee "$REPORT_DIR/codespell-report.txt" || true
-        echo "codespell scan complete. Report saved to $REPORT_DIR/codespell-report.txt"
+        echo "codespell scan complete. Report: $REPORT_DIR/codespell-report.txt"
