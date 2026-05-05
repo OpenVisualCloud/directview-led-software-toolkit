@@ -28,9 +28,10 @@ jobs:
           find "${{ github.workspace }}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 
       - name: Checkout repository
-        run: |
-          git clone https://github.com/OpenVisualCloud/directview-led-software-toolkit.git .
-          git checkout ${{ github.sha }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
 
       - name: Verify dependencies
         run: |
@@ -64,23 +65,13 @@ jobs:
           echo "PKG_CONFIG_PATH=${MTL_PC_DIR}:${PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
 
       - name: Build dvledtx
-        run: |
-          echo "Setting up meson build directory..."
-          meson setup build
+        uses: ./.github/actions/build-dvledtx
 
-          echo "Compiling dvledtx..."
-          ninja -C build
+      - name: Run unit tests
+        uses: ./.github/actions/run-unit-tests
 
-          echo "Build successful!"
-          echo "Binary: ./build/dvledtx"
-
-      - name: Verify build output
-        run: |
-          if [ ! -f "./build/dvledtx" ]; then
-            echo "ERROR: Build artifact dvledtx not found!"
-            exit 1
-          fi
-          echo "Build artifact verified: $(file ./build/dvledtx)"
+      - name: Static analysis
+        uses: ./.github/actions/static-analysis
 
       - name: Binary size and symbol check
         run: |
@@ -117,12 +108,14 @@ jobs:
           cat "$REPORT_DIR/smoke-test.txt"
 
           # Copy binary into reports so everything is in one artifact
-          cp ./build/dvledtx "$REPORT_DIR/dvledtx"
+          # cp ./build/dvledtx "$REPORT_DIR/dvledtx"
 
       - name: Upload daily build reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: dvledtx-build-artifacts-${{ github.run_id }}
-          path: ${{ github.workspace }}/reports/
+          path: |
+            ${{ github.workspace }}/reports/
+            ${{ github.workspace }}/test-reports/
           retention-days: 30

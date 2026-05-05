@@ -34,47 +34,38 @@ jobs:
           fetch-depth: 0
 
       - name: Build with FFMPEG TX APIs
-        run: |
-          echo "Building with FFMPEG TX APIs..."
-          ./scripts/build.sh
-
-          if [ ! -f "./build/dvledtx" ]; then
-            echo "ERROR: Build artifact dvledtx not found!"
-            exit 1
-          fi
-          echo "Build with FFMPEG TX APIs succeess $(file ./build/dvledtx)"
+        uses: ./.github/actions/build-dvledtx
 
       - name: Build with MTL TX APIs
-        run: |
-          echo "Building with MTL TX APIs..."
-          ./scripts/build.sh -Denable_mtl_tx=true
-
-          if [ ! -f "./build/dvledtx" ]; then
-            echo "ERROR: Build artifact dvledtx not found!"
-            exit 1
-          fi
-          echo "Build with MTL TX APIs succeess $(file ./build/dvledtx)"
-
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
-        if: always()
+        uses: ./.github/actions/build-dvledtx
         with:
-          name: pr-binary-${{ github.run_id }}
-          path: build/dvledtx
-          retention-days: 30
+          enable_mtl_tx: 'true'
+
+      # - name: Upload binary
+      #   uses: actions/upload-artifact@v4
+      #   if: always()
+      #   with:
+      #     name: pr-binary-${{ github.run_id }}
+      #     path: build/dvledtx
+      #     retention-days: 30
 
   unit-tests:
     name: Unit Tests
     runs-on: self-hosted
 
     steps:
-      - name: Execute Unit Tests
+      - name: Clean up previous run
         run: |
-          echo "Executing Unit Tests..."
-          mkdir -p "$GITHUB_WORKSPACE/test-reports"
-          ./scripts/test.sh 2>&1 | tee "$GITHUB_WORKSPACE/test-reports/unit-test-results.txt"
+          find "${{ github.workspace }}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 
-          echo "Unit Tests executed successfully"
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Run unit tests
+        uses: ./.github/actions/run-unit-tests
 
       - name: Upload unit test reports
         uses: actions/upload-artifact@v4
@@ -99,40 +90,8 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
-      - name: cppcheck
-        run: |
-          REPORT_DIR="$GITHUB_WORKSPACE/reports"
-          mkdir -p "$REPORT_DIR"
-          cppcheck \
-            --enable=warning,style,performance,portability \
-            --std=c11 --force --inline-suppr \
-            --suppress=missingIncludeSystem \
-            -Iinclude src 2>&1 | tee "$REPORT_DIR/cppcheck-report.txt" || true
-          echo "cppcheck scan complete. Report saved to $REPORT_DIR/cppcheck-report.txt"
-
-      - name: flawfinder
-        run: |
-          REPORT_DIR="$GITHUB_WORKSPACE/reports"
-          mkdir -p "$REPORT_DIR"
-          flawfinder --minlevel=3 --dataonly src include 2>&1 | tee "$REPORT_DIR/flawfinder-report.txt" || true
-          echo "flawfinder scan complete. Report saved to $REPORT_DIR/flawfinder-report.txt"
-
-      - name: shellcheck scripts
-        run: |
-          REPORT_DIR="$GITHUB_WORKSPACE/reports"
-          mkdir -p "$REPORT_DIR"
-          shellcheck scripts/build.sh scripts/run.sh 2>&1 | tee "$REPORT_DIR/shellcheck-report.txt" || true
-          echo "shellcheck scan complete. Report saved to $REPORT_DIR/shellcheck-report.txt"
-
-      - name: codespell
-        run: |
-          REPORT_DIR="$GITHUB_WORKSPACE/reports"
-          mkdir -p "$REPORT_DIR"
-          codespell \
-            --skip="./.git,./build" \
-            --ignore-words-list=mtl,st20p,st30p \
-            . 2>&1 | tee "$REPORT_DIR/codespell-report.txt" || true
-          echo "codespell scan complete. Report saved to $REPORT_DIR/codespell-report.txt"
+      - name: Static analysis
+        uses: ./.github/actions/static-analysis
 
       - name: Upload static analysis reports
         uses: actions/upload-artifact@v4
