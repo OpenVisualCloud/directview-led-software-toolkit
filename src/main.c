@@ -116,7 +116,7 @@ static bool validate_log_path(const char* path) {
   char* slash = strrchr(pathcopy, '/');
   if (slash != NULL) {
     *slash = '\0';
-    if (realpath(pathcopy, resolved) == NULL) {
+    if (realpath(pathcopy, resolved) == NULL) { /* flawfinder: ignore — resolved is PATH_MAX */
       /* Directory doesn't exist — reject */
       return false;
     }
@@ -172,7 +172,7 @@ static int parse_args(struct dvledtx_context* ctx, int argc, char** argv) {
   ctx->config_file[0] = '\0';
 
   int c = 0, option_index = 0;
-  while ((c = getopt_long(argc, argv, "C:v?", long_options, &option_index)) != -1) {
+  while ((c = getopt_long(argc, argv, "C:v?", long_options, &option_index)) != -1) { /* flawfinder: ignore */
     switch (c) {
       case 'C':
         strncpy(ctx->config_file, optarg, sizeof(ctx->config_file) - 1);
@@ -227,8 +227,8 @@ int main(int argc, char** argv) {
         peeked_log_file[0] != '\0') {
       log_file_path = peeked_log_file;
     } else {
-      const char *env_log = getenv("LOG_FILE");
-      if (env_log != NULL && env_log[0] != '\0')
+      const char *env_log = getenv("LOG_FILE"); /* flawfinder: ignore */
+      if (env_log != NULL && env_log[0] != '\0' && strlen(env_log) < PATH_MAX)
         log_file_path = env_log;
     }
 

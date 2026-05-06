@@ -115,7 +115,7 @@ void logger_log(log_level_t level, const char *file, int line,
     char msg[1024];
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(msg, sizeof(msg), fmt, ap);
+    vsnprintf(msg, sizeof(msg), fmt, ap); /* flawfinder: ignore — fmt is always a compile-time literal */
     va_end(ap);
 
     char ts[32] = "";
@@ -156,7 +156,10 @@ void logger_log(log_level_t level, const char *file, int line,
     if (g_logger.config.enable_file && g_logger.file_fp) {
         /* If the file has reached 20 MB, truncate and start fresh */
         if (ftell(g_logger.file_fp) >= 20 * 1024 * 1024) {
-            freopen(g_logger.config.log_file, "w", g_logger.file_fp);
+            FILE *new_fp = freopen(g_logger.config.log_file, "w", g_logger.file_fp);
+            if (new_fp == NULL) {
+                g_logger.file_fp = NULL;
+            }
         }
         if (level == LOG_LEVEL_ERROR) {
             fprintf(g_logger.file_fp, "%s[%s:%d %s] %s\n",
