@@ -51,7 +51,5 @@ jobs:
         if: always()
         with:
           name: dvledtx-pr-artifacts-${{ github.run_id }}
-          path: |
-            ${{ github.workspace }}/reports/
-            ${{ github.workspace }}/test-reports/
+          path: ${{ github.workspace }}/reports/
           retention-days: 30
