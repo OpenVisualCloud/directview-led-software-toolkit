@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  *
  * Mock-based unit tests for src/ffmpeg/ffmpeg_decoder.c.
@@ -88,7 +88,7 @@ const AVOutputFormat* __wrap_av_guess_format(const char* short_name,
  * Returns 0 on success, -1 on failure.  Caller must unlink() when done.
  * ========================================================================= */
 
-static char TEST_VIDEO_PATH[64] = "/tmp/txapp_test_mockXXXXXX";
+static char TEST_VIDEO_PATH[64] = "/tmp/dvledtx_test_mockXXXXXX";
 
 static int generate_test_video(void)
 {
@@ -172,10 +172,10 @@ fail_enc:
 }
 
 /* =========================================================================
- * Helper: fill a minimal tx_app_context for 16x16 video
+ * Helper: fill a minimal dvledtx_context for 16x16 video
  * ========================================================================= */
 
-static void fill_app_16x16(struct tx_app_context* app, int sessions)
+static void fill_app_16x16(struct dvledtx_context* app, int sessions)
 {
     memset(app, 0, sizeof(*app));
     strncpy(app->port,         "0000:06:00.0",  sizeof(app->port) - 1);
@@ -205,7 +205,7 @@ static void fill_app_16x16(struct tx_app_context* app, int sessions)
 static void test_open_shared_ffmpeg_success(void **state)
 {
     (void)state;
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app_16x16(&app, 3);
 
     struct shared_decode_ctx dec;
@@ -228,14 +228,14 @@ static void test_open_shared_ffmpeg_success(void **state)
 static void test_open_shared_ffmpeg_bad_file_fails(void **state)
 {
     (void)state;
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app_16x16(&app, 1);
 
     struct shared_decode_ctx dec;
     memset(&dec, 0, sizeof(dec));
     dec.app = &app;
 
-    int ret = open_shared_ffmpeg(&dec, "/tmp/txapp_nonexistent_xyz.mp4");
+    int ret = open_shared_ffmpeg(&dec, "/tmp/dvledtx_nonexistent_xyz.mp4");
     assert_int_equal(ret, -1);
 }
 
@@ -246,7 +246,7 @@ static void test_open_shared_ffmpeg_bad_file_fails(void **state)
 static void test_load_video_source_mp4_calls_open_ffmpeg_source(void **state)
 {
     (void)state;
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app_16x16(&app, 1);
 
     struct st20p_tx_ctx ctx;
@@ -269,7 +269,7 @@ static void test_load_video_source_nonexistent_mp4_returns_minus1(void **state)
     (void)state;
     /* A nonexistent .mp4 file causes avformat_open_input to fail inside
      * open_ffmpeg_source (static) → returns -1 → load_video_source propagates -1. */
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app_16x16(&app, 1);
 
     struct st20p_tx_ctx ctx;
@@ -277,7 +277,7 @@ static void test_load_video_source_nonexistent_mp4_returns_minus1(void **state)
     ctx.idx = 0;
     ctx.app = &app;
 
-    int ret = load_video_source(&ctx, "/tmp/txapp_nonexistent_xyz.mp4");
+    int ret = load_video_source(&ctx, "/tmp/dvledtx_nonexistent_xyz.mp4");
     assert_int_equal(ret, -1);
     assert_false(ctx.use_ffmpeg);
     assert_null(ctx.fmt_ctx);
@@ -290,7 +290,7 @@ static void test_load_video_source_nonexistent_mp4_returns_minus1(void **state)
 static void test_shared_decode_thread_decodes_frames(void **state)
 {
     (void)state;
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app_16x16(&app, 1);
     g_test_exit = false;
 
@@ -349,7 +349,7 @@ static void test_shared_decode_thread_decodes_frames(void **state)
 static void test_close_ffmpeg_source_full(void **state)
 {
     (void)state;
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app_16x16(&app, 1);
 
     struct st20p_tx_ctx ctx;
@@ -377,7 +377,7 @@ static void test_close_ffmpeg_source_full(void **state)
 static void test_close_shared_ffmpeg_full(void **state)
 {
     (void)state;
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app_16x16(&app, 1);
 
     struct shared_decode_ctx dec;

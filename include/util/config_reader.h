@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  */
 
@@ -8,7 +8,7 @@
 #include "app_context.h"
 
 // Forward declaration
-struct tx_app_context;
+struct dvledtx_context;
 
 /* Per-session network + crop configuration (one entry per tx_sessions[] item) */
 struct tx_session_config {
@@ -21,7 +21,7 @@ struct tx_session_config {
 };
 
 /* Full application configuration parsed from JSON */
-struct tx_app_config {
+struct dvledtx_config {
   /* interfaces[0] */
   char interface_name[64];  /* PCI address, e.g. "0000:02:00.0" */
   char interface_sip[32];   /* source IP, e.g. "192.168.50.29" */
@@ -46,15 +46,15 @@ struct tx_app_config {
  * Returns 0 and fills out_buf on success, -1 if not found or on error. */
 int peek_config_log_file(const char* config_file, char* out_buf, size_t out_size);
 
-/* Parse JSON config file into tx_app_config */
-int parse_tx_config(const char* config_file, struct tx_app_config* config);
+/* Parse JSON config file into dvledtx_config */
+int parse_tx_config(const char* config_file, struct dvledtx_config* config);
 
 /* Validate parsed configuration */
-int validate_tx_config(const struct tx_app_config* config);
+int validate_tx_config(const struct dvledtx_config* config);
 
 /* Load JSON config and apply it to the app context */
-int load_and_apply_config(struct tx_app_context* app, const char* config_file);
+int load_and_apply_config(struct dvledtx_context* app, const char* config_file);
 
 /* Convert sip_addr_str / dip_addr_str to packed binary (struct in_addr).
  * Call once after load_and_apply_config().  Returns 0 on success, -1 on error. */
-int resolve_ip_addrs(struct tx_app_context* ctx);
+int resolve_ip_addrs(struct dvledtx_context* ctx);

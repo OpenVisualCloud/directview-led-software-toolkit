@@ -1,0 +1,41 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: 'Smoke Tests'
+description: 'Run smoke tests on dvledtx-ffmpeg and dvledtx-mtl binaries. Results written to $GITHUB_WORKSPACE/reports/'
+
+runs:
+  using: composite
+  steps:
+    - name: Smoke test
+      shell: bash
+      run: |
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
+        mkdir -p "$REPORT_DIR"
+
+        for BINARY in ./bins/dvledtx-ffmpeg ./bins/dvledtx-mtl; do
+          NAME=$(basename "$BINARY")
+          echo "===== Smoke Test: $NAME ====="
+          OUTFILE="$REPORT_DIR/smoke-test-${NAME}.txt"
+
+          # version check
+          VERSION_OUTPUT=$(timeout 5s "$BINARY" -v 2>&1)
+          if ! echo "$VERSION_OUTPUT" | grep -qE "^dvledtx version [0-9]+\.[0-9]+\.[0-9]+"; then
+            echo "ERROR: $NAME -v output did not match expected format 'dvledtx version X.Y.Z'"
+            echo "Got: $VERSION_OUTPUT"
+            exit 1
+          fi
+          echo "  [OK] $NAME -v: $VERSION_OUTPUT"
+
+          # help check
+          timeout 5s "$BINARY" --help > "$OUTFILE" 2>&1 || true
+          if [ ! -s "$OUTFILE" ]; then
+            echo "ERROR: $NAME produced no output during smoke test."
+            exit 1
+          fi
+          echo "Smoke test passed for $NAME. Output:"
+          cat "$OUTFILE"
+        done
+

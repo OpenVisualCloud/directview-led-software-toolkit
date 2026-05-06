@@ -1,9 +1,9 @@
 #
-# Apache v2 license
+# BSD 3-Clause License
 # Copyright (C) 2026 Intel Corporation
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BSD-3-Clause
 #
-name: Transmitter Trivy Scan
+name: Trivy Scan
 permissions: read-all
 
 on:
@@ -33,9 +33,13 @@ jobs:
           rm -rf /tmp/trivy-*
 
       - name: Checkout repository
-        run: |
-          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/intel-innersource/applications.media.ledvideowall.gardencove-next.transmitter-app.git .
-          git checkout ${{ github.event.pull_request.head.sha || github.sha }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Environment check
+        uses: ./.github/actions/environment-check
 
       - name: Verify Trivy installation
         run: |
@@ -49,39 +53,28 @@ jobs:
 
       - name: Trivy filesystem scan
         run: |
-          REPORT_DIR="$HOME/trivy-scan/${{ github.repository }}/${{ github.run_id }}"
+          REPORT_DIR="$GITHUB_WORKSPACE/trivy-reports"
           mkdir -p "$REPORT_DIR"
-          cd "${{ github.workspace }}"
           trivy fs --list-all-pkgs --format json \
             --output "$REPORT_DIR/trivy-fs-full-report.json" . || true
-          [ -f "$REPORT_DIR/trivy-fs-full-report.json" ] && \
-            cp "$REPORT_DIR/trivy-fs-full-report.json" /tmp/trivy-fs-full-report.json
-          trivy fs --ignore-unfixed . | tee /tmp/trivy-fs-full-report.txt "$REPORT_DIR/trivy-fs-full-report.txt"
+          trivy fs --ignore-unfixed . | tee "$REPORT_DIR/trivy-fs-report.txt"
 
       - name: Trivy config scan
         run: |
-          REPORT_DIR="$HOME/trivy-scan/${{ github.repository }}/${{ github.run_id }}"
+          REPORT_DIR="$GITHUB_WORKSPACE/trivy-reports"
           mkdir -p "$REPORT_DIR"
-          cd "${{ github.workspace }}"
-          trivy config . | tee /tmp/trivy-config-report.txt "$REPORT_DIR/trivy-config-report.txt" || true
+          trivy config . | tee "$REPORT_DIR/trivy-config-report.txt" || true
 
       - name: Trivy secret scan
         run: |
-          REPORT_DIR="$HOME/trivy-scan/${{ github.repository }}/${{ github.run_id }}"
+          REPORT_DIR="$GITHUB_WORKSPACE/trivy-reports"
           mkdir -p "$REPORT_DIR"
-          cd "${{ github.workspace }}"
-          trivy fs --scanners secret . | tee /tmp/trivy-secret-report.txt "$REPORT_DIR/trivy-secret-report.txt" || true
-
-      - name: Upload Scan artifact to Github
-        uses: actions/upload-artifact@v4
-        with:
-          name: Trivy-reports
-          path: /tmp/trivy-*
+          trivy fs --scanners secret . | tee "$REPORT_DIR/trivy-secret-report.txt" || true
 
       - name: Upload trivy scan reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: trivy-scan-reports-${{ github.run_id }}
-          path: ${{ env.HOME }}/trivy-scan/${{ github.repository }}/${{ github.run_id }}/
+          path: ${{ github.workspace }}/trivy-reports/
           retention-days: 30

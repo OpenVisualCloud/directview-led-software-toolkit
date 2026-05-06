@@ -1,5 +1,5 @@
-{
-  "log_file": "TxApp.log",
+﻿{
+  "log_file": "dvledtx.log",
   "interfaces": [
     {
       "name": "0000:06:00.0",

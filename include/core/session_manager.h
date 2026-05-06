@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  */
 
@@ -22,7 +22,7 @@
 #endif
 
 // Forward declarations
-struct tx_app_context;
+struct dvledtx_context;
 
 /*
  * Shared decode context - ONE decoder feeds ALL N TX sessions.
@@ -56,7 +56,7 @@ struct shared_decode_ctx {
   pthread_cond_t     start_cond;
   bool               start_ready;
 
-  struct tx_app_context* app;
+  struct dvledtx_context* app;
   uint32_t           frame_counter;   /* shared monotonic frame number      */
 };
 
@@ -64,7 +64,7 @@ struct shared_decode_ctx {
 struct st20p_tx_ctx {
   int idx;
   pthread_t thread;
-  struct tx_app_context* app;
+  struct dvledtx_context* app;
   char session_name[32];
 
   /* Raw YUV source (single-session path) */
@@ -126,7 +126,7 @@ typedef struct session_manager_s {
   bool running;
 } session_manager_t;
 
-int  session_manager_init(session_manager_t* manager, struct tx_app_context* app);
+int  session_manager_init(session_manager_t* manager, struct dvledtx_context* app);
 int  session_manager_start(session_manager_t* manager);
 int  session_manager_stop(session_manager_t* manager);
 void session_manager_cleanup(session_manager_t* manager);
@@ -137,4 +137,4 @@ void session_manager_request_exit(void);
 bool session_manager_should_exit(void);
 void session_manager_reset_exit(void);
 
-int create_st20p_tx_session(session_manager_t* manager, struct tx_app_context* app, int session_idx);
+int create_st20p_tx_session(session_manager_t* manager, struct dvledtx_context* app, int session_idx);

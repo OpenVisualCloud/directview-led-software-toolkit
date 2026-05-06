@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  */
 #include "core/session_manager.h"
@@ -26,11 +26,11 @@
  * to signal all threads to terminate.
  * _Atomic ensures reads/writes are race-free across TX threads.
  * Accessed only through accessor functions (Rule 28). */
-static _Atomic bool g_tx_app_exit = false;
+static _Atomic bool g_dvledtx_exit = false;
 
-void session_manager_request_exit(void) { g_tx_app_exit = true; }
-bool session_manager_should_exit(void)  { return g_tx_app_exit; }
-void session_manager_reset_exit(void)   { g_tx_app_exit = false; }
+void session_manager_request_exit(void) { g_dvledtx_exit = true; }
+bool session_manager_should_exit(void)  { return g_dvledtx_exit; }
+void session_manager_reset_exit(void)   { g_dvledtx_exit = false; }
 
 /* =========================================================================
  * Video TX thread — SHARED path (multi-session)
@@ -71,8 +71,8 @@ static void* st20p_tx_thread_shared(void* arg) {
   while (1) {
     pthread_barrier_wait(&dec->barrier_decoded);
 
-    /* Check only dec->exit / app->exit — NOT g_tx_app_exit directly.
-     * g_tx_app_exit causes the decode thread's while-loop to exit; the decode
+    /* Check only dec->exit / app->exit — NOT g_dvledtx_exit directly.
+     * g_dvledtx_exit causes the decode thread's while-loop to exit; the decode
      * thread then sets dec->exit = true and performs the final barrier-pair
      * sync. TX threads must participate in that final sync before breaking,
      * otherwise the decode thread deadlocks waiting at barrier_decoded. */
@@ -201,7 +201,7 @@ static void* st20p_tx_thread(void* arg) {
 /*
  * create_st20p_tx_session() — initialise one ST20P video TX session.
  */
-int create_st20p_tx_session(session_manager_t* manager, struct tx_app_context* app,
+int create_st20p_tx_session(session_manager_t* manager, struct dvledtx_context* app,
                              int session_idx) {
   struct st20p_tx_ctx* ctx = &manager->st20p_sessions[session_idx];
 
@@ -260,7 +260,7 @@ int create_st20p_tx_session(session_manager_t* manager, struct tx_app_context* a
 /* =========================================================================
  * session_manager_init / start / stop / cleanup
  * ========================================================================= */
-int session_manager_init(session_manager_t* manager, struct tx_app_context* app) {
+int session_manager_init(session_manager_t* manager, struct dvledtx_context* app) {
   memset(manager, 0, sizeof(*manager));
 
 #ifdef ENABLE_MTL_TX

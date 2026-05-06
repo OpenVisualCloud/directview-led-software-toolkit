@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  *
  * Unit tests for src/util/logger.c using cmocka.
@@ -31,7 +31,7 @@
  * -------------------------------------------------------------------------- */
 static char *make_tmppath(void)
 {
-    char *path = strdup("/tmp/txapp_logger_test_XXXXXX");
+    char *path = strdup("/tmp/dvledtx_logger_test_XXXXXX");
     if (!path) return NULL;
     int fd = mkstemp(path);
     if (fd < 0) { free(path); return NULL; }
@@ -110,7 +110,7 @@ static void test_init_file_logging_bad_path_fails(void **state)
         .enable_file      = true,
         .enable_timestamp = false,
         .enable_colors    = false,
-        .log_file         = "/no/such/directory/txapp_test.log",
+        .log_file         = "/no/such/directory/dvledtx_test.log",
     };
     assert_int_equal(logger_init(&cfg), -1);
 }

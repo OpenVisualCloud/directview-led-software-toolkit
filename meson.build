@@ -1,4 +1,7 @@
-project('TxApp', 'c', version: '1.0.0')
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright 2026 Intel Corporation
+
+project('dvledtx', 'c', version: '1.0.0')
 
 cc = meson.get_compiler('c')
 
@@ -30,7 +33,7 @@ all_deps = [m_dep, pthread_dep,
             libavformat_dep, libavcodec_dep, libavutil_dep, libswscale_dep,
             avdevice_dep, mtl_dep]
 
-executable('TxApp',
+executable('dvledtx',
   sources: [
     'src/main.c',
     'src/util/config_reader.c',

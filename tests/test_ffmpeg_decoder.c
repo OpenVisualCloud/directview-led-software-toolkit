@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  *
  * Unit tests for src/ffmpeg/ffmpeg_decoder.c using cmocka.
@@ -26,7 +26,7 @@
 #include <string.h>
 #include <unistd.h>
 
-/* Pull in FFmpeg types before tx_app_context.h which uses AVPixelFormat */
+/* Pull in FFmpeg types before dvledtx_context.h which uses AVPixelFormat */
 #include <libavutil/pixfmt.h>
 #include <libavutil/imgutils.h>
 #include <libavformat/avformat.h>
@@ -146,7 +146,7 @@ static void test_is_raw_yuv_just_extension_yuv(void **state)
 static void test_load_video_source_empty_url_is_noop(void **state)
 {
     (void)state;
-    struct tx_app_context app;
+    struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
     app.fmt = AV_PIX_FMT_YUV422P10LE;
     app.width = 1920; app.height = 1080;
@@ -165,7 +165,7 @@ static void test_load_video_source_empty_url_is_noop(void **state)
 static void test_load_video_source_null_url_is_noop(void **state)
 {
     (void)state;
-    struct tx_app_context app;
+    struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
     app.fmt = AV_PIX_FMT_YUV422P10LE;
     app.width = 1920; app.height = 1080;
@@ -184,7 +184,7 @@ static void test_load_video_source_nonexistent_yuv_returns_minus1(void **state)
     (void)state;
     /* A missing .yuv file is treated as "no source" (returns 0, no crash).
      * The real implementation opens the file; if it fails it returns 0. */
-    struct tx_app_context app;
+    struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
     app.fmt = AV_PIX_FMT_YUV422P10LE;
     app.width = 1920; app.height = 1080;
@@ -193,7 +193,7 @@ static void test_load_video_source_nonexistent_yuv_returns_minus1(void **state)
     memset(&ctx, 0, sizeof(ctx));
     ctx.app = &app;
 
-    int ret = load_video_source(&ctx, "/tmp/txapp_nonexistent_12345.yuv");
+    int ret = load_video_source(&ctx, "/tmp/dvledtx_nonexistent_12345.yuv");
     assert_int_equal(ret, -1);
     assert_false(ctx.use_ffmpeg);
     assert_null(ctx.source_buffer);
@@ -203,7 +203,7 @@ static void test_load_video_source_nonexistent_raw_returns_minus1(void **state)
 {
     (void)state;
     /* A missing .raw file: is_raw_yuv() returns true, fopen fails → returns 0 */
-    struct tx_app_context app;
+    struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
     app.fmt = AV_PIX_FMT_YUV422P10LE;
     app.width = 1920; app.height = 1080;
@@ -212,7 +212,7 @@ static void test_load_video_source_nonexistent_raw_returns_minus1(void **state)
     memset(&ctx, 0, sizeof(ctx));
     ctx.app = &app;
 
-    int ret = load_video_source(&ctx, "/tmp/txapp_nonexistent_12345.raw");
+    int ret = load_video_source(&ctx, "/tmp/dvledtx_nonexistent_12345.raw");
     assert_int_equal(ret, -1);
     assert_false(ctx.use_ffmpeg);
     assert_null(ctx.source_buffer);
@@ -224,7 +224,7 @@ static void test_load_video_source_nonexistent_mp4_returns_minus1(void **state)
     /* A missing non-YUV file goes through open_ffmpeg_source which calls
      * avformat_open_input. That fails → open_ffmpeg_source returns -1 →
      * load_video_source propagates -1. */
-    struct tx_app_context app;
+    struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
     app.fmt = AV_PIX_FMT_YUV422P10LE;
     app.width = 1920; app.height = 1080;
@@ -233,7 +233,7 @@ static void test_load_video_source_nonexistent_mp4_returns_minus1(void **state)
     memset(&ctx, 0, sizeof(ctx));
     ctx.app = &app;
 
-    int ret = load_video_source(&ctx, "/tmp/txapp_nonexistent_12345.mp4");
+    int ret = load_video_source(&ctx, "/tmp/dvledtx_nonexistent_12345.mp4");
     assert_int_equal(ret, -1);
     assert_false(ctx.use_ffmpeg);
     assert_null(ctx.fmt_ctx);
@@ -244,7 +244,7 @@ static void test_load_video_source_real_yuv_file_populates_buffer(void **state)
     (void)state;
     /* Write a small .yuv file (48 bytes = 4x4 YUV422 8-bit packed) and
      * verify that load_video_source reads it into source_buffer. */
-    char path[] = "/tmp/txapp_test_XXXXXX";
+    char path[] = "/tmp/dvledtx_test_XXXXXX";
     int fd = mkstemp(path);
     assert_true(fd >= 0);
     close(fd);
@@ -258,7 +258,7 @@ static void test_load_video_source_real_yuv_file_populates_buffer(void **state)
     fwrite(dummy, 1, sizeof(dummy), f);
     fclose(f);
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
     app.fmt = AV_PIX_FMT_YUV422P10LE;
     app.width = 4; app.height = 4;
@@ -387,7 +387,7 @@ static void test_ffmpeg_decode_next_frame_null_ctx_returns_false(void **state)
 {
     (void)state;
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
     app.fmt    = AV_PIX_FMT_YUV422P10LE;
     app.width  = 64;

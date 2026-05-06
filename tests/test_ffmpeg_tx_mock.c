@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+﻿/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright 2026 Intel Corporation
  *
  * Mock-based unit tests for src/ffmpeg/ffmpeg_tx.c and
@@ -74,7 +74,7 @@ const AVOutputFormat* __wrap_av_guess_format(const char* short_name,
  * Test video generator — 3-frame 16×16 MPEG2 clip written to /tmp
  * ========================================================================= */
 
-static char TEST_VIDEO_PATH[64] = "/tmp/txapp_tx_mock_XXXXXX";
+static char TEST_VIDEO_PATH[64] = "/tmp/dvledtx_tx_mock_XXXXXX";
 
 static int generate_test_video(void)
 {
@@ -152,10 +152,10 @@ fail_enc:
 }
 
 /* =========================================================================
- * Helper: minimal tx_app_context for 16×16 video
+ * Helper: minimal dvledtx_context for 16×16 video
  * ========================================================================= */
 
-static void fill_app_16x16(struct tx_app_context* app, int sessions)
+static void fill_app_16x16(struct dvledtx_context* app, int sessions)
 {
     memset(app, 0, sizeof(*app));
     strncpy(app->port,         "0000:06:00.0",  sizeof(app->port) - 1);
@@ -185,7 +185,7 @@ static void test_open_ffmpeg_tx_success(void **state)
     (void)state;
     avdevice_register_all();
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app_16x16(&app, 1);
 
     struct st20p_tx_ctx ctx;
@@ -212,7 +212,7 @@ static void test_open_ffmpeg_tx_uses_app_defaults(void **state)
     (void)state;
     avdevice_register_all();
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app_16x16(&app, 1);
     /* Clear per-session network config — open_ffmpeg_tx must fall back to
      * app-level width/height. */
@@ -237,7 +237,7 @@ static void test_open_ffmpeg_tx_crop_fallback(void **state)
     (void)state;
     avdevice_register_all();
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app_16x16(&app, 1);
 
     struct st20p_tx_ctx ctx;
@@ -263,7 +263,7 @@ static void test_close_ffmpeg_tx_full(void **state)
     (void)state;
     avdevice_register_all();
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app_16x16(&app, 1);
 
     struct st20p_tx_ctx ctx;
@@ -290,7 +290,7 @@ static void test_ffmpeg_decode_next_frame_returns_true(void **state)
     (void)state;
     avdevice_register_all();
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app_16x16(&app, 1);
     app.exit      = false;
     g_test_exit = false;
@@ -322,7 +322,7 @@ static void test_ffmpeg_decode_next_frame_exits_on_flag(void **state)
     (void)state;
     avdevice_register_all();
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app_16x16(&app, 1);
     app.exit = true; /* signal exit before first decode */
 
@@ -352,7 +352,7 @@ static void test_ffmpeg_tx_send_yuv_frame_pipeline(void **state)
     (void)state;
     avdevice_register_all();
 
-    struct tx_app_context app;
+    struct dvledtx_context app;
     fill_app_16x16(&app, 1);
     app.exit      = false;
     g_test_exit = false;

@@ -1,4 +1,7 @@
-project('TxApp-tests', 'c')
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright 2026 Intel Corporation
+
+project('dvledtx-tests', 'c')
 
 cc = meson.get_compiler('c')
 

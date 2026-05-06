@@ -1,7 +1,7 @@
-#
-# Apache v2 license
+﻿#
+# BSD 3-Clause License
 # Copyright (C) 2026 Intel Corporation
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BSD-3-Clause
 #
 name: Daily Build
 
@@ -19,6 +19,7 @@ on:
 jobs:
   build:
     name: Daily Build
+
     runs-on: self-hosted
 
     steps:
@@ -28,105 +29,30 @@ jobs:
           find "${{ github.workspace }}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 
       - name: Checkout repository
-        run: |
-          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/intel-innersource/applications.media.ledvideowall.gardencove-next.transmitter-app.git .
-          git checkout ${{ github.sha }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
 
-      - name: Verify dependencies
-        run: |
-          PKGS="meson ninja-build pkg-config build-essential libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libavdevice-dev"
-          MISSING=""
-          for pkg in $PKGS; do
-            dpkg -s "$pkg" &>/dev/null || MISSING="$MISSING $pkg"
-          done
-          if [ -n "$MISSING" ]; then
-            echo "ERROR: The following packages are not installed on this self-hosted runner:$MISSING"
-            echo "Please install them on the runner with: sudo apt-get install -y $MISSING"
-            exit 1
-          else
-            echo "All dependencies already installed."
-          fi
+      - name: Environment check
+        uses: ./.github/actions/environment-check
 
-      - name: Set up MTL environment
-        run: |
-          if pkg-config --exists mtl 2>/dev/null; then
-            echo "MTL already discoverable via pkg-config"
-            exit 0
-          fi
-          MTL_PC=$(find /usr /home /opt -name "mtl.pc" 2>/dev/null | head -1)
-          if [ -z "$MTL_PC" ]; then
-            echo "ERROR: MTL pkg-config file not found under /usr, /home, or /opt."
-            echo "Please ensure Media Transport Library is built and installed on the runner."
-            exit 1
-          fi
-          MTL_PC_DIR=$(dirname "$MTL_PC")
-          echo "Found MTL pkgconfig at: $MTL_PC_DIR"
-          echo "PKG_CONFIG_PATH=${MTL_PC_DIR}:${PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
-
-      - name: Build TxApp
-        run: |
-          echo "Setting up meson build directory..."
-          meson setup build
-
-          echo "Compiling TxApp..."
-          ninja -C build
-
-          echo "Build successful!"
-          echo "Binary: ./build/TxApp"
-
-      - name: Verify build output
-        run: |
-          if [ ! -f "./build/TxApp" ]; then
-            echo "ERROR: Build artifact TxApp not found!"
-            exit 1
-          fi
-          echo "Build artifact verified: $(file ./build/TxApp)"
-
-      - name: Binary size and symbol check
-        run: |
-          REPORT_DIR="$HOME/daily-build/${{ github.repository }}/${{ github.run_id }}"
-          mkdir -p "$REPORT_DIR"
-
-          echo "=== size ===" | tee "$REPORT_DIR/binary-report.txt"
-          size ./build/TxApp | tee -a "$REPORT_DIR/binary-report.txt"
-
-          echo "" | tee -a "$REPORT_DIR/binary-report.txt"
-          echo "=== readelf: shared library dependencies ===" | tee -a "$REPORT_DIR/binary-report.txt"
-          readelf -d ./build/TxApp | grep NEEDED | tee -a "$REPORT_DIR/binary-report.txt"
-
-          echo "" | tee -a "$REPORT_DIR/binary-report.txt"
-          echo "=== nm: undefined external symbols ===" | tee -a "$REPORT_DIR/binary-report.txt"
-          nm -u ./build/TxApp | tee -a "$REPORT_DIR/binary-report.txt"
-
-          echo "Binary report saved to $REPORT_DIR/binary-report.txt"
+      - name: Build dvledtx
+        uses: ./.github/actions/build-dvledtx
 
       - name: Smoke test
-        run: |
-          REPORT_DIR="$HOME/daily-build/${{ github.repository }}/${{ github.run_id }}"
-          mkdir -p "$REPORT_DIR"
+        uses: ./.github/actions/smoke-tests
 
-          echo "Running TxApp smoke test (5s timeout)..."
-          timeout 5s ./build/TxApp --help > "$REPORT_DIR/smoke-test.txt" 2>&1 || true
+      - name: Run unit tests
+        uses: ./.github/actions/unit-tests
 
-          # Verify it produced output (i.e. it started and didn't segfault silently)
-          if [ ! -s "$REPORT_DIR/smoke-test.txt" ]; then
-            echo "ERROR: TxApp produced no output during smoke test."
-            exit 1
-          fi
-          echo "Smoke test passed. Output:"
-          cat "$REPORT_DIR/smoke-test.txt"
-
-      - name: Purge old reports
-        run: |
-          echo "Purging static-analysis and daily-build reports older than 30 days..."
-          find "$HOME/static-analysis/" -mindepth 1 -mtime +30 -exec rm -rf {} + 2>/dev/null || true
-          find "$HOME/daily-build/" -mindepth 1 -mtime +30 -exec rm -rf {} + 2>/dev/null || true
-          echo "Purge complete."
+      - name: Static analysis
+        uses: ./.github/actions/static-analysis
 
       - name: Upload daily build reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: daily-build-reports-${{ github.run_id }}
-          path: ${{ env.HOME }}/daily-build/${{ github.repository }}/${{ github.run_id }}/
+          name: dvledtx-build-artifacts-${{ github.run_id }}
+          path: ${{ github.workspace }}/reports/
           retention-days: 30
