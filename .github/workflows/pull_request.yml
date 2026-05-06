@@ -11,8 +11,6 @@ on:
     branches-ignore:
       - main
 
-  push:
-
   workflow_dispatch:
 
 jobs:
