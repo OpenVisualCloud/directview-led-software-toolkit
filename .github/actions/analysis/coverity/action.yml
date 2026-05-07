@@ -36,30 +36,40 @@ runs:
 
         # Pick a non-snap downloader. Snap-confined curl ignores --noproxy/NO_PROXY
         # and routes everything through the DMZ proxy, which blocks internal hosts.
-        CURL_BIN=""
-        for c in /usr/bin/curl /bin/curl; do
-          if [ -x "$c" ] && ! readlink -f "$c" | grep -q '/snap/'; then
-            CURL_BIN="$c"; break
-          fi
-        done
+        # Prefer wget over curl as --no-proxy is more reliable on corporate runners.
         WGET_BIN=""
         for w in /usr/bin/wget /bin/wget; do
           if [ -x "$w" ] && ! readlink -f "$w" | grep -q '/snap/'; then
             WGET_BIN="$w"; break
           fi
         done
+        CURL_BIN=""
+        if [ -z "$WGET_BIN" ]; then
+          for c in /usr/bin/curl /bin/curl; do
+            if [ -x "$c" ] && ! readlink -f "$c" | grep -q '/snap/'; then
+              CURL_BIN="$c"; break
+            fi
+          done
+        fi
         if [ -z "$CURL_BIN" ] && [ -z "$WGET_BIN" ]; then
           echo "ERROR: No non-snap curl or wget available on this runner."
           echo "Install with: sudo apt-get install -y curl wget   (and: sudo snap remove curl)"
           exit 1
         fi
-        echo "Using downloader: ${CURL_BIN:-$WGET_BIN}"
+        echo "Using downloader: ${WGET_BIN:-$CURL_BIN}"
 
         cd "$HOME"
         BASE_URL="https://ubit-artifactory-or.intel.com/artifactory/coverity-or-local/Enterprise"
         for f in cov-analysis-linux64-2025.3.0.sh license.dat; do
           echo "Downloading $f ..."
-          if [ -n "$CURL_BIN" ]; then
+          if [ -n "$WGET_BIN" ]; then
+            "$WGET_BIN" --no-check-certificate --no-proxy \
+              --user="$ARTIFACTORY_USER" --password="$ARTIFACTORY_PASSWORD" \
+              -O "$f" "$BASE_URL/$f" || {
+                echo "ERROR: wget failed to download $f"
+                exit 1
+              }
+          else
             # --proxy "" forcibly disables any proxy regardless of env vars
             HTTP_CODE=$("$CURL_BIN" -k -sS -L --proxy "" \
               -w "%{http_code}" -o "$f" \
@@ -70,13 +80,6 @@ runs:
               echo "  401 = bad creds, 403 = no permission OR proxy blocked (DMZ proxy denies internal hosts)."
               exit 1
             fi
-          else
-            "$WGET_BIN" --no-check-certificate --no-proxy \
-              --user="$ARTIFACTORY_USER" --password="$ARTIFACTORY_PASSWORD" \
-              -O "$f" "$BASE_URL/$f" || {
-                echo "ERROR: wget failed to download $f"
-                exit 1
-              }
           fi
         done
         chmod 755 cov-analysis-linux64-2025.3.0.sh
