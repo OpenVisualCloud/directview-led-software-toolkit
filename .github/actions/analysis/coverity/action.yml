@@ -137,7 +137,7 @@ runs:
           --stream Garden_Cove_NEXT \
           --user "$COV_USER" \
           --password "$COV_PASSWORD" \
-          --ssl --on-new-cert trust
+          --on-new-cert trust
 
         # Generate JSON report
         $HOME/coverity/bin/cov-format-errors --dir coverity_output/ \
