@@ -3,21 +3,26 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: BSD-3-Clause
 #
-name: DVLED App CI
+name: Continuous Integration
 
 on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
-  static-analysis:
+  ci:
     name: Continuous Integration
     runs-on: self-hosted
     steps:
       - name: Clean up previous run
         run: |
           find "${{ github.workspace }}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          rm -rf /tmp/trivy-*
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -28,13 +33,28 @@ jobs:
       - name: Environment check
         uses: ./.github/actions/environment-check
 
-      - name: Static analysis
-        uses: ./.github/actions/static-analysis
+      - name: Build dvledtx
+        uses: ./.github/actions/build-dvledtx
 
-      - name: Upload static analysis reports
+      - name: Smoke test
+        uses: ./.github/actions/smoke-tests
+
+      - name: Run unit tests
+        uses: ./.github/actions/unit-tests
+
+      - name: ShellCheck
+        uses: ./.github/actions/analysis/shellcheck
+
+      - name: Coverity Scan
+        uses: ./.github/actions/analysis/coverity
+
+      - name: Trivy Scan
+        uses: ./.github/actions/analysis/trivy
+
+      - name: Upload all reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: static-analysis-reports-${{ github.run_id }}
+          name: all-scan-reports-${{ github.run_id }}
           path: ${{ github.workspace }}/reports/
           retention-days: 30

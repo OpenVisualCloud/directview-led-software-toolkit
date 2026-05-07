@@ -1,0 +1,19 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: 'ShellCheck'
+description: 'Run shellcheck on shell scripts. Report written to $GITHUB_WORKSPACE/reports/'
+
+runs:
+  using: composite
+  steps:
+    - name: shellcheck scripts
+      shell: bash
+      run: |
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
+        mkdir -p "$REPORT_DIR"
+        echo "===== shellcheck Script Analysis ====="
+        shellcheck scripts/build.sh scripts/test.sh 2>&1 | tee "$REPORT_DIR/shellcheck-report.txt" || true
+        echo "shellcheck scan complete. Report: $REPORT_DIR/shellcheck-report.txt"

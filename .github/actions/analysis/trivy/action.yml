@@ -1,0 +1,53 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: 'Trivy Scan'
+description: 'Run Trivy filesystem, config, and secret scans'
+
+runs:
+  using: composite
+  steps:
+    - name: Verify Trivy installation
+      shell: bash
+      run: |
+        if ! command -v trivy > /dev/null 2>&1; then
+          echo "ERROR: Trivy is not installed or not available in PATH for the runner user."
+          echo "Install Trivy on the self-hosted runner and ensure PATH includes the binary location."
+          echo "If installed via snap, verify /snap/bin is available to the runner service."
+          exit 1
+        fi
+        trivy --version
+
+    - name: Trivy filesystem scan
+      shell: bash
+      run: |
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
+        mkdir -p "$REPORT_DIR"
+        {
+          echo "===== Trivy Filesystem Scan ====="
+          trivy fs --list-all-pkgs --format json \
+            --output "$REPORT_DIR/trivy-fs-full-report.json" . || true
+          trivy fs --ignore-unfixed . | tee "$REPORT_DIR/trivy-fs-report.txt"
+        } 2>&1 | tee -a "$REPORT_DIR/trivy_scan.txt"
+
+    - name: Trivy config scan
+      shell: bash
+      run: |
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
+        mkdir -p "$REPORT_DIR"
+        {
+          echo "===== Trivy Config Scan ====="
+          trivy config . | tee "$REPORT_DIR/trivy-config-report.txt"
+        } 2>&1 | tee -a "$REPORT_DIR/trivy_scan.txt" || true
+
+    - name: Trivy secret scan
+      shell: bash
+      run: |
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
+        mkdir -p "$REPORT_DIR"
+        {
+          echo "===== Trivy Secret Scan ====="
+          trivy fs --scanners secret . | tee "$REPORT_DIR/trivy-secret-report.txt"
+        } 2>&1 | tee -a "$REPORT_DIR/trivy_scan.txt" || true
