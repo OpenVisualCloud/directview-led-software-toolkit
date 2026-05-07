@@ -9,7 +9,9 @@ on:
   push:
     branches:
       - main
-      - coverityScans
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
