@@ -117,8 +117,11 @@ runs:
 
         # Configure Coverity for gcc/g++/cc (template covers all variants)
         $HOME/coverity/bin/cov-configure --gcc
+        # Also configure 'cc' explicitly since meson uses /usr/bin/cc
+        $HOME/coverity/bin/cov-configure --compiler /usr/bin/cc --comptype gcc --template
 
-        # Setup meson build directory
+        # Clean and setup meson build directory
+        rm -rf build coverity_output
         meson setup build
 
         # Run cov-build wrapping the ninja compilation
