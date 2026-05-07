@@ -115,9 +115,7 @@ runs:
       run: |
         cd "$GITHUB_WORKSPACE"
 
-        # Configure Coverity for gcc/g++/cc (template covers all variants)
-        $HOME/coverity/bin/cov-configure --gcc
-        # Also configure 'cc' explicitly since meson uses cc
+        # Configure Coverity for cc (meson uses cc which is gcc)
         $HOME/coverity/bin/cov-configure --compiler cc --comptype gcc --template
 
         # Clean and setup meson build directory
@@ -138,7 +136,8 @@ runs:
           --url https://coverity.devtools.intel.com/prod3 \
           --stream Garden_Cove_NEXT \
           --user "$COV_USER" \
-          --password "$COV_PASSWORD"
+          --password "$COV_PASSWORD" \
+          --ssl --on-new-cert trust
 
         # Generate JSON report
         $HOME/coverity/bin/cov-format-errors --dir coverity_output/ \
