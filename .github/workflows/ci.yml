@@ -68,9 +68,6 @@ jobs:
 
       - name: Coverity Scan
         uses: ./.github/actions/analysis/coverity
-        with:
-          artifactory-user: ${{ secrets.COVERITY_ARTIFACTORY_USER }}
-          artifactory-password: ${{ secrets.COVERITY_ARTIFACTORY_PASSWORD }}
 
       - name: Upload Scan artifact to Github
         uses: actions/upload-artifact@v4

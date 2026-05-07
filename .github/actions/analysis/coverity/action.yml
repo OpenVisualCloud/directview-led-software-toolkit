@@ -6,14 +6,6 @@
 name: 'Coverity Scan'
 description: 'Run Coverity static analysis (assumes Coverity pre-installed on runner)'
 
-inputs:
-  artifactory-user:
-    description: 'Coverity server username'
-    required: true
-  artifactory-password:
-    description: 'Coverity server password'
-    required: true
-
 runs:
   using: composite
   steps:
@@ -36,9 +28,6 @@ runs:
 
     - name: Coverity Scan
       shell: bash
-      env:
-        COV_USER: ${{ inputs.artifactory-user }}
-        COV_PASSWORD: ${{ inputs.artifactory-password }}
       run: |
         cd "$GITHUB_WORKSPACE"
 
@@ -57,14 +46,6 @@ runs:
           --webapp-security \
           --enable-audit-checkers \
           --enable-default
-
-        # Commit defects to Coverity server
-        $HOME/coverity/bin/cov-commit-defects --dir coverity_output/ \
-          --url https://coverity.devtools.intel.com/prod3 \
-          --stream Garden_Cove_NEXT \
-          --user "$COV_USER" \
-          --password "$COV_PASSWORD" \
-          --on-new-cert trust
 
         # Generate JSON report
         $HOME/coverity/bin/cov-format-errors --dir coverity_output/ \
