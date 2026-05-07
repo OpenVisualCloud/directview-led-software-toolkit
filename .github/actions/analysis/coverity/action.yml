@@ -115,8 +115,8 @@ runs:
       run: |
         cd "$GITHUB_WORKSPACE"
 
-        # Configure Coverity for C compiler
-        $HOME/coverity/bin/cov-configure --compiler gcc --comptype gcc
+        # Configure Coverity for gcc/g++/cc (template covers all variants)
+        $HOME/coverity/bin/cov-configure --gcc
 
         # Setup meson build directory
         meson setup build
