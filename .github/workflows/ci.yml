@@ -9,9 +9,11 @@ on:
   push:
     branches:
       - main
+      - coverityScans
+  workflow_dispatch:
 
 jobs:
-  static-analysis:
+  analysis:
     name: Continuous Integration
     runs-on: self-hosted
     steps:
@@ -28,13 +30,77 @@ jobs:
       - name: Environment check
         uses: ./.github/actions/environment-check
 
-      - name: Static analysis
-        uses: ./.github/actions/static-analysis
+      - name: Analysis
+        uses: ./.github/actions/analysis
 
-      - name: Upload static analysis reports
+      - name: Upload analysis reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: static-analysis-reports-${{ github.run_id }}
+          name: analysis-reports-${{ github.run_id }}
           path: ${{ github.workspace }}/reports/
+          retention-days: 30
+
+  coverity:
+    name: Coverity Scan
+    runs-on: self-hosted
+    steps:
+      - name: Check the system
+        run: |
+          uname -a
+          git version
+          gcc --version
+          meson --version
+          ninja --version
+
+      - name: Clean up previous run
+        run: |
+          echo "Cleaning up previous run"
+          rm -rf "${{ github.workspace }}/build"
+          rm -rf "${{ github.workspace }}/coverity_output"
+          rm -rf "$HOME/cov-analysis-linux64-2025.3.0.sh"
+          rm -rf "$HOME/license.dat"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Coverity Scan
+        uses: ./.github/actions/analysis/coverity
+        with:
+          artifactory-user: ${{ secrets.COVERITY_ARTIFACTORY_USER }}
+          artifactory-password: ${{ secrets.COVERITY_ARTIFACTORY_PASSWORD }}
+
+      - name: Upload Scan artifact to Github
+        uses: actions/upload-artifact@v4
+        with:
+          name: Coverity-report-json
+          path: "${{ github.workspace }}/coverity_dir_result.json"
+
+  trivy:
+    name: Trivy Scan
+    runs-on: self-hosted
+    steps:
+      - name: Clean up previous run
+        run: |
+          find "${{ github.workspace }}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          rm -rf /tmp/trivy-*
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Environment check
+        uses: ./.github/actions/environment-check
+
+      - name: Trivy Scan
+        uses: ./.github/actions/analysis/trivy
+
+      - name: Upload trivy scan reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-scan-reports-${{ github.run_id }}
+          path: ${{ github.workspace }}/trivy-reports/
           retention-days: 30
