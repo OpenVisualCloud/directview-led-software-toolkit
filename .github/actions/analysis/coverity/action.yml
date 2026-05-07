@@ -90,6 +90,42 @@ runs:
           --license.type.choice=0 \
           --license.cov.path=$HOME/license.dat
 
+    - name: Import Coverity server SSL certificates
+      shell: bash
+      run: |
+        KEYTOOL=$(find $HOME/coverity -name keytool -type f 2>/dev/null | head -1)
+        if [ -z "$KEYTOOL" ]; then
+          echo "WARNING: keytool not found, skipping cert import"
+          exit 0
+        fi
+        # Check if cert already imported
+        for CACERTS in $HOME/coverity/jre/lib/security/cacerts $HOME/coverity/jdk23/lib/security/cacerts $HOME/coverity/jdk21/lib/security/cacerts; do
+          if [ -f "$CACERTS" ] && $KEYTOOL -list -keystore "$CACERTS" -storepass changeit -alias "coverity_devtools_intel_0" >/dev/null 2>&1; then
+            echo "Certificates already imported, skipping."
+            exit 0
+          fi
+        done
+        # Download full cert chain
+        echo | openssl s_client -connect coverity.devtools.intel.com:443 -showcerts 2>/dev/null | \
+          sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' > /tmp/coverity_chain.pem
+        cd /tmp && rm -f cert_*.pem
+        csplit -z -f cert_ -b '%02d.pem' coverity_chain.pem '/-----BEGIN CERTIFICATE-----/' '{*}' 2>/dev/null
+        # Import into all Coverity cacerts keystores
+        for CACERTS in $HOME/coverity/jre/lib/security/cacerts $HOME/coverity/jdk23/lib/security/cacerts $HOME/coverity/jdk21/lib/security/cacerts; do
+          if [ -f "$CACERTS" ]; then
+            i=0
+            for cert in /tmp/cert_*.pem; do
+              if [ -s "$cert" ]; then
+                $KEYTOOL -import -noprompt -trustcacerts \
+                  -alias "coverity_devtools_intel_$i" \
+                  -file "$cert" -keystore "$CACERTS" -storepass changeit 2>&1 || true
+                i=$((i+1))
+              fi
+            done
+            echo "Imported $i certs into $CACERTS"
+          fi
+        done
+
     - name: Set up MTL environment
       shell: bash
       run: |
