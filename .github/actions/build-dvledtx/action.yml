@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 name: 'Build dvledtx'
-description: 'Build dvledtx with FFMPEG and MTL TX APIs, keep both binaries, run binary size/symbol check for each'
+description: 'Build dvledtx with FFMPEG and MTL TX APIs, keep both binaries'
 
 runs:
   using: composite
@@ -34,26 +34,3 @@ runs:
         mkdir -p ./bins
         cp ./build/dvledtx ./bins/dvledtx-mtl
         echo "MTL build saved: $(file ./bins/dvledtx-mtl)"
-
-    - name: Binary size and symbol check
-      shell: bash
-      run: |
-        REPORT_DIR="$GITHUB_WORKSPACE/reports"
-        mkdir -p "$REPORT_DIR"
-
-        for BINARY in ./bins/dvledtx-ffmpeg ./bins/dvledtx-mtl; do
-          NAME=$(basename "$BINARY")
-          echo "" | tee -a "$REPORT_DIR/binary-report.txt"
-          echo "===== $NAME: Binary Size =====" | tee -a "$REPORT_DIR/binary-report.txt"
-          size "$BINARY" | tee -a "$REPORT_DIR/binary-report.txt"
-
-          echo "" | tee -a "$REPORT_DIR/binary-report.txt"
-          echo "===== $NAME: Shared Library Dependencies =====" | tee -a "$REPORT_DIR/binary-report.txt"
-          readelf -d "$BINARY" | grep NEEDED | tee -a "$REPORT_DIR/binary-report.txt"
-
-          echo "" | tee -a "$REPORT_DIR/binary-report.txt"
-          echo "===== $NAME: Undefined External Symbols =====" | tee -a "$REPORT_DIR/binary-report.txt"
-          nm -u "$BINARY" | tee -a "$REPORT_DIR/binary-report.txt"
-        done
-
-        echo "Binary report saved to $REPORT_DIR/binary-report.txt"

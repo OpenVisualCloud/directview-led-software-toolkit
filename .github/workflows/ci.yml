@@ -15,68 +15,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  analysis:
+  ci:
     name: Continuous Integration
-    runs-on: self-hosted
-    steps:
-      - name: Clean up previous run
-        run: |
-          find "${{ github.workspace }}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-
-      - name: Environment check
-        uses: ./.github/actions/environment-check
-
-      - name: Analysis
-        uses: ./.github/actions/analysis
-
-      - name: Upload analysis reports
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: analysis-reports-${{ github.run_id }}
-          path: ${{ github.workspace }}/reports/
-          retention-days: 30
-
-  coverity:
-    name: Coverity Scan
-    runs-on: self-hosted
-    steps:
-      - name: Check the system
-        run: |
-          uname -a
-          git version
-          gcc --version
-          meson --version
-          ninja --version
-
-      - name: Clean up previous run
-        run: |
-          echo "Cleaning up previous run"
-          rm -rf "${{ github.workspace }}/build"
-          rm -rf "${{ github.workspace }}/coverity_output"
-          rm -rf "$HOME/cov-analysis-linux64-2025.3.0.sh"
-          rm -rf "$HOME/license.dat"
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Coverity Scan
-        uses: ./.github/actions/analysis/coverity
-
-      - name: Upload Scan artifact to Github
-        uses: actions/upload-artifact@v4
-        with:
-          name: Coverity-report-json
-          path: "${{ github.workspace }}/coverity_dir_result.json"
-
-  trivy:
-    name: Trivy Scan
     runs-on: self-hosted
     steps:
       - name: Clean up previous run
@@ -93,13 +33,28 @@ jobs:
       - name: Environment check
         uses: ./.github/actions/environment-check
 
+      - name: Build dvledtx
+        uses: ./.github/actions/build-dvledtx
+
+      - name: Smoke test
+        uses: ./.github/actions/smoke-tests
+
+      - name: Run unit tests
+        uses: ./.github/actions/unit-tests
+
+      - name: ShellCheck
+        uses: ./.github/actions/analysis/shellcheck
+
+      - name: Coverity Scan
+        uses: ./.github/actions/analysis/coverity
+
       - name: Trivy Scan
         uses: ./.github/actions/analysis/trivy
 
-      - name: Upload trivy scan reports
+      - name: Upload all reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: trivy-scan-reports-${{ github.run_id }}
-          path: ${{ github.workspace }}/trivy-reports/
+          name: all-scan-reports-${{ github.run_id }}
+          path: ${{ github.workspace }}/reports/
           retention-days: 30

@@ -23,22 +23,31 @@ runs:
     - name: Trivy filesystem scan
       shell: bash
       run: |
-        REPORT_DIR="$GITHUB_WORKSPACE/trivy-reports"
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
         mkdir -p "$REPORT_DIR"
-        trivy fs --list-all-pkgs --format json \
-          --output "$REPORT_DIR/trivy-fs-full-report.json" . || true
-        trivy fs --ignore-unfixed . | tee "$REPORT_DIR/trivy-fs-report.txt"
+        {
+          echo "===== Trivy Filesystem Scan ====="
+          trivy fs --list-all-pkgs --format json \
+            --output "$REPORT_DIR/trivy-fs-full-report.json" . || true
+          trivy fs --ignore-unfixed . | tee "$REPORT_DIR/trivy-fs-report.txt"
+        } 2>&1 | tee -a "$REPORT_DIR/trivy_scan.txt"
 
     - name: Trivy config scan
       shell: bash
       run: |
-        REPORT_DIR="$GITHUB_WORKSPACE/trivy-reports"
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
         mkdir -p "$REPORT_DIR"
-        trivy config . | tee "$REPORT_DIR/trivy-config-report.txt" || true
+        {
+          echo "===== Trivy Config Scan ====="
+          trivy config . | tee "$REPORT_DIR/trivy-config-report.txt"
+        } 2>&1 | tee -a "$REPORT_DIR/trivy_scan.txt" || true
 
     - name: Trivy secret scan
       shell: bash
       run: |
-        REPORT_DIR="$GITHUB_WORKSPACE/trivy-reports"
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
         mkdir -p "$REPORT_DIR"
-        trivy fs --scanners secret . | tee "$REPORT_DIR/trivy-secret-report.txt" || true
+        {
+          echo "===== Trivy Secret Scan ====="
+          trivy fs --scanners secret . | tee "$REPORT_DIR/trivy-secret-report.txt"
+        } 2>&1 | tee -a "$REPORT_DIR/trivy_scan.txt" || true

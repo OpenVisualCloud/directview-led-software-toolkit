@@ -45,8 +45,14 @@ jobs:
       - name: Run unit tests
         uses: ./.github/actions/unit-tests
 
-      - name: Analysis
-        uses: ./.github/actions/analysis
+      - name: ShellCheck
+        uses: ./.github/actions/analysis/shellcheck
+
+      - name: Coverity Scan
+        uses: ./.github/actions/analysis/coverity
+
+      - name: Trivy Scan
+        uses: ./.github/actions/analysis/trivy
 
       - name: Upload PR reports
         uses: actions/upload-artifact@v4

@@ -3,8 +3,8 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: BSD-3-Clause
 #
-name: 'Analysis'
-description: 'Run shellcheck. Reports written to $GITHUB_WORKSPACE/reports/'
+name: 'ShellCheck'
+description: 'Run shellcheck on shell scripts. Report written to $GITHUB_WORKSPACE/reports/'
 
 runs:
   using: composite

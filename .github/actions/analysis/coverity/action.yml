@@ -30,23 +30,27 @@ runs:
       shell: bash
       run: |
         cd "$GITHUB_WORKSPACE"
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
+        mkdir -p "$REPORT_DIR"
 
-        # Configure Coverity for cc (meson uses cc which is gcc)
-        $HOME/coverity/bin/cov-configure --compiler cc --comptype gcc --template
+        {
+          # Configure Coverity for cc (meson uses cc which is gcc)
+          $HOME/coverity/bin/cov-configure --compiler cc --comptype gcc --template
 
-        # Clean and setup meson build directory
-        rm -rf build coverity_output
-        meson setup build
+          # Clean and setup meson build directory
+          rm -rf build coverity_output
+          meson setup build
 
-        # Run cov-build wrapping the ninja compilation
-        $HOME/coverity/bin/cov-build --dir coverity_output/ ninja -C build
+          # Run cov-build wrapping the ninja compilation
+          $HOME/coverity/bin/cov-build --dir coverity_output/ ninja -C build
 
-        # Analyze captured build
-        $HOME/coverity/bin/cov-analyze --dir coverity_output/ \
-          --webapp-security \
-          --enable-audit-checkers \
-          --enable-default
+          # Analyze captured build
+          $HOME/coverity/bin/cov-analyze --dir coverity_output/ \
+            --webapp-security \
+            --enable-audit-checkers \
+            --enable-default
 
-        # Generate JSON report
-        $HOME/coverity/bin/cov-format-errors --dir coverity_output/ \
-          --json-output-v8 coverity_dir_result.json
+          # Generate JSON report
+          $HOME/coverity/bin/cov-format-errors --dir coverity_output/ \
+            --json-output-v8 "$REPORT_DIR/coverity-report.json"
+        } 2>&1 | tee "$REPORT_DIR/coverity_scan.txt"
