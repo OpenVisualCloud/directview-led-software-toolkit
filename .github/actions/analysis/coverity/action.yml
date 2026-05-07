@@ -117,8 +117,8 @@ runs:
 
         # Configure Coverity for gcc/g++/cc (template covers all variants)
         $HOME/coverity/bin/cov-configure --gcc
-        # Also configure 'cc' explicitly since meson uses /usr/bin/cc
-        $HOME/coverity/bin/cov-configure --compiler /usr/bin/cc --comptype gcc --template
+        # Also configure 'cc' explicitly since meson uses cc
+        $HOME/coverity/bin/cov-configure --compiler cc --comptype gcc --template
 
         # Clean and setup meson build directory
         rm -rf build coverity_output
