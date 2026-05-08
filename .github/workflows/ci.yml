@@ -14,6 +14,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   ci:
     name: Continuous Integration
@@ -25,10 +28,11 @@ jobs:
           rm -rf /tmp/trivy-*
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Environment check
         uses: ./.github/actions/environment-check
@@ -55,7 +59,7 @@ jobs:
         uses: ./.github/actions/analysis/trivy
 
       - name: Upload all reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: all-scan-reports-${{ github.run_id }}

@@ -24,7 +24,11 @@ runs:
         fi
         MTL_PC_DIR=$(dirname "$MTL_PC")
         echo "Found MTL pkgconfig at: $MTL_PC_DIR"
-        echo "PKG_CONFIG_PATH=${MTL_PC_DIR}:${PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+        {
+          echo "PKG_CONFIG_PATH<<EOF"
+          echo "${MTL_PC_DIR}:${PKG_CONFIG_PATH}"
+          echo "EOF"
+        } >> "$GITHUB_ENV"
 
     - name: Coverity Scan
       shell: bash
