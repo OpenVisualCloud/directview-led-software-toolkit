@@ -1,0 +1,23 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: 'cppcheck'
+description: 'Run cppcheck static analysis'
+
+runs:
+  using: composite
+  steps:
+    - name: cppcheck
+      shell: bash
+      run: |
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
+        mkdir -p "$REPORT_DIR"
+        echo "===== cppcheck Static Analysis ====="
+        cppcheck \
+          --enable=warning,style,performance,portability \
+          --std=c11 --force --inline-suppr \
+          --suppress=missingIncludeSystem \
+          -Iinclude src 2>&1 | tee "$REPORT_DIR/cppcheck-report.txt" || true
+        echo "cppcheck scan complete. Report: $REPORT_DIR/cppcheck-report.txt"
