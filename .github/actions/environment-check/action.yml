@@ -54,7 +54,7 @@ runs:
       run: |
         echo "===== Analysis Tools Check ====="
         MISSING=""
-        for TOOL in shellcheck; do
+        for TOOL in shellcheck cppcheck; do
           if command -v "$TOOL" &>/dev/null; then
             echo "  [OK] $TOOL ($(command -v "$TOOL"))"
           else

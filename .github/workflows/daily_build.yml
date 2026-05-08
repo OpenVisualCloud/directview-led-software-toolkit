@@ -48,6 +48,9 @@ jobs:
       - name: ShellCheck
         uses: ./.github/actions/analysis/shellcheck
 
+      - name: cppcheck
+        uses: ./.github/actions/analysis/cppcheck
+
       - name: Coverity Scan
         uses: ./.github/actions/analysis/coverity
 
