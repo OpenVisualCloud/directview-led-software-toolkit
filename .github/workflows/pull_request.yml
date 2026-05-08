@@ -21,6 +21,8 @@ jobs:
   pull-request:
     name: Pull Request
     runs-on: self-hosted
+    permissions:
+      contents: read
 
     steps:
       - name: Clean up previous run
@@ -28,10 +30,11 @@ jobs:
           find "${{ github.workspace }}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Environment check
         uses: ./.github/actions/environment-check
@@ -48,6 +51,9 @@ jobs:
       - name: ShellCheck
         uses: ./.github/actions/analysis/shellcheck
 
+      - name: cppcheck
+        uses: ./.github/actions/analysis/cppcheck
+
       - name: Coverity Scan
         uses: ./.github/actions/analysis/coverity
 
@@ -55,7 +61,7 @@ jobs:
         uses: ./.github/actions/analysis/trivy
 
       - name: Upload PR reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: dvledtx-pr-artifacts-${{ github.run_id }}

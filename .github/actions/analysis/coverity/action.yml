@@ -9,26 +9,22 @@ description: 'Run Coverity static analysis (assumes Coverity pre-installed on ru
 runs:
   using: composite
   steps:
-    - name: Set up MTL environment
-      shell: bash
-      run: |
-        if pkg-config --exists mtl 2>/dev/null; then
-          echo "MTL already discoverable via pkg-config"
-          exit 0
-        fi
-        MTL_PC=$(find /usr /home /opt -name "mtl.pc" 2>/dev/null | head -1)
-        if [ -z "$MTL_PC" ]; then
-          echo "ERROR: MTL pkg-config file not found under /usr, /home, or /opt."
-          echo "Please ensure Media Transport Library is built and installed on the runner."
-          exit 1
-        fi
-        MTL_PC_DIR=$(dirname "$MTL_PC")
-        echo "Found MTL pkgconfig at: $MTL_PC_DIR"
-        echo "PKG_CONFIG_PATH=${MTL_PC_DIR}:${PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
-
     - name: Coverity Scan
       shell: bash
       run: |
+        # Resolve MTL pkg-config path without writing to GITHUB_ENV
+        if ! pkg-config --exists mtl 2>/dev/null; then
+          MTL_PC=$(find /usr /home /opt -name "mtl.pc" 2>/dev/null | head -1)
+          if [ -z "$MTL_PC" ]; then
+            echo "ERROR: MTL pkg-config file not found under /usr, /home, or /opt."
+            echo "Please ensure Media Transport Library is built and installed on the runner."
+            exit 1
+          fi
+          MTL_PC_DIR=$(dirname "$MTL_PC")
+          echo "Found MTL pkgconfig at: $MTL_PC_DIR"
+          export PKG_CONFIG_PATH="${MTL_PC_DIR}:${PKG_CONFIG_PATH:-}"
+        fi
+
         cd "$GITHUB_WORKSPACE"
         REPORT_DIR="$GITHUB_WORKSPACE/reports"
         mkdir -p "$REPORT_DIR"
