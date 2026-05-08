@@ -162,6 +162,8 @@ void logger_log(log_level_t level, const char *file, int line,
             FILE *new_fp = freopen(g_logger.config.log_file, "w", g_logger.file_fp);
             if (new_fp == NULL) {
                 g_logger.file_fp = NULL;
+            } else {
+                g_logger.file_fp = new_fp;
             }
         }
         if (level == LOG_LEVEL_ERROR) {
