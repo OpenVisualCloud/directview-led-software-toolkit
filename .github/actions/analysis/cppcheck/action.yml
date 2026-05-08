@@ -12,11 +12,12 @@ runs:
     - name: cppcheck
       shell: bash
       run: |
-        REPORT_DIR="$HOME/static-analysis/${{ github.repository }}/${{ github.run_id }}"
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
         mkdir -p "$REPORT_DIR"
+        echo "===== cppcheck Static Analysis ====="
         cppcheck \
           --enable=warning,style,performance,portability \
           --std=c11 --force --inline-suppr \
           --suppress=missingIncludeSystem \
           -Iinclude src 2>&1 | tee "$REPORT_DIR/cppcheck-report.txt" || true
-        echo "cppcheck scan complete. Report saved to $REPORT_DIR/cppcheck-report.txt"
+        echo "cppcheck scan complete. Report: $REPORT_DIR/cppcheck-report.txt"

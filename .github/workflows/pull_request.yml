@@ -17,13 +17,12 @@ on:
 
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
   pull-request:
     name: Pull Request
     runs-on: self-hosted
+    permissions:
+      contents: read
 
     steps:
       - name: Clean up previous run
