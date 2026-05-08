@@ -145,12 +145,12 @@ void mtl_copy_crop_to_frame(struct st_frame* dst, AVFrame* src,
    * Y/U/V planes are packed sequentially: Y then U then V, each with
    * tightly-packed rows (no line padding).  Compute the offsets manually. */
   uint8_t* dst_y = (uint8_t*)dst->addr[0];
+  if (!dst_y) return;
+
   uint8_t* dst_u = dst->addr[1] ? (uint8_t*)dst->addr[1]
                                  : dst_y + dst_y_stride * crop_h;
   uint8_t* dst_v = dst->addr[2] ? (uint8_t*)dst->addr[2]
                                  : dst_u + dst_c_stride * chroma_h;
-
-  if (!dst_y) return;
 
   /* Luma (Y) plane — full crop_h rows, crop_w samples wide */
   for (int line = 0; line < crop_h; line++)

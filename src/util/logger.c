@@ -103,7 +103,10 @@ log_level_t logger_get_level(void)
 
 bool logger_is_level_enabled(log_level_t level)
 {
-    return g_logger.initialized && (level <= g_logger.config.level);
+    pthread_mutex_lock(&g_logger.lock);
+    bool enabled = g_logger.initialized && (level <= g_logger.config.level);
+    pthread_mutex_unlock(&g_logger.lock);
+    return enabled;
 }
 
 void logger_log(log_level_t level, const char *file, int line,
@@ -156,7 +159,12 @@ void logger_log(log_level_t level, const char *file, int line,
     if (g_logger.config.enable_file && g_logger.file_fp) {
         /* If the file has reached 20 MB, truncate and start fresh */
         if (ftell(g_logger.file_fp) >= 20 * 1024 * 1024) {
-            freopen(g_logger.config.log_file, "w", g_logger.file_fp);
+            FILE *new_fp = freopen(g_logger.config.log_file, "w", g_logger.file_fp);
+            if (new_fp == NULL) {
+                g_logger.file_fp = NULL;
+            } else {
+                g_logger.file_fp = new_fp;
+            }
         }
         if (level == LOG_LEVEL_ERROR) {
             fprintf(g_logger.file_fp, "%s[%s:%d %s] %s\n",
