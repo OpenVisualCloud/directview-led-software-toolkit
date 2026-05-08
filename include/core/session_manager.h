@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -57,7 +58,7 @@ struct shared_decode_ctx {
   bool               start_ready;
 
   struct dvledtx_context* app;
-  uint32_t           frame_counter;   /* shared monotonic frame number      */
+  _Atomic uint32_t   frame_counter;   /* shared monotonic frame number      */
 };
 
 /* Video TX session context */

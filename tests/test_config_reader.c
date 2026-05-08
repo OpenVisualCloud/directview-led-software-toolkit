@@ -956,10 +956,10 @@ static void test_parse_session_zero_crop_w_fails(void **state)
  * load_and_apply_config
  * ========================================================================== */
 
-static void test_load_and_apply_config_null_app_returns_zero(void **state)
+static void test_load_and_apply_config_null_app_returns_error(void **state)
 {
     (void)state;
-    assert_int_equal(load_and_apply_config(NULL, "any_file.json"), 0);
+    assert_int_equal(load_and_apply_config(NULL, "any_file.json"), -1);
 }
 
 static void test_load_and_apply_config_null_file_returns_zero(void **state)
@@ -1175,7 +1175,7 @@ int main(void)
         cmocka_unit_test(test_peek_log_file_strips_bare_control_chars),
 
         /* --- load_and_apply_config --- */
-        cmocka_unit_test(test_load_and_apply_config_null_app_returns_zero),
+        cmocka_unit_test(test_load_and_apply_config_null_app_returns_error),
         cmocka_unit_test(test_load_and_apply_config_null_file_returns_zero),
         cmocka_unit_test(test_load_and_apply_config_empty_file_returns_zero),
         cmocka_unit_test(test_load_and_apply_config_nonexistent_file_returns_minus1),
