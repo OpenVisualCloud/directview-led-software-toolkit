@@ -6,6 +6,8 @@
 #include "util/config_reader.h"
 #include "app_context.h"
 #include "util/logger.h"
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -94,7 +96,12 @@ static int extract_json_int(const char* start, const char* end, const char* key)
         if (pos >= end || *pos != ':') continue;
         pos++;
         while (pos < end && (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r')) pos++;
-        return atoi(pos);
+        char *endptr = NULL;
+        errno = 0;
+        long val = strtol(pos, &endptr, 10);
+        if (endptr == pos || errno == ERANGE || val < INT_MIN || val > INT_MAX)
+            return -1;
+        return (int)val;
     }
     return -1;
 }
@@ -391,15 +398,17 @@ int validate_tx_config(const struct dvledtx_config* config) {
         int reti = regcomp(&regex,
             "^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\\.[0-9]$",
             REG_EXTENDED | REG_NOSUB);
-        if (reti == 0) {
-            reti = regexec(&regex, config->interface_name, 0, NULL, 0);
-            regfree(&regex);
-            if (reti != 0) {
-                LOG_ERROR("Invalid PCI BDF format '%s' "
-                       "(expected DDDD:DD:DD.D hex pattern)",
-                       config->interface_name);
-                return -1;
-            }
+        if (reti != 0) {
+            LOG_ERROR("Internal error: PCI BDF regex compilation failed");
+            return -1;
+        }
+        reti = regexec(&regex, config->interface_name, 0, NULL, 0);
+        regfree(&regex);
+        if (reti != 0) {
+            LOG_ERROR("Invalid PCI BDF format '%s' "
+                   "(expected DDDD:DD:DD.D hex pattern)",
+                   config->interface_name);
+            return -1;
         }
     }
 
@@ -546,7 +555,9 @@ int validate_tx_config(const struct dvledtx_config* config) {
 }
 
 int load_and_apply_config(struct dvledtx_context* app, const char* config_file) {
-    if (app == NULL || config_file == NULL || config_file[0] == '\0')
+    if (app == NULL)
+        return -1;
+    if (config_file == NULL || config_file[0] == '\0')
         return 0; /* no config file — keep CLI defaults */
 
     struct dvledtx_config config;

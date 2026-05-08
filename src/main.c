@@ -154,30 +154,42 @@ static bool validate_log_path(const char* path) {
 }
 
 static void print_help(const char* prog_name) {
-  LOG_INFO("Usage: %s --config <file>", prog_name);
+  LOG_INFO("Usage: %s --config <file> [options]", prog_name);
   LOG_INFO("Options:");
-  LOG_INFO("  -C, --config <file>   JSON config file (required)");
-  LOG_INFO("  -v, --version         Show version");
-  LOG_INFO("  --help                Show this help");
+  LOG_INFO("  -C, --config <file>       JSON config file (required)");
+  LOG_INFO("  -t, --test-time <secs>    Transmit for N seconds then exit (1..86400)");
+  LOG_INFO("  -v, --version             Show version");
+  LOG_INFO("  --help                    Show this help");
 }
 
 static int parse_args(struct dvledtx_context* ctx, int argc, char** argv) {
   static struct option long_options[] = {
-    {"config",  required_argument, 0, 'C'},
-    {"version", no_argument,       0, 'v'},
-    {"help",    no_argument,       0, '?'},
+    {"config",    required_argument, 0, 'C'},
+    {"test-time", required_argument, 0, 't'},
+    {"version",   no_argument,       0, 'v'},
+    {"help",      no_argument,       0, '?'},
     {0, 0, 0, 0}
   };
 
   ctx->config_file[0] = '\0';
 
   int c = 0, option_index = 0;
-  while ((c = getopt_long(argc, argv, "C:v?", long_options, &option_index)) != -1) {
+  while ((c = getopt_long(argc, argv, "C:t:v?", long_options, &option_index)) != -1) { /* flawfinder: ignore */
     switch (c) {
       case 'C':
         strncpy(ctx->config_file, optarg, sizeof(ctx->config_file) - 1);
         ctx->config_file[sizeof(ctx->config_file) - 1] = '\0';
         break;
+      case 't': {
+        char *endptr = NULL;
+        long val = strtol(optarg, &endptr, 10);
+        if (endptr == optarg || *endptr != '\0' || val <= 0 || val > 86400) {
+          LOG_ERROR("Invalid --test-time value '%s' (expected 1..86400)", optarg);
+          return -1;
+        }
+        ctx->test_time_s = (int)val;
+        break;
+      }
       case 'v':
         printf("dvledtx version %s\n", DVLEDTX_VERSION);
         exit(0);
