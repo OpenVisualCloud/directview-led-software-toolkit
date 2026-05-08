@@ -103,7 +103,10 @@ log_level_t logger_get_level(void)
 
 bool logger_is_level_enabled(log_level_t level)
 {
-    return g_logger.initialized && (level <= g_logger.config.level);
+    pthread_mutex_lock(&g_logger.lock);
+    bool enabled = g_logger.initialized && (level <= g_logger.config.level);
+    pthread_mutex_unlock(&g_logger.lock);
+    return enabled;
 }
 
 void logger_log(log_level_t level, const char *file, int line,
