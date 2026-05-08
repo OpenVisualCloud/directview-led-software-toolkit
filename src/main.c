@@ -10,12 +10,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <sys/prctl.h>
-#include <linux/capability.h>
-#include <sys/syscall.h>
 #include <limits.h>
 
 /* libavdevice is only needed for the FFmpeg mtl_st20p muxer TX path */
@@ -50,44 +46,6 @@ static void dvledtx_apply_pending_signal_exit(void) {
   if (g_dvledtx_signal_exit == 0) return;
   session_manager_request_exit();
   if (g_app_ptr != NULL) g_app_ptr->exit = true;
-}
-
-/* =========================================================================
- * E-1: Privilege drop — reduce capabilities after DPDK/MTL initialisation.
- *
- * dvledtx requires CAP_SYS_ADMIN (VFIO) and CAP_IPC_LOCK (hugepages) during
- * mtl_init / session_manager_init.  Once the NIC is bound and hugepages are
- * locked, drop to the minimal set so that any subsequent exploit (e.g. via
- * libavcodec) does not grant kernel-level access.
- * ========================================================================= */
-static void drop_privileges(void) {
-  /* Keep only CAP_IPC_LOCK (for hugepages) and CAP_NET_ADMIN (NIC control).
-   * Use the raw syscall interface to avoid linking libcap. */
-  struct __user_cap_header_struct hdr = {
-    .version = _LINUX_CAPABILITY_VERSION_3,
-    .pid = 0  /* current process */
-  };
-  struct __user_cap_data_struct data[2];
-  memset(data, 0, sizeof(data));
-
-  /* CAP_IPC_LOCK = 14, CAP_NET_ADMIN = 12 */
-  uint32_t caps = (1U << 14) | (1U << 12);
-  data[0].effective   = caps;
-  data[0].permitted   = caps;
-  data[0].inheritable = 0;
-  data[1].effective   = 0;
-  data[1].permitted   = 0;
-  data[1].inheritable = 0;
-
-  /* Prevent regaining caps via execve */
-  prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
-
-  if (syscall(SYS_capset, &hdr, data) < 0) {
-    LOG_WARN("drop_privileges: capset failed (errno=%d) — "
-             "running with elevated privileges", errno);
-  } else {
-    LOG_INFO("Privileges dropped to CAP_NET_ADMIN+CAP_IPC_LOCK");
-  }
 }
 
 /* =========================================================================
@@ -332,10 +290,6 @@ int main(int argc, char** argv) {
     ret = -1;
     goto cleanup_logger;
   }
-
-  /* E-1: Drop elevated privileges — DPDK/MTL initialization is complete,
-   * hugepages are locked, VFIO group is open. No longer need CAP_SYS_ADMIN. */
-  drop_privileges();
 
   /* Start transmission sessions */
   if (session_manager_start(&session_manager) < 0) {
