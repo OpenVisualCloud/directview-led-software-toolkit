@@ -10,8 +10,11 @@ inputs:
   coverity-url:
     description: 'URL to download the Coverity analysis tarball'
     required: true
-  coverity-token:
-    description: 'Authentication token for Coverity download'
+  coverity-user:
+    description: 'Artifactory username for Coverity download'
+    required: true
+  coverity-password:
+    description: 'Artifactory password for Coverity download'
     required: true
 
 runs:
@@ -29,7 +32,7 @@ runs:
         fi
         echo "  Downloading Coverity..."
         mkdir -p "$COVERITY_DIR"
-        wget --no-proxy -q --header="Authorization: Bearer ${{ inputs.coverity-token }}" \
+        wget --no-proxy -q --user="${{ inputs.coverity-user }}" --password="${{ inputs.coverity-password }}" \
           -O /tmp/coverity.tar.gz "${{ inputs.coverity-url }}"
         echo "  Extracting Coverity..."
         tar xzf /tmp/coverity.tar.gz --strip-components=1 -C "$COVERITY_DIR"
