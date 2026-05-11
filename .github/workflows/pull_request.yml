@@ -17,17 +17,31 @@ on:
 
   workflow_dispatch:
 
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pull-request:
     name: Pull Request
+    # Self-hosted runner required for Intel MTL/DPDK hardware access.
+    # Restricted to same-repository PRs only (github.event.pull_request.head.repo.full_name)
+    # to prevent untrusted fork code from executing on the self-hosted runner.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: self-hosted
     permissions:
       contents: read
 
     steps:
       - name: Clean up previous run
+        env:
+          WORKSPACE: ${{ github.workspace }}
         run: |
-          find "${{ github.workspace }}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          find "$WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -65,5 +79,5 @@ jobs:
         if: always()
         with:
           name: dvledtx-pr-artifacts-${{ github.run_id }}
-          path: ${{ github.workspace }}/reports/
+          path: ${{ env.GITHUB_WORKSPACE }}/reports/
           retention-days: 30

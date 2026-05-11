@@ -14,16 +14,29 @@ on:
       - main
   workflow_dispatch:
 
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ci:
     name: Continuous Integration
+    # Self-hosted runner required for Intel MTL/DPDK hardware access.
+    # Guard against untrusted fork PRs executing on the self-hosted runner.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: self-hosted
     permissions:
       contents: read
     steps:
       - name: Clean up previous run
+        env:
+          WORKSPACE: ${{ github.workspace }}
         run: |
-          find "${{ github.workspace }}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          find "$WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
           rm -rf /tmp/trivy-*
 
       - name: Checkout repository
@@ -62,5 +75,5 @@ jobs:
         if: always()
         with:
           name: all-scan-reports-${{ github.run_id }}
-          path: ${{ github.workspace }}/reports/
+          path: ${{ env.GITHUB_WORKSPACE }}/reports/
           retention-days: 30
