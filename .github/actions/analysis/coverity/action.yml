@@ -22,6 +22,10 @@ runs:
   steps:
     - name: Install Coverity
       shell: bash
+      env:
+        COVERITY_URL: ${{ inputs.coverity-url }}
+        COVERITY_USER: ${{ inputs.coverity-user }}
+        COVERITY_PASSWORD: ${{ inputs.coverity-password }}
       run: |
         echo "===== Coverity Setup ====="
         COVERITY_DIR="$HOME/coverity"
@@ -32,8 +36,8 @@ runs:
         fi
         echo "  Downloading Coverity..."
         mkdir -p "$COVERITY_DIR"
-        wget --no-proxy -q --user="${{ inputs.coverity-user }}" --password="${{ inputs.coverity-password }}" \
-          -O /tmp/coverity.tar.gz "${{ inputs.coverity-url }}"
+        wget --no-proxy -q --user="$COVERITY_USER" --password="$COVERITY_PASSWORD" \
+          -O /tmp/coverity.tar.gz "$COVERITY_URL"
         echo "  Extracting Coverity..."
         tar xzf /tmp/coverity.tar.gz --strip-components=1 -C "$COVERITY_DIR"
         rm -f /tmp/coverity.tar.gz

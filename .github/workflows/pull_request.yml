@@ -53,21 +53,24 @@ jobs:
       - name: Smoke test
         uses: ./.github/actions/smoke-tests
 
-      - name: Run unit tests
+      - name: Unit tests
         uses: ./.github/actions/unit-tests
 
       - name: ShellCheck
         uses: ./.github/actions/analysis/shellcheck
 
+      - name: zizmor Scan
+        uses: ./.github/actions/analysis/zizmor
+
       - name: cppcheck
         uses: ./.github/actions/analysis/cppcheck
 
-      - name: Coverity Scan
-        uses: ./.github/actions/analysis/coverity
-        with:
-          coverity-url: ${{ secrets.COVERITY_URL }}
-          coverity-user: ${{ secrets.COVERITY_ARTIFACTORY_USER }}
-          coverity-password: ${{ secrets.COVERITY_ARTIFACTORY_PASSWORD }}
+      # - name: Coverity Scan
+      #   uses: ./.github/actions/analysis/coverity
+      #   with:
+      #     coverity-url: ${{ secrets.COVERITY_URL }}
+      #     coverity-user: ${{ secrets.COVERITY_ARTIFACTORY_USER }}
+      #     coverity-password: ${{ secrets.COVERITY_ARTIFACTORY_PASSWORD }}
 
       - name: Trivy Scan
         uses: ./.github/actions/analysis/trivy

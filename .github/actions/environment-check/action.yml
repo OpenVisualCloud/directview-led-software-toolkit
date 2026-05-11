@@ -79,24 +79,27 @@ runs:
 
     - name: Build and install DPDK
       shell: bash
+      env:
+        DPDK_VERSION: ${{ inputs.dpdk-version }}
+        MTL_VERSION: ${{ inputs.mtl-version }}
       run: |
         echo "===== DPDK Setup ====="
         if pkg-config --exists libdpdk 2>/dev/null; then
           echo "  [OK] libdpdk ($(pkg-config --modversion libdpdk))"
           exit 0
         fi
-        echo "  Building DPDK ${{ inputs.dpdk-version }} from source..."
+        echo "  Building DPDK $DPDK_VERSION from source..."
         MTL_SOURCE="$HOME/Media-Transport-Library"
         if [ ! -d "$MTL_SOURCE" ]; then
           git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git "$MTL_SOURCE"
-          cd "$MTL_SOURCE" && git checkout ${{ inputs.mtl-version }}
+          cd "$MTL_SOURCE" && git checkout "$MTL_VERSION"
         fi
         cd "$HOME"
         git clone https://github.com/DPDK/dpdk.git
         cd dpdk
-        git checkout v${{ inputs.dpdk-version }}
-        git switch -c v${{ inputs.dpdk-version }}
-        git apply "$MTL_SOURCE"/patches/dpdk/${{ inputs.dpdk-version }}/*.patch
+        git checkout "v$DPDK_VERSION"
+        git switch -c "v$DPDK_VERSION"
+        git apply "$MTL_SOURCE"/patches/dpdk/"$DPDK_VERSION"/*.patch
         meson setup build
         ninja -C build
         sudo ninja install -C build
@@ -105,6 +108,8 @@ runs:
 
     - name: Build and install MTL
       shell: bash
+      env:
+        MTL_VERSION: ${{ inputs.mtl-version }}
       run: |
         echo "===== MTL Setup ====="
         export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
@@ -112,11 +117,11 @@ runs:
           echo "  [OK] mtl ($(pkg-config --modversion mtl))"
           exit 0
         fi
-        echo "  Building MTL ${{ inputs.mtl-version }} from source..."
+        echo "  Building MTL $MTL_VERSION from source..."
         MTL_SOURCE="$HOME/Media-Transport-Library"
         if [ ! -d "$MTL_SOURCE" ]; then
           git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git "$MTL_SOURCE"
-          cd "$MTL_SOURCE" && git checkout ${{ inputs.mtl-version }}
+          cd "$MTL_SOURCE" && git checkout "$MTL_VERSION"
         fi
         cd "$MTL_SOURCE"
         ./build.sh
@@ -143,6 +148,9 @@ runs:
 
     - name: Build and install FFmpeg with MTL plugin
       shell: bash
+      env:
+        FFMPEG_VERSION: ${{ inputs.ffmpeg-version }}
+        MTL_VERSION: ${{ inputs.mtl-version }}
       run: |
         echo "===== FFmpeg Setup ====="
         export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
@@ -150,13 +158,13 @@ runs:
           echo "  [OK] FFmpeg with MTL plugin already installed"
           exit 0
         fi
-        echo "  Building FFmpeg ${{ inputs.ffmpeg-version }} with MTL plugin from source..."
+        echo "  Building FFmpeg $FFMPEG_VERSION with MTL plugin from source..."
         MTL_SOURCE="$HOME/Media-Transport-Library"
         cd "$HOME"
         git clone https://github.com/FFmpeg/FFmpeg.git
         cd FFmpeg
-        git checkout release/${{ inputs.ffmpeg-version }}
-        git apply "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/${{ inputs.ffmpeg-version }}/*.patch
+        git checkout "release/$FFMPEG_VERSION"
+        git apply "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/"$FFMPEG_VERSION"/*.patch
         cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.c libavdevice/
         cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.h libavdevice/
         ./configure --enable-shared --disable-static  --enable-pic \
