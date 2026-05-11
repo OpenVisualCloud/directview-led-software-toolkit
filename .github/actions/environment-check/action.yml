@@ -23,6 +23,18 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Restore environment cache
+      id: env-cache
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          /usr/local/lib
+          /usr/local/include
+          /usr/local/bin
+          /usr/local/share
+          ${{ runner.temp }}/mtl-source
+        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-version }}-ffmpeg-${{ inputs.ffmpeg-version }}-${{ runner.os }}
+
     - name: Install APT packages
       shell: bash
       run: |
@@ -84,17 +96,18 @@ runs:
         MTL_VERSION: ${{ inputs.mtl-version }}
       run: |
         echo "===== DPDK Setup ====="
+        export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
         if pkg-config --exists libdpdk 2>/dev/null; then
-          echo "  [OK] libdpdk ($(pkg-config --modversion libdpdk))"
+          echo "  [OK] libdpdk ($(pkg-config --modversion libdpdk)) — skipping build (cached)"
           exit 0
         fi
         echo "  Building DPDK $DPDK_VERSION from source..."
-        MTL_SOURCE="$HOME/Media-Transport-Library"
+        MTL_SOURCE="$RUNNER_TEMP/mtl-source"
         if [ ! -d "$MTL_SOURCE" ]; then
           git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git "$MTL_SOURCE"
           cd "$MTL_SOURCE" && git checkout "$MTL_VERSION"
         fi
-        cd "$HOME"
+        cd "$RUNNER_TEMP"
         git clone https://github.com/DPDK/dpdk.git
         cd dpdk
         git checkout "v$DPDK_VERSION"
@@ -114,11 +127,11 @@ runs:
         echo "===== MTL Setup ====="
         export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
         if pkg-config --exists mtl 2>/dev/null; then
-          echo "  [OK] mtl ($(pkg-config --modversion mtl))"
+          echo "  [OK] mtl ($(pkg-config --modversion mtl)) — skipping build (cached)"
           exit 0
         fi
         echo "  Building MTL $MTL_VERSION from source..."
-        MTL_SOURCE="$HOME/Media-Transport-Library"
+        MTL_SOURCE="$RUNNER_TEMP/mtl-source"
         if [ ! -d "$MTL_SOURCE" ]; then
           git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git "$MTL_SOURCE"
           cd "$MTL_SOURCE" && git checkout "$MTL_VERSION"
@@ -155,12 +168,12 @@ runs:
         echo "===== FFmpeg Setup ====="
         export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
         if command -v ffmpeg &>/dev/null && ffmpeg -devices 2>&1 | grep -qi mtl; then
-          echo "  [OK] FFmpeg with MTL plugin already installed"
+          echo "  [OK] FFmpeg with MTL plugin already installed — skipping build (cached)"
           exit 0
         fi
         echo "  Building FFmpeg $FFMPEG_VERSION with MTL plugin from source..."
-        MTL_SOURCE="$HOME/Media-Transport-Library"
-        cd "$HOME"
+        MTL_SOURCE="$RUNNER_TEMP/mtl-source"
+        cd "$RUNNER_TEMP"
         git clone https://github.com/FFmpeg/FFmpeg.git
         cd FFmpeg
         git checkout "release/$FFMPEG_VERSION"
