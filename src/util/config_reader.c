@@ -447,7 +447,7 @@ int validate_tx_config(const struct dvledtx_config* config) {
 
     /* Video source file validation */
     if (config->tx_url[0] != '\0') {
-        FILE* f = fopen(config->tx_url, "r");
+        FILE* f = fopen(config->tx_url, "rb");
         if (!f) {
             LOG_ERROR("video source file not found: %s", config->tx_url);
             return -1;
