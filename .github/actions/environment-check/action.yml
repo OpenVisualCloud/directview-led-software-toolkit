@@ -164,8 +164,8 @@ runs:
         git apply "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/7.0/*.patch
         cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.c libavdevice/
         cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.h libavdevice/
-        ./configure --enable-shared --disable-static --enable-nonfree --enable-pic \
-          --enable-gpl --enable-libopenh264 --enable-encoder=libopenh264 --enable-mtl
+        ./configure --enable-shared --disable-static  --enable-pic \
+           --enable-libopenh264 --enable-encoder=libopenh264 --enable-mtl
         make -j "$(nproc)"
         sudo make install
         sudo ldconfig

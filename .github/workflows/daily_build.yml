@@ -61,6 +61,15 @@ jobs:
       - name: cppcheck
         uses: ./.github/actions/analysis/cppcheck
 
+      - name: Coverity Scan
+        uses: ./.github/actions/analysis/coverity
+        with:
+          coverity-url: ${{ secrets.COVERITY_URL }}
+          coverity-token: ${{ secrets.COVERITY_TOKEN }}
+
+      - name: Trivy Scan
+        uses: ./.github/actions/analysis/trivy
+
       - name: Upload daily build reports
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
