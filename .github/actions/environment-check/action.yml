@@ -127,8 +127,8 @@ runs:
         git apply "$MTL_SOURCE"/patches/dpdk/"$DPDK_VERSION"/*.patch
         meson setup build
         ninja -C build
-        sudo ninja install -C build
         DESTDIR="$RUNNER_TEMP/dvledtx-deps" ninja install -C build
+        sudo ninja install -C build
         sudo ldconfig
         echo "  DPDK installed: $(pkg-config --modversion libdpdk)"
 
@@ -151,8 +151,9 @@ runs:
         fi
         cd "$MTL_SOURCE"
         ./build.sh
-        # Capture MTL installables via DESTDIR (build.sh uses meson internally)
+        # Capture MTL installables via DESTDIR before sudo install (build dir still runner-owned)
         DESTDIR="$RUNNER_TEMP/dvledtx-deps" ninja -C "$MTL_SOURCE/build" install
+        sudo ninja -C "$MTL_SOURCE/build" install
         sudo ldconfig
         echo "  MTL installed: $(pkg-config --modversion mtl)"
 
@@ -170,8 +171,8 @@ runs:
         cd openh264
         git checkout openh264v2.4.0
         make -j "$(nproc)"
-        sudo make install
         make install DESTDIR="$RUNNER_TEMP/dvledtx-deps"
+        sudo make install
         sudo ldconfig
         echo "  openh264 installed."
 
@@ -199,8 +200,8 @@ runs:
         ./configure --enable-shared --disable-static  --enable-pic \
            --enable-libopenh264 --enable-encoder=libopenh264 --enable-mtl
         make -j "$(nproc)"
-        sudo make install
         make install DESTDIR="$RUNNER_TEMP/dvledtx-deps"
+        sudo make install
         sudo ldconfig
         echo "  FFmpeg installed: $(ffmpeg -version 2>&1 | head -1)"
 
