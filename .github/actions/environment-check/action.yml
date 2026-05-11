@@ -101,7 +101,7 @@ runs:
         cd dpdk
         git checkout v25.11
         git switch -c v25.11
-        git am "$MTL_SOURCE"/patches/dpdk/25.11/*.patch
+        git apply "$MTL_SOURCE"/patches/dpdk/25.11/*.patch
         meson setup build
         ninja -C build
         sudo ninja install -C build
@@ -161,7 +161,7 @@ runs:
         git clone https://github.com/FFmpeg/FFmpeg.git
         cd FFmpeg
         git checkout release/7.0
-        git am "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/7.0/*.patch
+        git apply "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/7.0/*.patch
         cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.c libavdevice/
         cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.h libavdevice/
         ./configure --enable-shared --disable-static --enable-nonfree --enable-pic \
