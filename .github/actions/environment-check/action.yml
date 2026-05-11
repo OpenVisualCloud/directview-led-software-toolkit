@@ -6,6 +6,20 @@
 name: 'Environment Setup'
 description: 'Install and verify all required libraries and tools on the runner'
 
+inputs:
+  dpdk-version:
+    description: 'DPDK version to build'
+    required: false
+    default: '25.11'
+  mtl-version:
+    description: 'MTL release tag to build'
+    required: false
+    default: 'v26.01'
+  ffmpeg-version:
+    description: 'FFmpeg release branch to build'
+    required: false
+    default: '7.0'
+
 runs:
   using: composite
   steps:
@@ -71,18 +85,18 @@ runs:
           echo "  [OK] libdpdk ($(pkg-config --modversion libdpdk))"
           exit 0
         fi
-        echo "  Building DPDK 25.11 from source..."
+        echo "  Building DPDK ${{ inputs.dpdk-version }} from source..."
         MTL_SOURCE="$HOME/Media-Transport-Library"
         if [ ! -d "$MTL_SOURCE" ]; then
           git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git "$MTL_SOURCE"
-          cd "$MTL_SOURCE" && git checkout v26.01
+          cd "$MTL_SOURCE" && git checkout ${{ inputs.mtl-version }}
         fi
         cd "$HOME"
         git clone https://github.com/DPDK/dpdk.git
         cd dpdk
-        git checkout v25.11
-        git switch -c v25.11
-        git apply "$MTL_SOURCE"/patches/dpdk/25.11/*.patch
+        git checkout v${{ inputs.dpdk-version }}
+        git switch -c v${{ inputs.dpdk-version }}
+        git apply "$MTL_SOURCE"/patches/dpdk/${{ inputs.dpdk-version }}/*.patch
         meson setup build
         ninja -C build
         sudo ninja install -C build
@@ -98,11 +112,11 @@ runs:
           echo "  [OK] mtl ($(pkg-config --modversion mtl))"
           exit 0
         fi
-        echo "  Building MTL v26.01 from source..."
+        echo "  Building MTL ${{ inputs.mtl-version }} from source..."
         MTL_SOURCE="$HOME/Media-Transport-Library"
         if [ ! -d "$MTL_SOURCE" ]; then
           git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git "$MTL_SOURCE"
-          cd "$MTL_SOURCE" && git checkout v26.01
+          cd "$MTL_SOURCE" && git checkout ${{ inputs.mtl-version }}
         fi
         cd "$MTL_SOURCE"
         ./build.sh
@@ -136,13 +150,13 @@ runs:
           echo "  [OK] FFmpeg with MTL plugin already installed"
           exit 0
         fi
-        echo "  Building FFmpeg 7.0 with MTL plugin from source..."
+        echo "  Building FFmpeg ${{ inputs.ffmpeg-version }} with MTL plugin from source..."
         MTL_SOURCE="$HOME/Media-Transport-Library"
         cd "$HOME"
         git clone https://github.com/FFmpeg/FFmpeg.git
         cd FFmpeg
-        git checkout release/7.0
-        git apply "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/7.0/*.patch
+        git checkout release/${{ inputs.ffmpeg-version }}
+        git apply "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/${{ inputs.ffmpeg-version }}/*.patch
         cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.c libavdevice/
         cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.h libavdevice/
         ./configure --enable-shared --disable-static  --enable-pic \
