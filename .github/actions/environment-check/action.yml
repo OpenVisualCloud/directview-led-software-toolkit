@@ -48,25 +48,6 @@ runs:
         fi
         echo "All required pip packages present."
 
-    - name: Install analysis tools
-      shell: bash
-      run: |
-        echo "===== Analysis Tools Setup ====="
-        MISSING=""
-        for TOOL in shellcheck cppcheck; do
-          if command -v "$TOOL" &>/dev/null; then
-            echo "  [OK] $TOOL ($(command -v "$TOOL"))"
-          else
-            MISSING="$MISSING $TOOL"
-          fi
-        done
-        if [ -n "$MISSING" ]; then
-          echo "  Installing missing analysis tools:$MISSING"
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq $MISSING
-        fi
-        echo "All required analysis tools present."
-
     - name: Check system libraries
       shell: bash
       run: |
