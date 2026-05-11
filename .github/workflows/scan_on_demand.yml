@@ -1,31 +1,27 @@
-﻿#
+#
 # BSD 3-Clause License
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: BSD-3-Clause
 #
-name: Pull Request
+name: Scan On Demand
 
 on:
-  pull_request:
-    types: [assigned, opened, synchronize, reopened]
-    branches-ignore:
-      - main
-
-  push:
-    branches-ignore:
-      - main
-
   workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to scan'
+        required: true
+        default: 'main'
 
 permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.branch }}
   cancel-in-progress: true
 
 jobs:
-  pull-request:
-    name: Pull Request
+  scan:
+    name: Scan On Demand
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -36,25 +32,14 @@ jobs:
           WORKSPACE: ${{ github.workspace }}
         run: |
           find "$WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          rm -rf /tmp/trivy-*
 
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.branch }}
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Environment check
-        uses: ./.github/actions/environment-check
-
-      - name: Build dvledtx
-        uses: ./.github/actions/build-dvledtx
-
-      - name: Smoke test
-        uses: ./.github/actions/smoke-tests
-
-      - name: Unit tests
-        uses: ./.github/actions/unit-tests
 
       - name: ShellCheck
         uses: ./.github/actions/analysis/shellcheck
@@ -75,10 +60,10 @@ jobs:
       - name: Trivy Scan
         uses: ./.github/actions/analysis/trivy
 
-      - name: Upload PR reports
+      - name: Upload scan reports
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: DVLED-SW-TK-PR-${{ github.run_id }}
+          name: DVLED-SW-TK-ScanOnDemand-${{ inputs.branch }}-${{ github.run_id }}
           path: ${{ github.workspace }}/reports/
           retention-days: 30
