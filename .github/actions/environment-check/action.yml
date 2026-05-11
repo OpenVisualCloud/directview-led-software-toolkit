@@ -28,18 +28,28 @@ runs:
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: |
-          /usr/local/lib
-          /usr/local/include
-          /usr/local/bin
-          /usr/local/share
+          ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
         key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-version }}-ffmpeg-${{ inputs.ffmpeg-version }}-${{ runner.os }}
+
+    - name: Deploy cache to system
+      if: steps.env-cache.outputs.cache-hit == 'true'
+      shell: bash
+      run: |
+        echo "===== Deploying cached deps to /usr/local/ ====="
+        if [ -d "$RUNNER_TEMP/dvledtx-deps" ]; then
+          sudo cp -rp "$RUNNER_TEMP/dvledtx-deps/". /usr/local/
+          sudo ldconfig
+          echo "  Cache deployed to /usr/local/"
+        else
+          echo "  No cached deps found, will build from source."
+        fi
 
     - name: Install APT packages
       shell: bash
       run: |
         echo "===== APT Package Setup ====="
-        PKGS="git gcc meson python3 python3-pip pkg-config libnuma-dev libjson-c-dev libpcap-dev libgtest-dev libssl-dev systemtap-sdt-dev llvm clang flex byacc libcmocka-dev nasm wget patch unzip"
+        PKGS="git gcc meson python3 python3-pip pkg-config libnuma-dev libjson-c-dev libpcap-dev libgtest-dev libssl-dev systemtap-sdt-dev llvm clang flex byacc libcmocka-dev nasm wget patch unzip shellcheck cppcheck"
         MISSING=""
         for pkg in $PKGS; do
           if dpkg -s "$pkg" &>/dev/null; then
@@ -59,7 +69,7 @@ runs:
       shell: bash
       run: |
         echo "===== pip Package Setup ====="
-        PIP_PKGS="pyelftools ninja gcovr"
+        PIP_PKGS="pyelftools ninja gcovr zizmor"
         MISSING=""
         for pkg in $PIP_PKGS; do
           if pip3 show "$pkg" &>/dev/null; then
@@ -222,3 +232,13 @@ runs:
           echo "ERROR: FFmpeg MTL plugin not found after build."
           exit 1
         fi
+
+    - name: Stage deps for cache
+      if: steps.env-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "===== Staging /usr/local/ for cache ====="
+        mkdir -p "$RUNNER_TEMP/dvledtx-deps"
+        sudo cp -rp /usr/local/lib /usr/local/include /usr/local/bin /usr/local/share \
+          "$RUNNER_TEMP/dvledtx-deps/"
+        echo "  Staged to $RUNNER_TEMP/dvledtx-deps — will be saved to cache."

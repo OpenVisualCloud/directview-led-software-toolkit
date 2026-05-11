@@ -41,7 +41,7 @@ jobs:
       - name: Environment check
         uses: ./.github/actions/environment-check
 
-      - name: Build dvledtx
+      - name: Build
         uses: ./.github/actions/build-dvledtx
 
       - name: Smoke test
