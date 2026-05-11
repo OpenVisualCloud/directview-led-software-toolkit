@@ -24,13 +24,7 @@ concurrency:
 jobs:
   build:
     name: Daily Build
-    # Self-hosted runner required for Intel MTL/DPDK hardware access.
-    # Push/schedule/workflow_dispatch only — no fork trigger possible.
-    # Guard retained for defense-in-depth.
-    if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     permissions:
       contents: read
 

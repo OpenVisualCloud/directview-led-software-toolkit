@@ -23,12 +23,7 @@ concurrency:
 jobs:
   ci:
     name: Continuous Integration
-    # Self-hosted runner required for Intel MTL/DPDK hardware access.
-    # Guard against untrusted fork PRs executing on the self-hosted runner.
-    if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
