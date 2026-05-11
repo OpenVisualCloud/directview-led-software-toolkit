@@ -36,11 +36,13 @@ runs:
       if: steps.env-cache.outputs.cache-hit == 'true'
       shell: bash
       run: |
-        echo "===== Deploying cached deps to /usr/local/ ====="
-        if [ -d "$RUNNER_TEMP/dvledtx-deps" ]; then
-          sudo cp -rp "$RUNNER_TEMP/dvledtx-deps/". /usr/local/
+        echo "===== Deploying cached deps to system ====="
+        DEPS_DIR="$RUNNER_TEMP/dvledtx-deps"
+        if [ -d "$DEPS_DIR" ]; then
+          # DESTDIR-captured tree has structure DEPS_DIR/usr/local/...; copy to /
+          sudo cp -rp "$DEPS_DIR/." /
           sudo ldconfig
-          echo "  Cache deployed to /usr/local/"
+          echo "  Cache deployed. Size: $(du -sh "$DEPS_DIR" | cut -f1)"
         else
           echo "  No cached deps found, will build from source."
         fi
@@ -126,6 +128,7 @@ runs:
         meson setup build
         ninja -C build
         sudo ninja install -C build
+        DESTDIR="$RUNNER_TEMP/dvledtx-deps" ninja install -C build
         sudo ldconfig
         echo "  DPDK installed: $(pkg-config --modversion libdpdk)"
 
@@ -148,6 +151,8 @@ runs:
         fi
         cd "$MTL_SOURCE"
         ./build.sh
+        # Capture MTL installables via DESTDIR (build.sh uses meson internally)
+        DESTDIR="$RUNNER_TEMP/dvledtx-deps" ninja -C "$MTL_SOURCE/build" install
         sudo ldconfig
         echo "  MTL installed: $(pkg-config --modversion mtl)"
 
@@ -166,6 +171,7 @@ runs:
         git checkout openh264v2.4.0
         make -j "$(nproc)"
         sudo make install
+        make install DESTDIR="$RUNNER_TEMP/dvledtx-deps"
         sudo ldconfig
         echo "  openh264 installed."
 
@@ -194,6 +200,7 @@ runs:
            --enable-libopenh264 --enable-encoder=libopenh264 --enable-mtl
         make -j "$(nproc)"
         sudo make install
+        make install DESTDIR="$RUNNER_TEMP/dvledtx-deps"
         sudo ldconfig
         echo "  FFmpeg installed: $(ffmpeg -version 2>&1 | head -1)"
 
@@ -233,12 +240,10 @@ runs:
           exit 1
         fi
 
-    - name: Stage deps for cache
+    - name: Report cache size
       if: steps.env-cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        echo "===== Staging /usr/local/ for cache ====="
-        mkdir -p "$RUNNER_TEMP/dvledtx-deps"
-        sudo cp -rp /usr/local/lib /usr/local/include /usr/local/bin /usr/local/share \
-          "$RUNNER_TEMP/dvledtx-deps/"
-        echo "  Staged to $RUNNER_TEMP/dvledtx-deps — will be saved to cache."
+        echo "===== Cache Content Summary ====="
+        du -sh "$RUNNER_TEMP/dvledtx-deps" || true
+        echo "  Cache will be saved automatically by actions/cache."
