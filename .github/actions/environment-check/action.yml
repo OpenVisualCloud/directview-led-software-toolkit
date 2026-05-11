@@ -3,68 +3,67 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: BSD-3-Clause
 #
-name: 'Environment Check'
-description: 'Verify required libraries and tools are available on the runner'
+name: 'Environment Setup'
+description: 'Install and verify all required libraries and tools on the runner'
 
 runs:
   using: composite
   steps:
-    - name: Check APT packages
+    - name: Install APT packages
       shell: bash
       run: |
-        echo "===== APT Package Check ====="
-        PKGS="git gcc meson python3 python3-pip pkg-config libnuma-dev libjson-c-dev libpcap-dev libgtest-dev libssl-dev systemtap-sdt-dev llvm clang flex byacc libcmocka-dev"
+        echo "===== APT Package Setup ====="
+        PKGS="git gcc meson python3 python3-pip pkg-config libnuma-dev libjson-c-dev libpcap-dev libgtest-dev libssl-dev systemtap-sdt-dev llvm clang flex byacc libcmocka-dev nasm wget patch unzip"
         MISSING=""
         for pkg in $PKGS; do
           if dpkg -s "$pkg" &>/dev/null; then
             echo "  [OK] $pkg"
           else
-            echo "  [MISSING] $pkg"
             MISSING="$MISSING $pkg"
           fi
         done
         if [ -n "$MISSING" ]; then
-          echo "ERROR: Missing packages:$MISSING"
-          exit 1
+          echo "  Installing missing packages:$MISSING"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq $MISSING
         fi
         echo "All required APT packages present."
 
-    - name: Check pip packages
+    - name: Install pip packages
       shell: bash
       run: |
-        echo "===== pip Package Check ====="
+        echo "===== pip Package Setup ====="
         PIP_PKGS="pyelftools ninja gcovr"
         MISSING=""
         for pkg in $PIP_PKGS; do
           if pip3 show "$pkg" &>/dev/null; then
             echo "  [OK] $pkg"
           else
-            echo "  [MISSING] $pkg"
             MISSING="$MISSING $pkg"
           fi
         done
         if [ -n "$MISSING" ]; then
-          echo "ERROR: Missing pip packages:$MISSING"
-          exit 1
+          echo "  Installing missing pip packages:$MISSING"
+          pip3 install --break-system-packages $MISSING
         fi
         echo "All required pip packages present."
 
-    - name: Check analysis tools
+    - name: Install analysis tools
       shell: bash
       run: |
-        echo "===== Analysis Tools Check ====="
+        echo "===== Analysis Tools Setup ====="
         MISSING=""
         for TOOL in shellcheck cppcheck; do
           if command -v "$TOOL" &>/dev/null; then
             echo "  [OK] $TOOL ($(command -v "$TOOL"))"
           else
-            echo "  [MISSING] $TOOL"
             MISSING="$MISSING $TOOL"
           fi
         done
         if [ -n "$MISSING" ]; then
-          echo "ERROR: Missing analysis tools:$MISSING"
-          exit 1
+          echo "  Installing missing analysis tools:$MISSING"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq $MISSING
         fi
         echo "All required analysis tools present."
 
@@ -72,66 +71,138 @@ runs:
       shell: bash
       run: |
         echo "===== System Library Check ====="
-        MISSING=""
         for LIB in m pthread; do
           if ldconfig -p | grep -q "lib${LIB}\.so"; then
             echo "  [OK] lib${LIB}"
           else
             echo "  [MISSING] lib${LIB}"
-            MISSING="$MISSING lib${LIB}"
+            echo "ERROR: lib${LIB} not found — this is unexpected on Ubuntu."
+            exit 1
           fi
         done
-        if [ -n "$MISSING" ]; then
-          echo "ERROR: Missing system libraries:$MISSING"
-          exit 1
-        fi
         echo "All required system libraries present."
 
-    - name: Check build dependencies via pkg-config
+    - name: Build and install DPDK
       shell: bash
       run: |
-        echo "===== Build Dependency Check (pkg-config) ====="
-        if ! command -v pkg-config &>/dev/null; then
-          echo "ERROR: pkg-config not found"
-          exit 1
+        echo "===== DPDK Setup ====="
+        if pkg-config --exists libdpdk 2>/dev/null; then
+          echo "  [OK] libdpdk ($(pkg-config --modversion libdpdk))"
+          exit 0
         fi
-        echo "  [OK] pkg-config ($(pkg-config --version)) at $(command -v pkg-config)"
+        echo "  Building DPDK 25.11 from source..."
+        MTL_SOURCE="$HOME/Media-Transport-Library"
+        if [ ! -d "$MTL_SOURCE" ]; then
+          git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git "$MTL_SOURCE"
+          cd "$MTL_SOURCE" && git checkout v26.01
+        fi
+        cd "$HOME"
+        git clone https://github.com/DPDK/dpdk.git
+        cd dpdk
+        git checkout v25.11
+        git switch -c v25.11
+        git am "$MTL_SOURCE"/patches/dpdk/25.11/*.patch
+        meson setup build
+        ninja -C build
+        sudo ninja install -C build
+        sudo ldconfig
+        echo "  DPDK installed: $(pkg-config --modversion libdpdk)"
 
-        MISSING=""
+    - name: Build and install MTL
+      shell: bash
+      run: |
+        echo "===== MTL Setup ====="
+        export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
+        if pkg-config --exists mtl 2>/dev/null; then
+          echo "  [OK] mtl ($(pkg-config --modversion mtl))"
+          exit 0
+        fi
+        echo "  Building MTL v26.01 from source..."
+        MTL_SOURCE="$HOME/Media-Transport-Library"
+        if [ ! -d "$MTL_SOURCE" ]; then
+          git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git "$MTL_SOURCE"
+          cd "$MTL_SOURCE" && git checkout v26.01
+        fi
+        cd "$MTL_SOURCE"
+        ./build.sh
+        sudo ldconfig
+        echo "  MTL installed: $(pkg-config --modversion mtl)"
+
+    - name: Build and install openh264
+      shell: bash
+      run: |
+        echo "===== openh264 Setup ====="
+        if ldconfig -p | grep -q libopenh264; then
+          echo "  [OK] openh264 already installed"
+          exit 0
+        fi
+        echo "  Building openh264 from source..."
+        cd "$HOME"
+        git clone https://github.com/cisco/openh264.git
+        cd openh264
+        git checkout openh264v2.4.0
+        make -j "$(nproc)"
+        sudo make install
+        sudo ldconfig
+        echo "  openh264 installed."
+
+    - name: Build and install FFmpeg with MTL plugin
+      shell: bash
+      run: |
+        echo "===== FFmpeg Setup ====="
+        export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
+        if command -v ffmpeg &>/dev/null && ffmpeg -devices 2>&1 | grep -qi mtl; then
+          echo "  [OK] FFmpeg with MTL plugin already installed"
+          exit 0
+        fi
+        echo "  Building FFmpeg 7.0 with MTL plugin from source..."
+        MTL_SOURCE="$HOME/Media-Transport-Library"
+        cd "$HOME"
+        git clone https://github.com/FFmpeg/FFmpeg.git
+        cd FFmpeg
+        git checkout release/7.0
+        git am "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/7.0/*.patch
+        cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.c libavdevice/
+        cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.h libavdevice/
+        ./configure --enable-shared --disable-static --enable-nonfree --enable-pic \
+          --enable-gpl --enable-libopenh264 --enable-encoder=libopenh264 --enable-mtl
+        make -j "$(nproc)"
+        sudo make install
+        sudo ldconfig
+        echo "  FFmpeg installed: $(ffmpeg -version 2>&1 | head -1)"
+
+    - name: Verify build dependencies
+      shell: bash
+      run: |
+        echo "===== Build Dependency Verification ====="
+        export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
+        FAILED=""
         for DEP in libavformat libavcodec libavutil libswscale libavdevice mtl; do
           if pkg-config --exists "$DEP" 2>/dev/null; then
             VER=$(pkg-config --modversion "$DEP" 2>/dev/null || echo "unknown")
             echo "  [OK] $DEP ($VER)"
           else
-            echo "  [MISSING] $DEP"
-            MISSING="$MISSING $DEP"
+            echo "  [FAIL] $DEP"
+            FAILED="$FAILED $DEP"
           fi
         done
-        if [ -n "$MISSING" ]; then
-          echo "ERROR: Missing build dependencies (dev libraries not installed):$MISSING"
+        if [ -n "$FAILED" ]; then
+          echo "ERROR: Missing build dependencies after setup:$FAILED"
           exit 1
         fi
-        echo "All required build dependencies present."
+        echo "All build dependencies verified."
 
-    - name: Check FFmpeg MTL plugin in avdevices
+    - name: Verify FFmpeg MTL plugin
       shell: bash
       run: |
-        echo "===== FFmpeg MTL Plugin Check ====="
-        if ! command -v ffmpeg &>/dev/null; then
-          echo "ERROR: ffmpeg binary not found"
-          exit 1
-        fi
+        echo "===== FFmpeg MTL Plugin Verification ====="
         echo "  ffmpeg: $(ffmpeg -version 2>&1 | head -1)"
-
         DEVICES=$(ffmpeg -devices 2>&1)
         if echo "$DEVICES" | grep -qi "mtl"; then
           MTL_DEVICES=$(echo "$DEVICES" | grep -i "mtl")
           echo "  [OK] MTL device(s) registered in FFmpeg avdevices:"
           echo "$MTL_DEVICES" | sed 's/^/    /'
         else
-          echo "  [MISSING] No MTL device found in FFmpeg avdevices."
-          echo "  Registered devices:"
-          echo "$DEVICES" | grep -E "^\s+(D |E | DE)" | sed 's/^/    /' || true
-          echo "ERROR: FFmpeg is not patched with the MTL plugin."
+          echo "ERROR: FFmpeg MTL plugin not found after build."
           exit 1
         fi
