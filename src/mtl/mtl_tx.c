@@ -347,12 +347,9 @@ int mtl_tx_send_raw_yuv(struct st20p_tx_ctx* ctx) {
   if (ctx->current_pos + frame_bytes > ctx->source_size)
     ctx->current_pos = 0;
 
-  size_t copy_sz = (ctx->current_pos + frame_bytes <= ctx->source_size)
-                     ? frame_bytes : (ctx->source_size - ctx->current_pos);
-
   if (frame->addr[0])
-    memcpy(frame->addr[0], ctx->source_buffer + ctx->current_pos, copy_sz);
-  ctx->current_pos += copy_sz;
+    memcpy(frame->addr[0], ctx->source_buffer + ctx->current_pos, frame_bytes);
+  ctx->current_pos += frame_bytes;
 
   frame->tfmt      = ST10_TIMESTAMP_FMT_MEDIA_CLK;
   frame->timestamp = ctx->frames_sent * 90000 / (uint32_t)ctx->app->fps;

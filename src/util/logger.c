@@ -98,7 +98,10 @@ void logger_set_level(log_level_t level)
 
 log_level_t logger_get_level(void)
 {
-    return g_logger.config.level;
+    pthread_mutex_lock(&g_logger.lock);
+    log_level_t level = g_logger.config.level;
+    pthread_mutex_unlock(&g_logger.lock);
+    return level;
 }
 
 bool logger_is_level_enabled(log_level_t level)
@@ -121,6 +124,8 @@ void logger_log(log_level_t level, const char *file, int line,
     vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
 
+    pthread_mutex_lock(&g_logger.lock);
+
     char ts[32] = "";
     if (g_logger.config.enable_timestamp) {
         struct timespec tp;
@@ -132,8 +137,6 @@ void logger_log(log_level_t level, const char *file, int line,
                  tm_info.tm_hour, tm_info.tm_min, tm_info.tm_sec,
                  tp.tv_nsec / 1000000L);
     }
-
-    pthread_mutex_lock(&g_logger.lock);
 
     if (g_logger.config.enable_console) {
         FILE *out = (level == LOG_LEVEL_ERROR) ? stderr : stdout;
@@ -158,21 +161,25 @@ void logger_log(log_level_t level, const char *file, int line,
 
     if (g_logger.config.enable_file && g_logger.file_fp) {
         /* If the file has reached 20 MB, truncate and start fresh */
-        if (ftell(g_logger.file_fp) >= 20 * 1024 * 1024) {
+        long pos = ftell(g_logger.file_fp);
+        if (pos >= 0 && pos >= 20 * 1024 * 1024) {
             FILE *new_fp = freopen(g_logger.config.log_file, "w", g_logger.file_fp);
             if (new_fp == NULL) {
-                g_logger.file_fp = NULL;
+                /* freopen closed the old stream; reopen from scratch */
+                g_logger.file_fp = fopen(g_logger.config.log_file, "a");
             } else {
                 g_logger.file_fp = new_fp;
             }
         }
-        if (level == LOG_LEVEL_ERROR) {
-            fprintf(g_logger.file_fp, "%s[%s:%d %s] %s\n",
-                    ts, file, line, func, msg);
-        } else {
-            fprintf(g_logger.file_fp, "%s[%s] %s\n", ts, level_str[level], msg);
+        if (g_logger.file_fp) {
+            if (level == LOG_LEVEL_ERROR) {
+                fprintf(g_logger.file_fp, "%s[%s:%d %s] %s\n",
+                        ts, file, line, func, msg);
+            } else {
+                fprintf(g_logger.file_fp, "%s[%s] %s\n", ts, level_str[level], msg);
+            }
+            fflush(g_logger.file_fp);
         }
-        fflush(g_logger.file_fp);
     }
 
     pthread_mutex_unlock(&g_logger.lock);

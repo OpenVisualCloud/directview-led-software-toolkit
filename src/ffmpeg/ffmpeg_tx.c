@@ -271,9 +271,6 @@ int ffmpeg_tx_send_raw_yuv(struct st20p_tx_ctx* ctx) {
   if (ctx->current_pos + frame_bytes > ctx->source_size)
     ctx->current_pos = 0;
 
-  size_t copy_sz = (ctx->current_pos + frame_bytes <= ctx->source_size)
-                     ? frame_bytes : (ctx->source_size - ctx->current_pos);
-
   /* Raw YUV files are packed (no per-line stride padding). Use
    * av_image_fill_arrays with align=1 to map the packed source buffer
    * onto the plane pointers/linesizes for av_image_copy. */
@@ -291,7 +288,7 @@ int ffmpeg_tx_send_raw_yuv(struct st20p_tx_ctx* ctx) {
   av_image_copy(ctx->enc_frame->data, ctx->enc_frame->linesize,
                 (const uint8_t**)planes, linesizes,
                 ctx->app->fmt, ctx->enc_frame->width, ctx->enc_frame->height);
-  ctx->current_pos += copy_sz;
+  ctx->current_pos += frame_bytes;
 
   int packed = av_image_copy_to_buffer(
       ctx->enc_pkt->data, ctx->enc_pkt->size,
