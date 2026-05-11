@@ -151,9 +151,10 @@ runs:
         fi
         cd "$MTL_SOURCE"
         ./build.sh
-        # Capture MTL installables via DESTDIR before sudo install (build dir still runner-owned)
+        # build.sh runs sudo ninja install internally, leaving meson-logs owned by root.
+        # Restore runner ownership so the unprivileged DESTDIR capture can write install-log.txt.
+        sudo chown -R "$(id -u):$(id -g)" "$MTL_SOURCE/build/meson-logs"
         DESTDIR="$RUNNER_TEMP/dvledtx-deps" ninja -C "$MTL_SOURCE/build" install
-        sudo ninja -C "$MTL_SOURCE/build" install
         sudo ldconfig
         echo "  MTL installed: $(pkg-config --modversion mtl)"
 
