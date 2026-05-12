@@ -29,6 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      security-events: write
 
     steps:
       - name: Clean up previous run
@@ -74,6 +75,9 @@ jobs:
 
       - name: Trivy Scan
         uses: ./.github/actions/analysis/trivy
+
+      - name: CodeQL Analysis
+        uses: ./.github/actions/analysis/codeql
 
       - name: Upload PR reports
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -1,0 +1,29 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: 'CodeQL Analysis'
+description: 'Run GitHub CodeQL static analysis for C/C++'
+
+runs:
+  using: composite
+  steps:
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@7fd177fa680c9881b53cdab4d346d32574c9f7f4 # v3
+      with:
+        languages: c-cpp
+        build-mode: manual
+
+    - name: Build for CodeQL
+      shell: bash
+      run: |
+        export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
+        rm -rf build
+        meson setup build
+        ninja -C build
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@7fd177fa680c9881b53cdab4d346d32574c9f7f4 # v3
+      with:
+        category: '/language:c-cpp'
