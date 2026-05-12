@@ -9,6 +9,18 @@ description: 'Run shellcheck on shell scripts. Report written to $GITHUB_WORKSPA
 runs:
   using: composite
   steps:
+    - name: Install ShellCheck
+      shell: bash
+      run: |
+        if command -v shellcheck &>/dev/null; then
+          echo "[OK] shellcheck already installed: $(shellcheck --version | head -2)"
+          exit 0
+        fi
+        echo "Installing shellcheck..."
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq shellcheck
+        echo "Installed: $(shellcheck --version | head -2)"
+
     - name: shellcheck scripts
       shell: bash
       run: |

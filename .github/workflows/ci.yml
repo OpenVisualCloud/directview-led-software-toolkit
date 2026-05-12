@@ -9,21 +9,26 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   ci:
     name: Continuous Integration
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - name: Clean up previous run
+        env:
+          WORKSPACE: ${{ github.workspace }}
         run: |
-          find "${{ github.workspace }}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          find "$WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
           rm -rf /tmp/trivy-*
 
       - name: Checkout repository
@@ -36,23 +41,30 @@ jobs:
       - name: Environment check
         uses: ./.github/actions/environment-check
 
-      - name: Build dvledtx
+      - name: Build
         uses: ./.github/actions/build-dvledtx
 
       - name: Smoke test
         uses: ./.github/actions/smoke-tests
 
-      - name: Run unit tests
+      - name: Unit tests
         uses: ./.github/actions/unit-tests
 
       - name: ShellCheck
         uses: ./.github/actions/analysis/shellcheck
 
+      - name: zizmor Scan
+        uses: ./.github/actions/analysis/zizmor
+
       - name: cppcheck
         uses: ./.github/actions/analysis/cppcheck
 
-      - name: Coverity Scan
-        uses: ./.github/actions/analysis/coverity
+      # - name: Coverity Scan
+      #   uses: ./.github/actions/analysis/coverity
+      #   with:
+      #     coverity-url: ${{ secrets.COVERITY_URL }}
+      #     coverity-user: ${{ secrets.COVERITY_ARTIFACTORY_USER }}
+      #     coverity-password: ${{ secrets.COVERITY_ARTIFACTORY_PASSWORD }}
 
       - name: Trivy Scan
         uses: ./.github/actions/analysis/trivy
@@ -61,6 +73,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: all-scan-reports-${{ github.run_id }}
+          name: DVLED-SW-TK-CI-${{ github.run_id }}
           path: ${{ github.workspace }}/reports/
           retention-days: 30

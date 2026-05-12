@@ -9,6 +9,18 @@ description: 'Run cppcheck static analysis'
 runs:
   using: composite
   steps:
+    - name: Install cppcheck
+      shell: bash
+      run: |
+        if command -v cppcheck &>/dev/null; then
+          echo "[OK] cppcheck already installed: $(cppcheck --version)"
+          exit 0
+        fi
+        echo "Installing cppcheck..."
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq cppcheck
+        echo "Installed: $(cppcheck --version)"
+
     - name: cppcheck
       shell: bash
       run: |

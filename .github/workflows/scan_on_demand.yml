@@ -1,0 +1,129 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: Scan On Demand
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to scan'
+        required: true
+        default: 'main'
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.branch }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Scan On Demand
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Clean up previous run
+        env:
+          WORKSPACE: ${{ github.workspace }}
+        run: |
+          find "$WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          rm -rf /tmp/trivy-*
+
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Collect scan metadata
+        env:
+          TRIGGERED_BY: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_NUMBER: ${{ github.run_number }}
+          WORKFLOW: ${{ github.workflow }}
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
+          INPUT_BRANCH: ${{ inputs.branch }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/reports"
+          REPORT="$GITHUB_WORKSPACE/reports/scan-metadata.txt"
+          {
+            echo "=================================================="
+            echo " Scan On Demand — Run Metadata"
+            echo "=================================================="
+            echo ""
+            echo "--- Trigger ---"
+            echo "Triggered by   : $TRIGGERED_BY"
+            echo "Trigger event  : workflow_dispatch"
+            echo "Run ID         : $RUN_ID"
+            echo "Run number     : $RUN_NUMBER"
+            echo "Workflow       : $WORKFLOW"
+            echo "Run URL        : $SERVER_URL/$REPOSITORY/actions/runs/$RUN_ID"
+            echo "Triggered at   : $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo ""
+            echo "--- Actor git identity (from GitHub) ---"
+            GIT_NAME=$(git log -1 --format="%an" 2>/dev/null || echo "n/a")
+            GIT_EMAIL=$(git log -1 --format="%ae" 2>/dev/null || echo "n/a")
+            echo "Committer name : $GIT_NAME"
+            echo "Committer email: $GIT_EMAIL"
+            echo ""
+            echo "--- Repository ---"
+            echo "Repository     : $REPOSITORY"
+            echo "Scanned branch : $INPUT_BRANCH"
+            echo ""
+            echo "--- Git HEAD ---"
+            echo "Commit SHA     : $(git rev-parse HEAD)"
+            echo "Short SHA      : $(git rev-parse --short HEAD)"
+            echo "Branch/ref     : $(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse HEAD)"
+            echo "Commit subject : $(git log -1 --format='%s')"
+            echo "Commit author  : $(git log -1 --format='%an <%ae>')"
+            echo "Commit date    : $(git log -1 --format='%cd' --date=format:'%Y-%m-%d %H:%M:%S UTC')"
+            echo "Commit body    :"
+            git log -1 --format='%b' | sed 's/^/  /'
+            echo ""
+            echo "--- Recent commits (last 5) ---"
+            git log -5 --format="  %h  %cd  %an  %s" --date=format:'%Y-%m-%d %H:%M'
+            echo ""
+            echo "--- Working tree status ---"
+            git status --short || true
+            echo ""
+            echo "--- Tags at HEAD (if any) ---"
+            git tag --points-at HEAD 2>/dev/null || echo "  (none)"
+            echo ""
+            echo "=================================================="
+          } > "$REPORT"
+          echo "Scan metadata written to $REPORT"
+          cat "$REPORT"
+
+      - name: ShellCheck
+        uses: ./.github/actions/analysis/shellcheck
+
+      - name: zizmor Scan
+        uses: ./.github/actions/analysis/zizmor
+
+      - name: cppcheck
+        uses: ./.github/actions/analysis/cppcheck
+
+      # - name: Coverity Scan
+      #   uses: ./.github/actions/analysis/coverity
+      #   with:
+      #     coverity-url: ${{ secrets.COVERITY_URL }}
+      #     coverity-user: ${{ secrets.COVERITY_ARTIFACTORY_USER }}
+      #     coverity-password: ${{ secrets.COVERITY_ARTIFACTORY_PASSWORD }}
+
+      - name: Trivy Scan
+        uses: ./.github/actions/analysis/trivy
+
+      - name: Upload scan reports
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: DVLED-SW-TK-ScanOnDemand-${{ inputs.branch }}-${{ github.run_id }}
+          path: ${{ github.workspace }}/reports/
+          retention-days: 30
