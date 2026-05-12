@@ -137,10 +137,12 @@ void* shared_decode_thread(void* arg) {
        * buffer that all TX threads will read from simultaneously. */
       int rows = convert_frame_format(dec->sws_ctx, dec->av_frame,
                                       dec->codec_ctx->height, dec->yuv_frame);
-      if (rows <= 0)
-        LOG_ERROR("Shared decode: convert_frame_format failed (ret=%d)", rows);
-
       av_frame_unref(dec->av_frame); /* return decoded frame back to FFmpeg pool */
+      if (rows <= 0) {
+        LOG_ERROR("Shared decode: convert_frame_format failed (ret=%d)", rows);
+        continue; /* don't send garbage frame to TX threads */
+      }
+
       dec->frame_counter++;
       got_frame = true;
     }

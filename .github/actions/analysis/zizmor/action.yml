@@ -1,0 +1,34 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: 'zizmor Scan'
+description: 'Install zizmor and scan all GitHub Actions workflow and action files'
+
+runs:
+  using: composite
+  steps:
+    - name: Install zizmor
+      shell: bash
+      run: |
+        echo "===== zizmor Setup ====="
+        if command -v zizmor > /dev/null 2>&1; then
+          echo "  [OK] zizmor already installed: $(zizmor --version)"
+        else
+          pip3 install --break-system-packages zizmor
+          echo "  zizmor installed: $(zizmor --version)"
+        fi
+
+    - name: zizmor scan
+      shell: bash
+      run: |
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
+        mkdir -p "$REPORT_DIR"
+        echo "===== zizmor Workflow Security Scan ====="
+        zizmor --pedantic --format sarif "$GITHUB_WORKSPACE" \
+          > "$REPORT_DIR/zizmor-report.sarif" 2>&1 || ZIZMOR_EXIT=$?
+        zizmor --pedantic "$GITHUB_WORKSPACE" \
+          2>&1 | tee "$REPORT_DIR/zizmor-scan.txt" || true
+        echo "zizmor scan complete. Reports: $REPORT_DIR/zizmor-scan.txt, $REPORT_DIR/zizmor-report.sarif"
+        exit "${ZIZMOR_EXIT:-0}"

@@ -9,15 +9,22 @@ description: 'Run Trivy filesystem, config, and secret scans'
 runs:
   using: composite
   steps:
-    - name: Verify Trivy installation
+    - name: Install Trivy
       shell: bash
       run: |
-        if ! command -v trivy > /dev/null 2>&1; then
-          echo "ERROR: Trivy is not installed or not available in PATH for the runner user."
-          echo "Install Trivy on the self-hosted runner and ensure PATH includes the binary location."
-          echo "If installed via snap, verify /snap/bin is available to the runner service."
-          exit 1
+        echo "===== Trivy Setup ====="
+        if command -v trivy &>/dev/null; then
+          echo "  [OK] Trivy already installed"
+          trivy --version
+          exit 0
         fi
+        echo "  Installing Trivy..."
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq wget apt-transport-https gnupg
+        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+        echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" | sudo tee /etc/apt/sources.list.d/trivy.list
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq trivy
         trivy --version
 
     - name: Trivy filesystem scan
