@@ -185,10 +185,8 @@ runs:
       run: |
         echo "===== FFmpeg Setup ====="
         export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
-        if pkg-config --exists libavformat libavcodec libavutil libavdevice 2>/dev/null \
-            && [ -x "/usr/local/bin/ffmpeg" ] \
-            && /usr/local/bin/ffmpeg -version 2>&1 | grep -q -- '--enable-mtl'; then
-          echo "  [OK] FFmpeg with MTL plugin already installed — skipping build (cached)"
+        if pkg-config --exists libavformat libavcodec libavutil libavdevice 2>/dev/null; then
+          echo "  [OK] FFmpeg already installed — skipping build (cached)"
           exit 0
         fi
         echo "  Building FFmpeg $FFMPEG_VERSION with MTL plugin from source..."
