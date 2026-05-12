@@ -198,8 +198,9 @@ runs:
         git apply "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/"$FFMPEG_VERSION"/*.patch
         cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.c libavdevice/
         cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.h libavdevice/
-        ./configure --enable-shared --disable-static  --enable-pic \
-           --enable-libopenh264 --enable-encoder=libopenh264 --enable-mtl
+        ./configure --enable-shared --disable-static --enable-pic \
+           --enable-libopenh264 --enable-encoder=libopenh264 --enable-mtl \
+           --disable-optimizations
         make -j "$(nproc)"
         make install DESTDIR="$RUNNER_TEMP/dvledtx-deps"
         sudo make install
@@ -231,14 +232,19 @@ runs:
       shell: bash
       run: |
         echo "===== FFmpeg MTL Plugin Verification ====="
-        echo "  ffmpeg: $(ffmpeg -version 2>&1 | head -1)"
-        DEVICES=$(ffmpeg -devices 2>&1)
-        if echo "$DEVICES" | grep -qi "mtl"; then
-          MTL_DEVICES=$(echo "$DEVICES" | grep -i "mtl")
-          echo "  [OK] MTL device(s) registered in FFmpeg avdevices:"
-          echo "$MTL_DEVICES" | sed 's/^/    /'
+        # Use nm on the shared library to check MTL symbols are compiled in,
+        # avoiding executing the ffmpeg binary which may crash with SIGILL on
+        # runners with different CPU capabilities than where the cache was built.
+        LIBAVDEVICE=$(ldconfig -p | grep libavdevice | awk '{print $NF}' | head -1)
+        if [ -z "$LIBAVDEVICE" ]; then
+          echo "ERROR: libavdevice not found in ldconfig."
+          exit 1
+        fi
+        echo "  libavdevice: $LIBAVDEVICE"
+        if nm -D "$LIBAVDEVICE" 2>/dev/null | grep -qi "mtl"; then
+          echo "  [OK] MTL symbols found in libavdevice — MTL plugin compiled in."
         else
-          echo "ERROR: FFmpeg MTL plugin not found after build."
+          echo "ERROR: MTL symbols not found in libavdevice — MTL plugin missing."
           exit 1
         fi
 
