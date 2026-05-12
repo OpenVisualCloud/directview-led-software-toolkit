@@ -56,7 +56,6 @@ static void dvledtx_apply_pending_signal_exit(void) {
  * ========================================================================= */
 static const char* ALLOWED_LOG_PREFIXES[] = {
   "/var/log/",
-  "/tmp/",
   NULL  /* sentinel — also allows paths relative to cwd (resolved below) */
 };
 

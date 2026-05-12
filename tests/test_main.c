@@ -559,6 +559,43 @@ static void test_main_with_log_env_variable(void **state)
 }
 
 /* ===========================================================================
+ * validate_log_path — log file path restriction tests
+ * =========================================================================== */
+
+/* /tmp paths must be rejected (world-writable, symlink attack risk) */
+static void test_validate_log_path_rejects_tmp(void **state)
+{
+    (void)state;
+    assert_false(validate_log_path("/tmp/dvledtx.log"));
+    assert_false(validate_log_path("/tmp/subdir/app.log"));
+}
+
+/* /var/log/ is an allowed prefix */
+static void test_validate_log_path_allows_var_log(void **state)
+{
+    (void)state;
+    assert_true(validate_log_path("/var/log/dvledtx.log"));
+}
+
+/* A filename without '/' resolves to cwd — should be allowed */
+static void test_validate_log_path_allows_cwd_relative(void **state)
+{
+    (void)state;
+    assert_true(validate_log_path("dvledtx.log"));
+}
+
+/* ===========================================================================
+ * sudo detection test
+ * =========================================================================== */
+
+/* Verify that geteuid() != 0 when tests are not run under sudo */
+static void test_not_running_as_sudo(void **state)
+{
+    (void)state;
+    assert_int_not_equal((int)geteuid(), 0);
+}
+
+/* ===========================================================================
  * main
  * =========================================================================== */
 
@@ -600,6 +637,14 @@ int main(void)
         cmocka_unit_test(test_main_resolve_ip_fails),
         cmocka_unit_test(test_main_with_log_file_redirect),
         cmocka_unit_test(test_main_with_log_env_variable),
+
+        /* validate_log_path */
+        cmocka_unit_test(test_validate_log_path_rejects_tmp),
+        cmocka_unit_test(test_validate_log_path_allows_var_log),
+        cmocka_unit_test(test_validate_log_path_allows_cwd_relative),
+
+        /* warn_if_root / sudo detection */
+        cmocka_unit_test(test_not_running_as_sudo),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);
