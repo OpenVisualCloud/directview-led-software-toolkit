@@ -25,12 +25,16 @@ runs:
   steps:
     - name: Restore environment cache
       id: env-cache
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: |
           ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
         key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-version }}-ffmpeg-${{ inputs.ffmpeg-version }}-${{ runner.os }}
+        restore-keys: |
+          env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-version }}-ffmpeg-${{ inputs.ffmpeg-version }}-
+          env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-version }}-
+          env-dpdk-${{ inputs.dpdk-version }}-
 
     - name: Deploy cache to system
       if: steps.env-cache.outputs.cache-hit == 'true'
@@ -248,4 +252,12 @@ runs:
       run: |
         echo "===== Cache Content Summary ====="
         du -sh "$RUNNER_TEMP/dvledtx-deps" || true
-        echo "  Cache will be saved automatically by actions/cache."
+
+    - name: Save environment cache (main branch only)
+      if: steps.env-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          ${{ runner.temp }}/dvledtx-deps
+          ${{ runner.temp }}/mtl-source
+        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-version }}-ffmpeg-${{ inputs.ffmpeg-version }}-${{ runner.os }}
