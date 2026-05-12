@@ -120,18 +120,20 @@ static bool validate_log_path(const char* path) {
       /* Directory doesn't exist — reject */
       return false;
     }
-    /* Restore for length check */
+    /* Safely append '/' + filename */
     size_t dlen = strlen(resolved);
+    size_t flen = strlen(slash + 1);
+    if (dlen + 1 + flen >= sizeof(resolved)) return false;
     resolved[dlen] = '/';
-    strncpy(resolved + dlen + 1, slash + 1, sizeof(resolved) - dlen - 2);
-    resolved[sizeof(resolved) - 1] = '\0';
+    memcpy(resolved + dlen + 1, slash + 1, flen + 1);
   } else {
     /* Filename in current directory — get cwd */
     if (getcwd(resolved, sizeof(resolved)) == NULL) return false;
     size_t clen = strlen(resolved);
+    size_t plen = strlen(path);
+    if (clen + 1 + plen >= sizeof(resolved)) return false;
     resolved[clen] = '/';
-    strncpy(resolved + clen + 1, path, sizeof(resolved) - clen - 2);
-    resolved[sizeof(resolved) - 1] = '\0';
+    memcpy(resolved + clen + 1, path, plen + 1);
   }
 
   /* Check against allowed prefixes */
