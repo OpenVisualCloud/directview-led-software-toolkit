@@ -3,135 +3,249 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: BSD-3-Clause
 #
-name: 'Environment Check'
-description: 'Verify required libraries and tools are available on the runner'
+name: 'Environment Setup'
+description: 'Install and verify all required libraries and tools on the runner'
+
+inputs:
+  dpdk-version:
+    description: 'DPDK version to build'
+    required: false
+    default: '25.11'
+  mtl-version:
+    description: 'MTL release tag to build'
+    required: false
+    default: 'v26.01'
+  ffmpeg-version:
+    description: 'FFmpeg release branch to build'
+    required: false
+    default: '7.0'
 
 runs:
   using: composite
   steps:
-    - name: Check APT packages
+    - name: Restore environment cache
+      id: env-cache
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          ${{ runner.temp }}/dvledtx-deps
+          ${{ runner.temp }}/mtl-source
+        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-version }}-ffmpeg-${{ inputs.ffmpeg-version }}-${{ runner.os }}
+
+    - name: Deploy cache to system
+      if: steps.env-cache.outputs.cache-hit == 'true'
       shell: bash
       run: |
-        echo "===== APT Package Check ====="
-        PKGS="git gcc meson python3 python3-pip pkg-config libnuma-dev libjson-c-dev libpcap-dev libgtest-dev libssl-dev systemtap-sdt-dev llvm clang flex byacc libcmocka-dev"
+        echo "===== Deploying cached deps to system ====="
+        DEPS_DIR="$RUNNER_TEMP/dvledtx-deps"
+        if [ -d "$DEPS_DIR" ]; then
+          # DESTDIR-captured tree has structure DEPS_DIR/usr/local/...; copy to /
+          sudo cp -rp "$DEPS_DIR/." /
+          sudo ldconfig
+          echo "  Cache deployed. Size: $(du -sh "$DEPS_DIR" | cut -f1)"
+        else
+          echo "  No cached deps found, will build from source."
+        fi
+
+    - name: Install APT packages
+      shell: bash
+      run: |
+        echo "===== APT Package Setup ====="
+        PKGS="git gcc meson python3 python3-pip pkg-config libnuma-dev libjson-c-dev libpcap-dev libgtest-dev libssl-dev systemtap-sdt-dev llvm clang flex byacc libcmocka-dev nasm wget patch unzip shellcheck cppcheck"
         MISSING=""
         for pkg in $PKGS; do
           if dpkg -s "$pkg" &>/dev/null; then
             echo "  [OK] $pkg"
           else
-            echo "  [MISSING] $pkg"
             MISSING="$MISSING $pkg"
           fi
         done
         if [ -n "$MISSING" ]; then
-          echo "ERROR: Missing packages:$MISSING"
-          exit 1
+          echo "  Installing missing packages:$MISSING"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq $MISSING
         fi
         echo "All required APT packages present."
 
-    - name: Check pip packages
+    - name: Install pip packages
       shell: bash
       run: |
-        echo "===== pip Package Check ====="
-        PIP_PKGS="pyelftools ninja gcovr"
+        echo "===== pip Package Setup ====="
+        PIP_PKGS="pyelftools ninja gcovr zizmor"
         MISSING=""
         for pkg in $PIP_PKGS; do
           if pip3 show "$pkg" &>/dev/null; then
             echo "  [OK] $pkg"
           else
-            echo "  [MISSING] $pkg"
             MISSING="$MISSING $pkg"
           fi
         done
         if [ -n "$MISSING" ]; then
-          echo "ERROR: Missing pip packages:$MISSING"
-          exit 1
+          echo "  Installing missing pip packages:$MISSING"
+          pip3 install --break-system-packages $MISSING
         fi
         echo "All required pip packages present."
-
-    - name: Check analysis tools
-      shell: bash
-      run: |
-        echo "===== Analysis Tools Check ====="
-        MISSING=""
-        for TOOL in shellcheck cppcheck; do
-          if command -v "$TOOL" &>/dev/null; then
-            echo "  [OK] $TOOL ($(command -v "$TOOL"))"
-          else
-            echo "  [MISSING] $TOOL"
-            MISSING="$MISSING $TOOL"
-          fi
-        done
-        if [ -n "$MISSING" ]; then
-          echo "ERROR: Missing analysis tools:$MISSING"
-          exit 1
-        fi
-        echo "All required analysis tools present."
 
     - name: Check system libraries
       shell: bash
       run: |
         echo "===== System Library Check ====="
-        MISSING=""
         for LIB in m pthread; do
           if ldconfig -p | grep -q "lib${LIB}\.so"; then
             echo "  [OK] lib${LIB}"
           else
             echo "  [MISSING] lib${LIB}"
-            MISSING="$MISSING lib${LIB}"
+            echo "ERROR: lib${LIB} not found — this is unexpected on Ubuntu."
+            exit 1
           fi
         done
-        if [ -n "$MISSING" ]; then
-          echo "ERROR: Missing system libraries:$MISSING"
-          exit 1
-        fi
         echo "All required system libraries present."
 
-    - name: Check build dependencies via pkg-config
+    - name: Build and install DPDK
+      shell: bash
+      env:
+        DPDK_VERSION: ${{ inputs.dpdk-version }}
+        MTL_VERSION: ${{ inputs.mtl-version }}
+      run: |
+        echo "===== DPDK Setup ====="
+        export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
+        if pkg-config --exists libdpdk 2>/dev/null; then
+          echo "  [OK] libdpdk ($(pkg-config --modversion libdpdk)) — skipping build (cached)"
+          exit 0
+        fi
+        echo "  Building DPDK $DPDK_VERSION from source..."
+        MTL_SOURCE="$RUNNER_TEMP/mtl-source"
+        if [ ! -d "$MTL_SOURCE" ]; then
+          git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git "$MTL_SOURCE"
+          cd "$MTL_SOURCE" && git checkout "$MTL_VERSION"
+        fi
+        cd "$RUNNER_TEMP"
+        git clone https://github.com/DPDK/dpdk.git
+        cd dpdk
+        git checkout "v$DPDK_VERSION"
+        git switch -c "v$DPDK_VERSION"
+        git apply "$MTL_SOURCE"/patches/dpdk/"$DPDK_VERSION"/*.patch
+        meson setup build
+        ninja -C build
+        DESTDIR="$RUNNER_TEMP/dvledtx-deps" ninja install -C build
+        sudo ninja install -C build
+        sudo ldconfig
+        echo "  DPDK installed: $(pkg-config --modversion libdpdk)"
+
+    - name: Build and install MTL
+      shell: bash
+      env:
+        MTL_VERSION: ${{ inputs.mtl-version }}
+      run: |
+        echo "===== MTL Setup ====="
+        export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
+        if pkg-config --exists mtl 2>/dev/null; then
+          echo "  [OK] mtl ($(pkg-config --modversion mtl)) — skipping build (cached)"
+          exit 0
+        fi
+        echo "  Building MTL $MTL_VERSION from source..."
+        MTL_SOURCE="$RUNNER_TEMP/mtl-source"
+        if [ ! -d "$MTL_SOURCE" ]; then
+          git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git "$MTL_SOURCE"
+          cd "$MTL_SOURCE" && git checkout "$MTL_VERSION"
+        fi
+        cd "$MTL_SOURCE"
+        ./build.sh
+        # build.sh runs sudo ninja install internally, leaving meson-logs owned by root.
+        # Restore runner ownership so the unprivileged DESTDIR capture can write install-log.txt.
+        sudo chown -R "$(id -u):$(id -g)" "$MTL_SOURCE/build/meson-logs"
+        DESTDIR="$RUNNER_TEMP/dvledtx-deps" ninja -C "$MTL_SOURCE/build" install
+        sudo ldconfig
+        echo "  MTL installed: $(pkg-config --modversion mtl)"
+
+    - name: Build and install openh264
       shell: bash
       run: |
-        echo "===== Build Dependency Check (pkg-config) ====="
-        if ! command -v pkg-config &>/dev/null; then
-          echo "ERROR: pkg-config not found"
-          exit 1
+        echo "===== openh264 Setup ====="
+        if ldconfig -p | grep -q libopenh264; then
+          echo "  [OK] openh264 already installed"
+          exit 0
         fi
-        echo "  [OK] pkg-config ($(pkg-config --version)) at $(command -v pkg-config)"
+        echo "  Building openh264 from source..."
+        cd "$HOME"
+        git clone https://github.com/cisco/openh264.git
+        cd openh264
+        git checkout openh264v2.4.0
+        make -j "$(nproc)"
+        make install DESTDIR="$RUNNER_TEMP/dvledtx-deps"
+        sudo make install
+        sudo ldconfig
+        echo "  openh264 installed."
 
-        MISSING=""
+    - name: Build and install FFmpeg with MTL plugin
+      shell: bash
+      env:
+        FFMPEG_VERSION: ${{ inputs.ffmpeg-version }}
+        MTL_VERSION: ${{ inputs.mtl-version }}
+      run: |
+        echo "===== FFmpeg Setup ====="
+        export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
+        if command -v ffmpeg &>/dev/null && ffmpeg -devices 2>&1 | grep -qi mtl; then
+          echo "  [OK] FFmpeg with MTL plugin already installed — skipping build (cached)"
+          exit 0
+        fi
+        echo "  Building FFmpeg $FFMPEG_VERSION with MTL plugin from source..."
+        MTL_SOURCE="$RUNNER_TEMP/mtl-source"
+        cd "$RUNNER_TEMP"
+        git clone https://github.com/FFmpeg/FFmpeg.git
+        cd FFmpeg
+        git checkout "release/$FFMPEG_VERSION"
+        git apply "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/"$FFMPEG_VERSION"/*.patch
+        cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.c libavdevice/
+        cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.h libavdevice/
+        ./configure --enable-shared --disable-static  --enable-pic \
+           --enable-libopenh264 --enable-encoder=libopenh264 --enable-mtl
+        make -j "$(nproc)"
+        make install DESTDIR="$RUNNER_TEMP/dvledtx-deps"
+        sudo make install
+        sudo ldconfig
+        echo "  FFmpeg installed: $(ffmpeg -version 2>&1 | head -1)"
+
+    - name: Verify build dependencies
+      shell: bash
+      run: |
+        echo "===== Build Dependency Verification ====="
+        export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
+        FAILED=""
         for DEP in libavformat libavcodec libavutil libswscale libavdevice mtl; do
           if pkg-config --exists "$DEP" 2>/dev/null; then
             VER=$(pkg-config --modversion "$DEP" 2>/dev/null || echo "unknown")
             echo "  [OK] $DEP ($VER)"
           else
-            echo "  [MISSING] $DEP"
-            MISSING="$MISSING $DEP"
+            echo "  [FAIL] $DEP"
+            FAILED="$FAILED $DEP"
           fi
         done
-        if [ -n "$MISSING" ]; then
-          echo "ERROR: Missing build dependencies (dev libraries not installed):$MISSING"
+        if [ -n "$FAILED" ]; then
+          echo "ERROR: Missing build dependencies after setup:$FAILED"
           exit 1
         fi
-        echo "All required build dependencies present."
+        echo "All build dependencies verified."
 
-    - name: Check FFmpeg MTL plugin in avdevices
+    - name: Verify FFmpeg MTL plugin
       shell: bash
       run: |
-        echo "===== FFmpeg MTL Plugin Check ====="
-        if ! command -v ffmpeg &>/dev/null; then
-          echo "ERROR: ffmpeg binary not found"
-          exit 1
-        fi
+        echo "===== FFmpeg MTL Plugin Verification ====="
         echo "  ffmpeg: $(ffmpeg -version 2>&1 | head -1)"
-
         DEVICES=$(ffmpeg -devices 2>&1)
         if echo "$DEVICES" | grep -qi "mtl"; then
           MTL_DEVICES=$(echo "$DEVICES" | grep -i "mtl")
           echo "  [OK] MTL device(s) registered in FFmpeg avdevices:"
           echo "$MTL_DEVICES" | sed 's/^/    /'
         else
-          echo "  [MISSING] No MTL device found in FFmpeg avdevices."
-          echo "  Registered devices:"
-          echo "$DEVICES" | grep -E "^\s+(D |E | DE)" | sed 's/^/    /' || true
-          echo "ERROR: FFmpeg is not patched with the MTL plugin."
+          echo "ERROR: FFmpeg MTL plugin not found after build."
           exit 1
         fi
+
+    - name: Report cache size
+      if: steps.env-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "===== Cache Content Summary ====="
+        du -sh "$RUNNER_TEMP/dvledtx-deps" || true
+        echo "  Cache will be saved automatically by actions/cache."

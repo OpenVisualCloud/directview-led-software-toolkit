@@ -4,25 +4,60 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 name: 'Coverity Scan'
-description: 'Run Coverity static analysis (assumes Coverity pre-installed on runner)'
+description: 'Install (if needed) and run Coverity static analysis'
+
+inputs:
+  coverity-url:
+    description: 'URL to download the Coverity analysis tarball'
+    required: true
+  coverity-user:
+    description: 'Artifactory username for Coverity download'
+    required: true
+  coverity-password:
+    description: 'Artifactory password for Coverity download'
+    required: true
 
 runs:
   using: composite
   steps:
+    - name: Install Coverity
+      shell: bash
+      env:
+        COVERITY_URL: ${{ inputs.coverity-url }}
+        COVERITY_USER: ${{ inputs.coverity-user }}
+        COVERITY_PASSWORD: ${{ inputs.coverity-password }}
+      run: |
+        echo "===== Coverity Setup ====="
+        COVERITY_DIR="$HOME/coverity"
+        if [ -x "$COVERITY_DIR/bin/cov-build" ]; then
+          echo "  [OK] Coverity already installed at $COVERITY_DIR"
+          "$COVERITY_DIR/bin/cov-build" --ident | head -1 || true
+          exit 0
+        fi
+        echo "  Downloading Coverity..."
+        mkdir -p "$COVERITY_DIR"
+        wget --no-proxy -q --user="$COVERITY_USER" --password="$COVERITY_PASSWORD" \
+          -O /tmp/coverity.tar.gz "$COVERITY_URL"
+        echo "  Extracting Coverity..."
+        tar xzf /tmp/coverity.tar.gz --strip-components=1 -C "$COVERITY_DIR"
+        rm -f /tmp/coverity.tar.gz
+        echo "  Coverity installed:"
+        "$COVERITY_DIR/bin/cov-build" --ident | head -1 || true
+
     - name: Coverity Scan
       shell: bash
       run: |
-        # Resolve MTL pkg-config path without writing to GITHUB_ENV
+        # Resolve MTL pkg-config path
+        export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
         if ! pkg-config --exists mtl 2>/dev/null; then
           MTL_PC=$(find /usr /home /opt -name "mtl.pc" 2>/dev/null | head -1)
           if [ -z "$MTL_PC" ]; then
-            echo "ERROR: MTL pkg-config file not found under /usr, /home, or /opt."
-            echo "Please ensure Media Transport Library is built and installed on the runner."
+            echo "ERROR: MTL pkg-config file not found."
             exit 1
           fi
           MTL_PC_DIR=$(dirname "$MTL_PC")
           echo "Found MTL pkgconfig at: $MTL_PC_DIR"
-          export PKG_CONFIG_PATH="${MTL_PC_DIR}:${PKG_CONFIG_PATH:-}"
+          export PKG_CONFIG_PATH="${MTL_PC_DIR}:${PKG_CONFIG_PATH}"
         fi
 
         cd "$GITHUB_WORKSPACE"
