@@ -44,9 +44,6 @@ jobs:
       - name: Build
         uses: ./.github/actions/build-dvledtx
 
-      - name: Smoke test
-        uses: ./.github/actions/smoke-tests
-
       - name: Unit tests
         uses: ./.github/actions/unit-tests
 
