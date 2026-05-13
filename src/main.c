@@ -234,6 +234,7 @@ int main(int argc, char** argv) {
             LOG_WARN("setvbuf(stdout) failed");
           if (setvbuf(stderr, NULL, _IOLBF, 0) != 0)
             LOG_WARN("setvbuf(stderr) failed");
+          logger_set_stdout_redirected(true);
           redirected = true;
         } else {
           LOG_WARN("dup2 failed for log redirection");
