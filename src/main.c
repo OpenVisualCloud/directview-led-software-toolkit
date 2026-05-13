@@ -185,6 +185,17 @@ int main(int argc, char** argv) {
     goto cleanup_logger;
   }
 
+  /* Reject symlinked config files to prevent symlink-based attacks */
+  {
+    struct stat lst;
+    if (lstat(app.config_file, &lst) == 0 && S_ISLNK(lst.st_mode)) {
+      LOG_ERROR("Config file '%s' is a symbolic link — rejected for security",
+                app.config_file);
+      ret = -1;
+      goto cleanup_logger;
+    }
+  }
+
   /* Phase 2: resolve log file destination BEFORE the full config load so that
    * "Config loaded" and session-info messages go directly to the log file.
    * Priority: config "log_file" > LOG_FILE env variable > console only. */
