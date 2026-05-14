@@ -22,6 +22,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <glob.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 
 #include "util/logger.h"
 
@@ -330,6 +333,65 @@ static void test_log_with_colors_disabled(void **state)
 }
 
 /* ==========================================================================
+ * Log rotation — archive old log and create fresh file
+ * ========================================================================== */
+
+static void test_log_rotation_archives_old_log(void **state)
+{
+    (void)state;
+    char *path = make_tmppath();
+    assert_non_null(path);
+
+    logger_config_t cfg = {
+        .level            = LOG_LEVEL_DEBUG,
+        .enable_console   = false,
+        .enable_file      = true,
+        .enable_timestamp = false,
+        .enable_colors    = false,
+        .log_file         = path,
+    };
+    assert_int_equal(logger_init(&cfg), 0);
+
+    /* Set a tiny rotation threshold (512 bytes) so we can trigger it easily */
+    logger_set_max_size(512);
+
+    /* Write enough data to exceed the 512-byte threshold */
+    for (int i = 0; i < 50; i++) {
+        logger_log(LOG_LEVEL_INFO, __FILE__, __LINE__, __func__,
+                   "rotation test line %d — padding to fill the log quickly", i);
+    }
+
+    logger_cleanup();
+
+    /* The current log file should exist and be small (post-rotation) */
+    struct stat st;
+    assert_int_equal(stat(path, &st), 0);
+
+    /* An archived .gz file should exist matching the pattern <path>.*gz */
+    char glob_pattern[600];
+    snprintf(glob_pattern, sizeof(glob_pattern), "%s.*.gz", path);
+    glob_t gl;
+    int gret = glob(glob_pattern, 0, NULL, &gl);
+    assert_int_equal(gret, 0);
+    assert_true(gl.gl_pathc >= 1);
+
+    /* Archived file should be non-empty */
+    struct stat gz_st;
+    assert_int_equal(stat(gl.gl_pathv[0], &gz_st), 0);
+    assert_true(gz_st.st_size > 0);
+
+    /* Cleanup: remove all generated files */
+    for (size_t i = 0; i < gl.gl_pathc; i++)
+        unlink(gl.gl_pathv[i]);
+    globfree(&gl);
+    unlink(path);
+    free(path);
+
+    /* Reset rotation size to default */
+    logger_set_max_size(0);
+}
+
+/* ==========================================================================
  * main
  * ========================================================================== */
 
@@ -366,6 +428,9 @@ int main(void)
         cmocka_unit_test_teardown(test_log_writes_to_file,              teardown),
         cmocka_unit_test_teardown(test_log_with_timestamp_enabled,      teardown),
         cmocka_unit_test_teardown(test_log_with_colors_disabled,        teardown),
+
+        /* --- log rotation --- */
+        cmocka_unit_test_teardown(test_log_rotation_archives_old_log,   teardown),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

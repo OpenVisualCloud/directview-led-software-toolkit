@@ -155,6 +155,23 @@ test_ffmpeg_tx_mock = executable('test_ffmpeg_tx_mock',
 )
 test('ffmpeg_tx_mock', test_ffmpeg_tx_mock)
 
+# Watchdog tests: --wrap=av_read_frame to inject perpetual decode failure.
+test_ffmpeg_watchdog = executable('test_ffmpeg_watchdog',
+  sources: [
+    'test_ffmpeg_watchdog.c',
+    '../src/ffmpeg/ffmpeg_decoder.c',
+    '../src/ffmpeg/ffmpeg_frame_handler.c',
+    '../src/util/logger.c',
+  ],
+  include_directories: test_inc,
+  dependencies: test_deps,
+  c_args: test_c_args,
+  link_args: ['-Wl,--wrap=av_read_frame',
+              '-Wl,--wrap=av_guess_format'],
+  install: false
+)
+test('ffmpeg_watchdog', test_ffmpeg_watchdog)
+
 if mtl_dep.found()
   test_mtl_tx = executable('test_mtl_tx',
     sources: [

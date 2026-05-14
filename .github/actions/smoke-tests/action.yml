@@ -38,4 +38,3 @@ runs:
           echo "Smoke test passed for $NAME. Output:"
           cat "$OUTFILE"
         done
-

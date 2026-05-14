@@ -559,6 +559,79 @@ static void test_main_with_log_env_variable(void **state)
 }
 
 /* ===========================================================================
+ * validate_log_path — log file path restriction tests
+ * =========================================================================== */
+
+/* /tmp paths must be rejected (world-writable, symlink attack risk) */
+static void test_validate_log_path_rejects_tmp(void **state)
+{
+    (void)state;
+    assert_false(validate_log_path("/tmp/dvledtx.log"));
+    assert_false(validate_log_path("/tmp/subdir/app.log"));
+}
+
+/* /var/log/ is an allowed prefix */
+static void test_validate_log_path_allows_var_log(void **state)
+{
+    (void)state;
+    assert_true(validate_log_path("/var/log/dvledtx.log"));
+}
+
+/* A filename without '/' resolves to cwd — should be allowed */
+static void test_validate_log_path_allows_cwd_relative(void **state)
+{
+    (void)state;
+    assert_true(validate_log_path("dvledtx.log"));
+}
+
+/* ===========================================================================
+ * symlink config rejection test
+ * =========================================================================== */
+
+/* Config file must not be a symlink — symlink attack mitigation */
+static void test_main_rejects_symlinked_config(void **state)
+{
+    (void)state;
+    const char *real_cfg = "test_real_config.json";
+    const char *link_cfg = "test_symlink_config.json";
+
+    /* Create a minimal valid JSON config file */
+    FILE *f = fopen(real_cfg, "w");
+    assert_non_null(f);
+    fprintf(f, "{\"interfaces\":[{\"name\":\"0000:06:00.0\","
+               "\"sip\":\"192.168.50.29\",\"dip\":\"239.168.85.20\"}],"
+               "\"video\":{\"width\":1920,\"height\":1080,\"fps\":30,"
+               "\"fmt\":\"yuv422p10le\",\"tx_url\":\"test.mp4\"},"
+               "\"tx_sessions\":[{\"udp_port\":20000,\"payload_type\":96,"
+               "\"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]}");
+    fclose(f);
+
+    /* Create a symlink pointing to the real config */
+    unlink(link_cfg);
+    int sr = symlink(real_cfg, link_cfg);
+    assert_int_equal(sr, 0);
+
+    /* tx_app_real_main should reject the symlinked config */
+    char *argv[] = {"dvledtx", "--config", (char *)link_cfg};
+    int ret = tx_app_real_main(3, argv);
+    assert_int_equal(ret, -1);
+
+    unlink(link_cfg);
+    unlink(real_cfg);
+}
+
+/* ===========================================================================
+ * sudo detection test
+ * =========================================================================== */
+
+/* Verify that geteuid() != 0 when tests are not run under sudo */
+static void test_not_running_as_sudo(void **state)
+{
+    (void)state;
+    assert_int_not_equal((int)geteuid(), 0);
+}
+
+/* ===========================================================================
  * main
  * =========================================================================== */
 
@@ -600,6 +673,17 @@ int main(void)
         cmocka_unit_test(test_main_resolve_ip_fails),
         cmocka_unit_test(test_main_with_log_file_redirect),
         cmocka_unit_test(test_main_with_log_env_variable),
+
+        /* validate_log_path */
+        cmocka_unit_test(test_validate_log_path_rejects_tmp),
+        cmocka_unit_test(test_validate_log_path_allows_var_log),
+        cmocka_unit_test(test_validate_log_path_allows_cwd_relative),
+
+        /* symlink config rejection */
+        cmocka_unit_test(test_main_rejects_symlinked_config),
+
+        /* warn_if_root / sudo detection */
+        cmocka_unit_test(test_not_running_as_sudo),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

@@ -417,8 +417,8 @@ int validate_tx_config(const struct dvledtx_config* config) {
         LOG_ERROR("video width/height must be non-zero");
         return -1;
     }
-    if (config->width > 7680 || config->height > 4320) {
-        LOG_ERROR("video resolution %dx%d exceeds maximum 7680x4320",
+    if (config->width > 1920 || config->height > 1080) {
+        LOG_ERROR("video resolution %dx%d exceeds maximum 1920x1080",
                config->width, config->height);
         return -1;
     }
