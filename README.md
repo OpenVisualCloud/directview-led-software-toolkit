@@ -256,6 +256,14 @@ MTL uses VFIO to access the NIC. The current user must belong to the `vfio` grou
    id -nG $USER
    ```
 
+### Killing the Application
+
+If `dvledtx` becomes unresponsive or needs to be force-stopped:
+
+```bash
+sudo pkill -9 -f dvledtx
+```
+
 ### Common Issues
 
 1. **MTL Initialization Failed**
