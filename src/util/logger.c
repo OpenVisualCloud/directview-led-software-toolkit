@@ -201,6 +201,10 @@ void logger_set_stdout_redirected(bool redirected)
 void logger_log(log_level_t level, const char *file, int line,
                 const char *func, const char *fmt, ...)
 {
+    (void)file;
+    (void)line;
+    (void)func;
+
     if (!logger_is_level_enabled(level))
         return;
 
@@ -226,21 +230,11 @@ void logger_log(log_level_t level, const char *file, int line,
 
     if (g_logger.config.enable_console) {
         FILE *out = (level == LOG_LEVEL_ERROR) ? stderr : stdout;
-        if (level == LOG_LEVEL_ERROR) {
-            if (g_logger.config.enable_colors) {
-                fprintf(out, "%s%s[%s:%d %s] %s%s\n",
-                        level_color[level], ts, file, line, func, msg, COLOR_RESET);
-            } else {
-                fprintf(out, "%s[%s:%d %s] %s\n",
-                        ts, file, line, func, msg);
-            }
+        if (g_logger.config.enable_colors) {
+            fprintf(out, "%s%s[%s] %s%s\n",
+                    level_color[level], ts, level_str[level], msg, COLOR_RESET);
         } else {
-            if (g_logger.config.enable_colors) {
-                fprintf(out, "%s%s[%s] %s%s\n",
-                        level_color[level], ts, level_str[level], msg, COLOR_RESET);
-            } else {
-                fprintf(out, "%s[%s] %s\n", ts, level_str[level], msg);
-            }
+            fprintf(out, "%s[%s] %s\n", ts, level_str[level], msg);
         }
         fflush(out);
     }
@@ -252,12 +246,7 @@ void logger_log(log_level_t level, const char *file, int line,
             logger_rotate_file();
         }
         if (g_logger.file_fp) {
-            if (level == LOG_LEVEL_ERROR) {
-                fprintf(g_logger.file_fp, "%s[%s:%d %s] %s\n",
-                        ts, file, line, func, msg);
-            } else {
-                fprintf(g_logger.file_fp, "%s[%s] %s\n", ts, level_str[level], msg);
-            }
+            fprintf(g_logger.file_fp, "%s[%s] %s\n", ts, level_str[level], msg);
             fflush(g_logger.file_fp);
         }
     }
