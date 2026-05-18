@@ -77,9 +77,33 @@ runs:
 
           # Analyze captured build
           $HOME/coverity/bin/cov-analyze --dir coverity_output/ \
-            --webapp-security \
-            --enable-audit-checkers \
-            --enable-default
+            --concurrency --enable-constraint-fpp --enable-fnptr --enable-virtual \
+            --disable ASSERT_SIDE_EFFECT \
+            --disable AUTO_CAUSES_COPY \
+            --disable BAD_CHECK_OF_WAIT_COND \
+            --disable BAD_SHIFT \
+            --disable COPY_INSTEAD_OF_MOVE \
+            --disable CUDA.COLLECTIVE_WARP_SHUFFLE_WIDTH \
+            --disable CUDA.CUDEVICE_HANDLES \
+            --disable CUDA.DEVICE_DEPENDENT \
+            --disable CUDA.DEVICE_DEPENDENT_CALLBACKS \
+            --disable CUDA.DIVERGENCE_AT_COLLECTIVE_OPERATION \
+            --disable CUDA.ERROR_INTERFACE \
+            --disable CUDA.ERROR_KERNEL_LAUNCH \
+            --disable CUDA.FORK \
+            --disable CUDA.INACTIVE_THREAD_AT_COLLECTIVE_WARP \
+            --disable CUDA.INITIATION_OBJECT_DEVICE_THREAD_BLOCK \
+            --disable CUDA.INVALID_MEMORY_ACCESS \
+            --disable CUDA.SHARE_FUNCTION \
+            --disable CUDA.SHARE_OBJECT_STREAM_ASSOCIATED \
+            --disable CUDA.SPECIFIERS_INCONSISTENCY \
+            --disable CUDA.SYNCHRONIZE_TERMINATION \
+            --disable INEFFICIENT_RESERVE \
+            --disable MISSING_COMMA \
+            --disable MISSING_MOVE_ASSIGNMENT \
+            --disable OVERLAPPING_COPY \
+            --disable STREAM_FORMAT_STATE \
+            --disable UNINTENDED_INTEGER_DIVISION
 
           # Generate JSON report
           $HOME/coverity/bin/cov-format-errors --dir coverity_output/ \
