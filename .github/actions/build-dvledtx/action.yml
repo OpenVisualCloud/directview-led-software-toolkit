@@ -19,8 +19,8 @@ runs:
           exit 1
         fi
         mkdir -p ./bins
-        cp ./build/dvledtx ./bins/dvledtx-ffmpeg
-        echo "FFMPEG build saved: $(file ./bins/dvledtx-ffmpeg)"
+        cp ./build/dvledtx ./bins/dvledtx
+        echo "FFMPEG build saved: $(file ./bins/dvledtx)"
 
     - name: Build with MTL TX APIs
       shell: bash

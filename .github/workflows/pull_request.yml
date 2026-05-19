@@ -75,6 +75,14 @@ jobs:
       - name: Trivy Scan
         uses: ./.github/actions/analysis/trivy
 
+      - name: Gitleaks Scan
+        uses: ./.github/actions/analysis/gitleaks
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: checksec Analysis
+        uses: ./.github/actions/analysis/seccomp
+
       - name: Upload PR reports
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
