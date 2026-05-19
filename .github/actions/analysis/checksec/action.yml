@@ -44,7 +44,7 @@ runs:
             if [ -f "$BIN" ]; then
               echo ""
               echo "--- $BIN ---"
-              checksec --file="$BIN" --output=text || true
+              checksec --no-banner file -o table "$BIN" || true
             else
               echo "WARNING: $BIN not found, skipping"
             fi
@@ -62,7 +62,7 @@ runs:
         for BIN in bins/dvledtx bins/dvledtx-mtl; do
           if [ -f "$BIN" ]; then
             LABEL=$(basename "$BIN")
-            checksec --file="$BIN" --output=json \
+            checksec --no-banner file -o json "$BIN" \
               > "$REPORT_DIR/checksec-${LABEL}.json" 2>/dev/null || true
           fi
         done
