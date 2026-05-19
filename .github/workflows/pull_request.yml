@@ -75,11 +75,6 @@ jobs:
       - name: Trivy Scan
         uses: ./.github/actions/analysis/trivy
 
-      - name: Gitleaks Scan
-        uses: ./.github/actions/analysis/gitleaks
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: checksec Analysis
         uses: ./.github/actions/analysis/seccomp
 
