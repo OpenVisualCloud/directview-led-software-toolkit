@@ -1,0 +1,70 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: 'checksec Analysis'
+description: 'Run checksec static hardening analysis on dvledtx binaries'
+
+runs:
+  using: composite
+  steps:
+    - name: Install checksec
+      shell: bash
+      run: |
+        echo "===== checksec Setup ====="
+        if command -v checksec &>/dev/null && checksec --version 2>/dev/null | grep -q "3\.1\.0"; then
+          echo "  [OK] checksec 3.1.0 already installed"
+          exit 0
+        fi
+        CHECKSEC_VERSION="3.1.0"
+        CHECKSEC_DEB="checksec_${CHECKSEC_VERSION}_amd64.deb"
+        CHECKSEC_URL="https://github.com/slimm609/checksec/releases/download/${CHECKSEC_VERSION}/${CHECKSEC_DEB}"
+        CHECKSEC_SHA256="6d1b6cdc69b567ef7f16ebbe259af37594f93fbbd6a963eb37597898e86d13d5"
+        echo "  Downloading checksec ${CHECKSEC_VERSION}..."
+        curl -fsSL -o "/tmp/${CHECKSEC_DEB}" "${CHECKSEC_URL}"
+        echo "  Verifying checksum..."
+        echo "${CHECKSEC_SHA256}  /tmp/${CHECKSEC_DEB}" | sha256sum --check --status
+        echo "  Checksum verified. Installing..."
+        sudo dpkg -i "/tmp/${CHECKSEC_DEB}"
+        rm -f "/tmp/${CHECKSEC_DEB}"
+        echo "  checksec installed: $(checksec --version 2>/dev/null || echo 'ok')"
+
+    - name: checksec � binary hardening report
+      shell: bash
+      run: |
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
+        mkdir -p "$REPORT_DIR"
+        REPORT="$REPORT_DIR/checksec-report.txt"
+        {
+          echo "=================================================="
+          echo " checksec � Binary Hardening Analysis"
+          echo "=================================================="
+          for BIN in bins/dvledtx bins/dvledtx-mtl; do
+            if [ -f "$BIN" ]; then
+              echo ""
+              echo "--- $BIN ---"
+              checksec --no-banner file -o table "$BIN" 2>&1 | sed 's/\x1b\[[0-9;]*[mGKHF]//g' || true
+            else
+              echo "WARNING: $BIN not found, skipping"
+            fi
+          done
+          echo ""
+          echo "=================================================="
+        } | tee "$REPORT"
+        echo "checksec report written to $REPORT"
+
+    - name: checksec � JSON report
+      shell: bash
+      run: |
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
+        mkdir -p "$REPORT_DIR"
+        for BIN in bins/dvledtx bins/dvledtx-mtl; do
+          if [ -f "$BIN" ]; then
+            LABEL=$(basename "$BIN")
+            checksec --no-banner file -o json "$BIN" 2>/dev/null \
+              | sed 's/\x1b\[[0-9;]*[mGKHF]//g' \
+              > "$REPORT_DIR/checksec-${LABEL}.json" || true
+          fi
+        done
+        echo "checksec JSON reports written to $REPORT_DIR"

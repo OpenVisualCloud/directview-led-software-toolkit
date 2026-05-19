@@ -89,6 +89,20 @@ void logger_log(log_level_t level, const char *file, int line,
  */
 bool logger_is_level_enabled(log_level_t level);
 
+/**
+ * @brief Override the log rotation size threshold (default 20 MB).
+ *        Intended for unit testing only.
+ *
+ * @param size_bytes New rotation threshold in bytes
+ */
+void logger_set_max_size(long size_bytes);
+
+/**
+ * @brief Tell the logger that stdout/stderr have been dup2'd to the log file.
+ *        After log rotation, the logger will re-dup2 them to the new file.
+ */
+void logger_set_stdout_redirected(bool redirected);
+
 /* Convenience macros for logging */
 #define LOG_ERROR(fmt, ...) \
     logger_log(LOG_LEVEL_ERROR, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)

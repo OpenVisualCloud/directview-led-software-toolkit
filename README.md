@@ -27,20 +27,20 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
 
 #### Software Requirements
 - [Ubuntu 22.04 LTS](https://releases.ubuntu.com/22.04)
-- [Media Transport Library (MTL) v26.01](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/v26.01/doc/build.md)
+- [Media Transport Library (MTL) v26.01+](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md)
   - Follow these steps
-    - [Install APT packages](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/v26.01/doc/build.md#111-ubuntudebian)
+    - [Install APT packages](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md#111-ubuntudebian)
     - Clone Media-Transport-Library
       ```
       git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git
       cd Media-Transport-Library
-      git checkout v26.01
+      git checkout ffmpeg-plugin-extra-pixel-format
       cd ..
       export mtl_source_code=${PWD}/Media-Transport-Library
       ```
-    - [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/v26.01/doc/build.md#2-dpdk-build-and-install)
-    - [Build and install MTL](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/v26.01/doc/build.md#3-build-media-transport-library-and-app)
-- [FFmpeg 7.0 with MTL Plugin](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/v26.01/ecosystem/ffmpeg_plugin/README.md#1-build)
+    - [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md#2-dpdk-build-and-install)
+    - [Build and install MTL](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md#3-build-media-transport-library-and-app)
+- [FFmpeg 7.0 with MTL Plugin](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/ecosystem/ffmpeg_plugin/README.md#1-build)
 
 ### Build Steps
 
@@ -65,8 +65,8 @@ The built binary will be available at `build/dvledtx`.
 ### Binding Ethernet Controller to DPDK PMD and Hugepage Setup 
 
 - Ensure VFIO group exists [follow](#vfio-group-setup)
-- [DPDK PMD Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/main/doc/run.md#3-dpdk-pmd-setup)
-- [Hugepage Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/main/doc/run.md#4-setup-hugepage)
+- [DPDK PMD Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/run.md#3-dpdk-pmd-setup)
+- [Hugepage Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/run.md#4-setup-hugepage)
 
 ### JSON Configuration
 
@@ -255,6 +255,14 @@ MTL uses VFIO to access the NIC. The current user must belong to the `vfio` grou
    ```bash
    id -nG $USER
    ```
+
+### Killing the Application
+
+If `dvledtx` becomes unresponsive or needs to be force-stopped:
+
+```bash
+sudo pkill -9 -f dvledtx
+```
 
 ### Common Issues
 

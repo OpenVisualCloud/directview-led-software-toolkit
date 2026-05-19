@@ -38,13 +38,66 @@ runs:
       run: |
         echo "===== Deploying cached deps to system ====="
         DEPS_DIR="$RUNNER_TEMP/dvledtx-deps"
-        if [ -d "$DEPS_DIR" ]; then
-          # DESTDIR-captured tree has structure DEPS_DIR/usr/local/...; copy to /
-          sudo cp -rp "$DEPS_DIR/." /
-          sudo ldconfig
-          echo "  Cache deployed. Size: $(du -sh "$DEPS_DIR" | cut -f1)"
-        else
+        if [ ! -d "$DEPS_DIR" ]; then
           echo "  No cached deps found, will build from source."
+          exit 0
+        fi
+
+        # Bulk copy the full DESTDIR tree to /
+        sudo cp -rp "$DEPS_DIR/." /
+        sudo ldconfig
+        echo "  Cache deployed. Size: $(du -sh "$DEPS_DIR" | cut -f1)"
+
+        # --- Explicit FFmpeg binary copy and restore confirmation ---
+        echo ""
+        echo "  --- FFmpeg explicit restore check ---"
+        FFMPEG_SRC_BIN=$(find "$DEPS_DIR" -type f -name "ffmpeg" | head -1)
+        FFMPEG_LIB_DIR=$(find "$DEPS_DIR" -type d -name "lib" | grep -v pkgconfig | head -1)
+
+        # Copy FFmpeg binary explicitly if found in DESTDIR snapshot
+        if [ -n "$FFMPEG_SRC_BIN" ]; then
+          DEST_BIN="/usr/local/bin/ffmpeg"
+          sudo cp -p "$FFMPEG_SRC_BIN" "$DEST_BIN"
+          echo "  [OK] Copied ffmpeg binary: $FFMPEG_SRC_BIN -> $DEST_BIN"
+        else
+          echo "  [WARN] ffmpeg binary not found in cache snapshot ($DEPS_DIR)"
+        fi
+
+        # Copy FFmpeg shared libraries explicitly
+        if [ -n "$FFMPEG_LIB_DIR" ]; then
+          sudo find "$FFMPEG_LIB_DIR" -name "libav*.so*" -o -name "libsw*.so*" | \
+            while read -r SOFILE; do
+              sudo cp -p "$SOFILE" /usr/local/lib/
+              echo "  [OK] Copied $(basename "$SOFILE")"
+            done
+          sudo ldconfig
+        else
+          echo "  [WARN] FFmpeg lib dir not found in cache snapshot"
+        fi
+
+        # Confirm each FFmpeg lib is registered
+        echo ""
+        echo "  --- FFmpeg restore confirmation ---"
+        ALL_OK=1
+        for LIB in libavformat libavcodec libavutil libavdevice libswscale; do
+          LIB_PATH=$(ldconfig -p | grep "^\s*${LIB}\.so" | awk '{print $NF}' | head -1)
+          if [ -n "$LIB_PATH" ]; then
+            echo "  [OK] $LIB -> $LIB_PATH"
+          else
+            echo "  [FAIL] $LIB not found after restore"
+            ALL_OK=0
+          fi
+        done
+        FFMPEG_BIN=$(command -v ffmpeg 2>/dev/null || true)
+        if [ -n "$FFMPEG_BIN" ]; then
+          echo "  [OK] ffmpeg binary in PATH: $FFMPEG_BIN"
+        else
+          echo "  [FAIL] ffmpeg binary not found in PATH after restore"
+          ALL_OK=0
+        fi
+        if [ "$ALL_OK" -eq 0 ]; then
+          echo "ERROR: FFmpeg restore incomplete — cache may be corrupt."
+          exit 1
         fi
 
     - name: Install APT packages
@@ -185,10 +238,8 @@ runs:
       run: |
         echo "===== FFmpeg Setup ====="
         export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
-        if pkg-config --exists libavformat libavcodec libavutil libavdevice 2>/dev/null \
-            && [ -x "/usr/local/bin/ffmpeg" ] \
-            && /usr/local/bin/ffmpeg -version 2>&1 | grep -q -- '--enable-mtl'; then
-          echo "  [OK] FFmpeg with MTL plugin already installed — skipping build (cached)"
+        if pkg-config --exists libavformat libavcodec libavutil libavdevice 2>/dev/null; then
+          echo "  [OK] FFmpeg already installed — skipping build (cached)"
           exit 0
         fi
         echo "  Building FFmpeg $FFMPEG_VERSION with MTL plugin from source..."
@@ -200,13 +251,13 @@ runs:
         git apply "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/"$FFMPEG_VERSION"/*.patch
         cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.c libavdevice/
         cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.h libavdevice/
-        ./configure --enable-shared --disable-static  --enable-pic \
+        ./configure --enable-shared --disable-static --enable-pic \
            --enable-libopenh264 --enable-encoder=libopenh264 --enable-mtl
         make -j "$(nproc)"
         make install DESTDIR="$RUNNER_TEMP/dvledtx-deps"
         sudo make install
         sudo ldconfig
-        echo "  FFmpeg installed: $(ffmpeg -version 2>&1 | head -1)"
+        echo "  FFmpeg installed."
 
     - name: Verify build dependencies
       shell: bash
@@ -233,8 +284,31 @@ runs:
       shell: bash
       run: |
         echo "===== FFmpeg MTL Plugin Verification ====="
-        echo "  ffmpeg: $(ffmpeg -version 2>&1 | head -1)"
+
+        # Locate the binary first
+        FFMPEG_PATH=$(which ffmpeg 2>/dev/null || true)
+        if [ -z "$FFMPEG_PATH" ]; then
+          echo "ERROR: ffmpeg not found in PATH (which ffmpeg returned nothing)."
+          echo "  PATH=$PATH"
+          exit 1
+        fi
+        echo "  [OK] ffmpeg binary: $FFMPEG_PATH"
+
+        # Run ffmpeg -version and print full output
+        echo "  --- ffmpeg -version output ---"
+        FFMPEG_VERSION_OUT=$(ffmpeg -version 2>&1)
+        echo "$FFMPEG_VERSION_OUT"
+        FFMPEG_VER=$(echo "$FFMPEG_VERSION_OUT" | head -1)
+        if [ -z "$FFMPEG_VER" ]; then
+          echo "ERROR: ffmpeg -version returned no output."
+          exit 1
+        fi
+        echo "  [OK] ffmpeg version: $FFMPEG_VER"
+
+        # Check MTL device is registered
+        echo "  --- ffmpeg -devices output ---"
         DEVICES=$(ffmpeg -devices 2>&1)
+        echo "$DEVICES"
         if echo "$DEVICES" | grep -qi "mtl"; then
           MTL_DEVICES=$(echo "$DEVICES" | grep -i "mtl")
           echo "  [OK] MTL device(s) registered in FFmpeg avdevices:"

@@ -1,0 +1,46 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: 'Gitleaks Scan'
+description: 'Scan repository for secrets and credentials using Gitleaks'
+
+inputs:
+  github-token:
+    description: 'GitHub token for Gitleaks API access'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Run Gitleaks
+      uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+
+    - name: Gitleaks git history scan
+      if: always()
+      shell: bash
+      run: |
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
+        mkdir -p "$REPORT_DIR"
+        echo "===== Gitleaks Git History Scan ====="
+        gitleaks git \
+          --report-format sarif \
+          --report-path "$REPORT_DIR/gitleaks-git-report.sarif" \
+          . 2>&1 | tee "$REPORT_DIR/gitleaks-git-scan.txt" || true
+        echo "Gitleaks git history scan complete."
+
+    - name: Copy report to reports directory
+      if: always()
+      shell: bash
+      run: |
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
+        mkdir -p "$REPORT_DIR"
+        if [ -f "$GITHUB_WORKSPACE/results.sarif" ]; then
+          cp "$GITHUB_WORKSPACE/results.sarif" "$REPORT_DIR/gitleaks-report.sarif"
+          echo "Gitleaks SARIF written to $REPORT_DIR/gitleaks-report.sarif"
+        else
+          echo "No Gitleaks SARIF output found"
+        fi
