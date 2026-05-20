@@ -26,7 +26,7 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
 - Intel Ethernet Controller I225 or above
 
 #### Software Requirements
-- [Ubuntu 22.04 LTS](https://releases.ubuntu.com/22.04)
+- Ubuntu [22.04](https://releases.ubuntu.com/jammy/) or [24.04](https://releases.ubuntu.com/noble/) LTS
 - [Media Transport Library (MTL) v26.01+](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md)
   - Follow these steps
     - [Install APT packages](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md#111-ubuntudebian)
