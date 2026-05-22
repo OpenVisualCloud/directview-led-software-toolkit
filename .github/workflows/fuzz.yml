@@ -72,6 +72,8 @@ jobs:
         run: |
           cd fuzz
           mkdir -p findings
+          export AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
+          export AFL_SKIP_CPUFREQ=1
           # Run AFL for 5 minutes (CI time-boxed)
           timeout 300 afl-fuzz -i corpus/ -o findings/ -V 300 -- ./fuzz_config_reader @@ || true
 
