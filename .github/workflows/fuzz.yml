@@ -89,6 +89,15 @@ jobs:
           fi
           echo "No crashes found — fuzzing passed."
 
+      - name: Sanitize AFL filenames for upload
+        if: always()
+        run: |
+          cd fuzz/findings
+          # Rename files with colons (AFL naming) to use underscores
+          find . -name '*:*' | while read f; do
+            mv "$f" "$(echo "$f" | tr ':' '_')"
+          done
+
       - name: Upload fuzzing results
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
