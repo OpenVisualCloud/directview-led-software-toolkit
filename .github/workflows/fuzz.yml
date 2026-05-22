@@ -44,14 +44,16 @@ jobs:
       - name: Build fuzz harness
         run: |
           cd fuzz
-          AFL_CC=afl-clang-fast afl-clang-fast -o fuzz_config_reader \
-            fuzz_config_reader.c \
-            ../src/util/config_reader.c \
-            ../src/util/logger.c \
-            -I../include \
-            $(pkg-config --cflags --libs libavutil) \
-            -lm -g -O1 -fno-omit-frame-pointer \
-            -fsanitize=address,undefined
+          export CC=afl-clang-fast
+          export AFL_CC=afl-clang-fast
+          CFLAGS="-g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined -I../include $(pkg-config --cflags libavutil)"
+          LDFLAGS="$(pkg-config --libs libavutil) -lm -fsanitize=address,undefined"
+          # Compile objects separately to avoid too many params
+          $CC $CFLAGS -c fuzz_config_reader.c -o fuzz_config_reader.o
+          $CC $CFLAGS -c ../src/util/config_reader.c -o config_reader.o
+          $CC $CFLAGS -c ../src/util/logger.c -o logger.o
+          # Link
+          $CC -o fuzz_config_reader fuzz_config_reader.o config_reader.o logger.o $LDFLAGS
 
       - name: Run AFL fuzzer (timed)
         run: |
