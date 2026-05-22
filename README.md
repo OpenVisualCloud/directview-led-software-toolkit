@@ -5,8 +5,6 @@
 [![MTL](https://img.shields.io/badge/MTL-v26.01+-green.svg)](https://github.com/OpenVisualCloud/Media-Transport-Library)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/OpenVisualCloud/directview-led-software-toolkit/badge)](https://securityscorecards.dev/viewer/?uri=github.com/OpenVisualCloud/directview-led-software-toolkit)
 
-> **Repository Topics:** `smpte-st2110` `direct-view-led` `video-streaming` `media-transport-library` `dpdk` `ffmpeg` `real-time-video` `uncompressed-video` `intel` `open-visual-cloud`
-
 ## Table of Contents
 
 - [Overview](#overview)
