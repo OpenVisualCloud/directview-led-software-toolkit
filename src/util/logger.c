@@ -71,7 +71,7 @@ static void logger_rotate_file(void)
     struct tm tm_info;
     localtime_r(&tp.tv_sec, &tm_info);
 
-    char ts_suffix[32];
+    char ts_suffix[64];
     snprintf(ts_suffix, sizeof(ts_suffix), ".%04d-%02d-%02d_%02d%02d%02d",
              tm_info.tm_year + 1900, tm_info.tm_mon + 1, tm_info.tm_mday,
              tm_info.tm_hour, tm_info.tm_min, tm_info.tm_sec);
@@ -216,7 +216,7 @@ void logger_log(log_level_t level, const char *file, int line,
 
     pthread_mutex_lock(&g_logger.lock);
 
-    char ts[32] = "";
+    char ts[64] = "";
     if (g_logger.config.enable_timestamp) {
         struct timespec tp;
         clock_gettime(CLOCK_REALTIME, &tp);
