@@ -64,7 +64,7 @@ void close_ffmpeg_tx(struct st20p_tx_ctx* ctx);
  *
  * Returns 0 on success, -1 on error.
  */
-int ffmpeg_tx_send_yuv_frame(struct st20p_tx_ctx* ctx, AVFrame* src,
+int ffmpeg_tx_send_yuv_frame(struct st20p_tx_ctx* ctx, const AVFrame* src,
                              int crop_x, int crop_y, int crop_w, int crop_h);
 
 /*

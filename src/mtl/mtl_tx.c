@@ -192,7 +192,7 @@ int mtl_tx_init(session_manager_t* manager, struct dvledtx_context* app) {
 
   mtl_params.flags   = MTL_FLAG_BIND_NUMA | MTL_FLAG_DEV_AUTO_START_STOP;
   mtl_params.num_ports = 1;
-  strncpy(mtl_params.port[MTL_PORT_P], app->port, MTL_PORT_MAX_LEN - 1);
+  snprintf(mtl_params.port[MTL_PORT_P], MTL_PORT_MAX_LEN, "%s", app->port);
   memcpy(mtl_params.sip_addr[MTL_PORT_P], app->sip_addr, MTL_IP_ADDR_LEN);
   mtl_params.pmd[MTL_PORT_P] = mtl_pmd_by_port_name(app->port);
 
@@ -239,7 +239,7 @@ int mtl_tx_session_create(session_manager_t* manager, struct st20p_tx_ctx* ctx,
 
   ops.port.num_port = 1;
   memcpy(ops.port.dip_addr[MTL_SESSION_PORT_P], app->dip_addr, MTL_IP_ADDR_LEN);
-  strncpy(ops.port.port[MTL_SESSION_PORT_P], app->port, MTL_PORT_MAX_LEN - 1);
+  snprintf(ops.port.port[MTL_SESSION_PORT_P], MTL_PORT_MAX_LEN, "%s", app->port);
 
   int udp_port = app->session_net[session_idx].udp_port;
   if (udp_port == 0) udp_port = (int)app->udp_port + (session_idx * 2);

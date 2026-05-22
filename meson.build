@@ -18,7 +18,7 @@ enable_mtl_tx = get_option('enable_mtl_tx')
 
 mtl_dep      = []
 avdevice_dep = []
-c_args       = ['-DALLOW_EXPERIMENTAL_API']
+c_args       = ['-DALLOW_EXPERIMENTAL_API', '-D_FORTIFY_SOURCE=2', '-O2']
 mtl_inc_args = []
 
 if enable_mtl_tx
@@ -47,5 +47,7 @@ executable('dvledtx',
   include_directories: include_directories('include'),
   dependencies: all_deps,
   c_args: c_args + mtl_inc_args,
+  link_args: ['-s'],
+  build_rpath: '',
   install: false
 )

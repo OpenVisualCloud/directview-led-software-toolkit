@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 name: 'Smoke Tests'
-description: 'Run smoke tests on dvledtx-ffmpeg and dvledtx-mtl binaries. Results written to $GITHUB_WORKSPACE/reports/'
+description: 'Run smoke tests on dvledtx and dvledtx-mtl binaries. Results written to $GITHUB_WORKSPACE/reports/'
 
 runs:
   using: composite
@@ -15,7 +15,7 @@ runs:
         REPORT_DIR="$GITHUB_WORKSPACE/reports"
         mkdir -p "$REPORT_DIR"
 
-        for BINARY in ./bins/dvledtx-ffmpeg ./bins/dvledtx-mtl; do
+        for BINARY in ./bins/dvledtx ./bins/dvledtx-mtl; do
           NAME=$(basename "$BINARY")
           echo "===== Smoke Test: $NAME ====="
           OUTFILE="$REPORT_DIR/smoke-test-${NAME}.txt"
@@ -30,7 +30,7 @@ runs:
           echo "  [OK] $NAME -v: $VERSION_OUTPUT"
 
           # help check
-          timeout 5s "$BINARY" --help > "$OUTFILE" 2>&1 || true
+          timeout 5s "$BINARY" --help 2>&1 | sed 's/\x1b\[[0-9;]*[mGKHF]//g' > "$OUTFILE" || true
           if [ ! -s "$OUTFILE" ]; then
             echo "ERROR: $NAME produced no output during smoke test."
             exit 1

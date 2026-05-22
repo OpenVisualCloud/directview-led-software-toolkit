@@ -188,7 +188,7 @@ int peek_config_log_file(const char* config_file, char* out_buf, size_t out_size
     json[nread] = '\0';
     fclose(fp);
 
-    char* result = extract_json_string(json, json + nread, "log_file", out_buf, out_size);
+    const char* result = extract_json_string(json, json + nread, "log_file", out_buf, out_size);
     free(json);
     return result ? 0 : -1;
 }

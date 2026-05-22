@@ -120,7 +120,7 @@ int open_ffmpeg_tx(struct st20p_tx_ctx* ctx)
             st->codecpar->width      = w;
             st->codecpar->height     = h;
             st->codecpar->format     = ctx->app->fmt;
-            avformat_write_header(fmt_ctx, NULL);
+            int hdr_ret __attribute__((unused)) = avformat_write_header(fmt_ctx, NULL);
             ctx->out_fmt_ctx = fmt_ctx;
             ctx->out_stream  = st;
         } else {
@@ -142,7 +142,7 @@ void close_ffmpeg_tx(struct st20p_tx_ctx* ctx)
     if (ctx->enc_pkt)   av_packet_free(&ctx->enc_pkt);
 }
 
-int ffmpeg_tx_send_yuv_frame(struct st20p_tx_ctx* ctx, AVFrame* src,
+int ffmpeg_tx_send_yuv_frame(struct st20p_tx_ctx* ctx, const AVFrame* src,
                               int crop_x, int crop_y, int crop_w, int crop_h)
 {
     (void)src; (void)crop_x; (void)crop_y; (void)crop_w; (void)crop_h;

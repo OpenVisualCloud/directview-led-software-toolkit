@@ -36,7 +36,7 @@ runs:
           echo "===== Trivy Filesystem Scan ====="
           trivy fs --list-all-pkgs --format json \
             --output "$REPORT_DIR/trivy-fs-full-report.json" . || true
-          trivy fs --ignore-unfixed . | tee "$REPORT_DIR/trivy-fs-report.txt"
+          trivy fs --ignore-unfixed . | sed 's/\x1b\[[0-9;]*[mGKHF]//g' | tee "$REPORT_DIR/trivy-fs-report.txt"
         } 2>&1 | tee -a "$REPORT_DIR/trivy_scan.txt"
 
     - name: Trivy config scan
@@ -46,7 +46,7 @@ runs:
         mkdir -p "$REPORT_DIR"
         {
           echo "===== Trivy Config Scan ====="
-          trivy config . | tee "$REPORT_DIR/trivy-config-report.txt"
+          trivy config . | sed 's/\x1b\[[0-9;]*[mGKHF]//g' | tee "$REPORT_DIR/trivy-config-report.txt"
         } 2>&1 | tee -a "$REPORT_DIR/trivy_scan.txt" || true
 
     - name: Trivy secret scan
@@ -56,5 +56,5 @@ runs:
         mkdir -p "$REPORT_DIR"
         {
           echo "===== Trivy Secret Scan ====="
-          trivy fs --scanners secret . | tee "$REPORT_DIR/trivy-secret-report.txt"
+          trivy fs --scanners secret . | sed 's/\x1b\[[0-9;]*[mGKHF]//g' | tee "$REPORT_DIR/trivy-secret-report.txt"
         } 2>&1 | tee -a "$REPORT_DIR/trivy_scan.txt" || true

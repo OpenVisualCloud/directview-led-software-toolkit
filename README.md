@@ -1,8 +1,56 @@
 ﻿# Direct View LED Software Toolkit
 
+[![License](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
+[![CI](https://github.com/OpenVisualCloud/directview-led-software-toolkit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/OpenVisualCloud/directview-led-software-toolkit/actions/workflows/ci.yml)
+[![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20|%2024.04-orange.svg)](https://releases.ubuntu.com/jammy/)
+[![MTL](https://img.shields.io/badge/MTL-v26.01+-green.svg)](https://github.com/OpenVisualCloud/Media-Transport-Library)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/OpenVisualCloud/directview-led-software-toolkit/badge)](https://securityscorecards.dev/viewer/?uri=github.com/OpenVisualCloud/directview-led-software-toolkit)
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Notices](#notices)
+- [Features](#features)
+- [Building](#building)
+  - [Prerequisites](#prerequisites)
+  - [Build Steps](#build-steps)
+- [Usage](#usage)
+  - [Binding Ethernet Controller to DPDK PMD and Hugepage Setup](#binding-ethernet-controller-to-dpdk-pmd-and-hugepage-setup)
+  - [JSON Configuration](#json-configuration)
+- [Logging](#logging)
+- [Command-Line Options](#command-line-options)
+- [Supported Formats](#supported-formats)
+- [Performance Considerations](#performance-considerations)
+- [Running Unit Tests](#running-unit-tests)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
+
 ## Overview
 
-Direct View LED Software Toolkit is a simplified, standalone transmitter application using FFMPEG APIs and Media Transport Library (MTL) plugin. It provides clean TX-only functionality without the complexity of RX/TX interdependencies.
+Direct View LED Software Toolkit is a simplified, standalone transmitter application using FFmpeg APIs and Media Transport Library (MTL) plugin.
+
+### What It Does
+
+dvledtx reads a video source file (e.g., MP4), decodes it using FFmpeg, and transmits uncompressed video frames over an IP network using the SMPTE ST 2110-20 standard. Multiple crop regions of the same source video can be transmitted simultaneously as independent RTP streams — enabling tiled LED wall configurations where each panel receives its own portion of the frame.
+
+### Use Case
+
+- **LED Video Walls**: Drive multiple LED panels from a single source, each panel receiving a cropped region of the full frame.
+
+### Architecture
+
+![dvledtx Architecture](docs/architecture.png)
+
+### System Requirements
+
+| Component | Requirement |
+|-----------|-------------|
+| **OS** | Validated on Ubuntu 22.04 LTS; should work on Ubuntu 24.04 and higher |
+| **CPU** | Intel 12th Generation (Alder Lake) or above |
+| **NIC** | Intel Ethernet Controller I225 or above |
+| **Memory** | Hugepages configured (typically 2GB+) |
+| **Kernel** | IOMMU and VFIO support enabled |
 
 ## Notices
 
@@ -26,21 +74,24 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
 - Intel Ethernet Controller I225 or above
 
 #### Software Requirements
-- [Ubuntu 22.04 LTS](https://releases.ubuntu.com/22.04)
-- [Media Transport Library (MTL) v26.01](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/v26.01/doc/build.md)
+
+> **Note:** This toolkit has been validated against **Ubuntu 22.04 LTS** but should work on Ubuntu 24.04 LTS and higher versions.
+
+- Ubuntu [22.04](https://releases.ubuntu.com/jammy/) or [24.04](https://releases.ubuntu.com/noble/) LTS
+- [Media Transport Library (MTL) v26.01+](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md)
   - Follow these steps
-    - [Install APT packages](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/v26.01/doc/build.md#111-ubuntudebian)
+    - [Install APT packages](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md#111-ubuntudebian)
     - Clone Media-Transport-Library
       ```
       git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git
       cd Media-Transport-Library
-      git checkout v26.01
+      git checkout ffmpeg-plugin-extra-pixel-format
       cd ..
       export mtl_source_code=${PWD}/Media-Transport-Library
       ```
-    - [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/v26.01/doc/build.md#2-dpdk-build-and-install)
-    - [Build and install MTL](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/v26.01/doc/build.md#3-build-media-transport-library-and-app)
-- [FFmpeg 7.0 with MTL Plugin](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/v26.01/ecosystem/ffmpeg_plugin/README.md#1-build)
+    - [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md#2-dpdk-build-and-install)
+    - [Build and install MTL](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md#3-build-media-transport-library-and-app)
+- [FFmpeg 7.0 with MTL Plugin](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/ecosystem/ffmpeg_plugin/README.md#1-build)
 
 ### Build Steps
 
@@ -65,8 +116,8 @@ The built binary will be available at `build/dvledtx`.
 ### Binding Ethernet Controller to DPDK PMD and Hugepage Setup 
 
 - Ensure VFIO group exists [follow](#vfio-group-setup)
-- [DPDK PMD Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/main/doc/run.md#3-dpdk-pmd-setup)
-- [Hugepage Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/main/doc/run.md#4-setup-hugepage)
+- [DPDK PMD Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/run.md#3-dpdk-pmd-setup)
+- [Hugepage Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/run.md#4-setup-hugepage)
 
 ### JSON Configuration
 
@@ -267,17 +318,93 @@ sudo pkill -9 -f dvledtx
 ### Common Issues
 
 1. **MTL Initialization Failed**
-   - Check network port PCI address
-   - Ensure MTL library is properly installed
-   - Verify network card is supported
+   - Check network port PCI address matches your hardware:
+     ```bash
+     lspci | grep Ethernet
+     # Example output: 06:00.0 Ethernet controller: Intel Corporation ...
+     # Use BDF format in config: "0000:06:00.0"
+     ```
+   - Verify MTL library is properly installed:
+     ```bash
+     # Check MTL shared library is present
+     ldconfig -p | grep mtl
+     # Expected: libmtl.so (libc6,x86-64) => /usr/local/lib/x86_64-linux-gnu/libmtl.so
+
+     # Check MTL pkg-config file is available
+     pkg-config --modversion mtl
+     # Expected: 26.01.0.REL (or higher)
+
+     # Check MTL header files exist
+     ls /usr/local/include/mtl/mtl_api.h
+     ```
+   - Verify DPDK is installed and the NIC is bound to VFIO:
+     ```bash
+     # Check DPDK installation
+     pkg-config --modversion libdpdk
+
+     # Check NIC binding status
+     sudo $mtl_source_code/script/nicctl.sh list
+     # Or use dpdk-devbind.py:
+     dpdk-devbind.py --status
+     # The target NIC should show "drv=vfio-pci"
+     ```
+   - Ensure IOMMU is enabled (see [IOMMU/VFIO Kernel Parameters](#iommu--vfio-kernel-parameters-grub)):
+     ```bash
+     dmesg | grep -i iommu
+     # Should show "DMAR: IOMMU enabled"
+     cat /proc/cmdline | grep intel_iommu
+     ```
+   - Verify network card is supported (Intel I225, I226, E810 series)
 
 2. **Cannot Load Source File**  
-   - Check file permissions
-   - Ensure sufficient disk space
-   - Verify file format matches parameters
+   - Check file exists and is readable:
+     ```bash
+     ls -la /path/to/video.mp4
+     ```
+   - Verify the file is a valid video (not corrupted):
+     ```bash
+     ffprobe /path/to/video.mp4
+     # Should show video stream info without errors
+     ```
+   - Ensure sufficient disk space:
+     ```bash
+     df -h .
+     ```
+   - Verify file format matches config parameters (resolution, pixel format)
+   - Note: Symlinked files are rejected for security reasons
 
 3. **Network Transmission Issues**
-   - Verify multicast routing
-   - Check firewall settings
-   - Ensure network card supports required bandwidth
+   - Ensure network card supports required bandwidth (uncompressed 1080p30 ≈ 1.8 Gbps)
+   - Verify hugepages are allocated:
+     ```bash
+     cat /proc/meminfo | grep HugePages
+     # HugePages_Free should be > 0
+     ```
+
+4. **Hugepage Allocation Failure**
+   - Check current hugepage status:
+     ```bash
+     cat /proc/meminfo | grep Huge
+     ```
+   - Allocate hugepages (requires root):
+     ```bash
+     sudo sysctl -w vm.nr_hugepages=2048
+     # Or make persistent in /etc/sysctl.conf
+     ```
+
+5. **Permission Denied (VFIO)**
+   - Ensure user is in the `vfio` group (see [VFIO Group Setup](#vfio-group-setup))
+   - Check VFIO device permissions:
+     ```bash
+     ls -la /dev/vfio/
+     # Group should be 'vfio' with rw permissions
+     ```
+
+## Contributing
+
+Contributions are welcome. Please open an issue or submit a pull request on [GitHub](https://github.com/OpenVisualCloud/directview-led-software-toolkit).
+
+## License
+
+This project is licensed under the BSD 3-Clause License. See [LICENSE](LICENSE) for details.
 

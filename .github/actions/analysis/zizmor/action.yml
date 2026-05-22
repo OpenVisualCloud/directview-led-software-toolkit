@@ -29,6 +29,6 @@ runs:
         zizmor --pedantic --format sarif "$GITHUB_WORKSPACE" \
           > "$REPORT_DIR/zizmor-report.sarif" 2>&1 || ZIZMOR_EXIT=$?
         zizmor --pedantic "$GITHUB_WORKSPACE" \
-          2>&1 | tee "$REPORT_DIR/zizmor-scan.txt" || true
+          2>&1 | sed 's/\x1b\[[0-9;]*[mGKHF]//g' | tee "$REPORT_DIR/zizmor-scan.txt" || true
         echo "zizmor scan complete. Reports: $REPORT_DIR/zizmor-scan.txt, $REPORT_DIR/zizmor-report.sarif"
         exit "${ZIZMOR_EXIT:-0}"
