@@ -41,6 +41,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y afl++ libavutil-dev libavformat-dev libavcodec-dev libswscale-dev pkg-config
 
+      - name: Verify environment
+        run: |
+          echo "=== AFL++ ==="
+          afl-clang-fast --version || { echo "ERROR: afl-clang-fast not found"; exit 1; }
+          echo ""
+          echo "=== libavutil ==="
+          dpkg -l libavutil-dev | grep -q ii || { echo "ERROR: libavutil-dev not installed"; exit 1; }
+          echo "  Header: $(find /usr/include -name 'avutil.h' | head -1)"
+          echo "  Library: $(find /usr/lib -name 'libavutil.so*' | head -1)"
+          echo ""
+          echo "=== Compiler ==="
+          gcc --version | head -1
+          echo ""
+          echo "Environment OK"
+
       - name: Build fuzz harness
         run: |
           cd fuzz
@@ -49,8 +64,9 @@ jobs:
           $CC -g -O1 -fno-omit-frame-pointer -I../include -c fuzz_config_reader.c -o fuzz_config_reader.o
           $CC -g -O1 -fno-omit-frame-pointer -I../include -c ../src/util/config_reader.c -o config_reader.o
           $CC -g -O1 -fno-omit-frame-pointer -I../include -c ../src/util/logger.c -o logger.o
-          # Link with gcc to avoid AFL param limit on linker flags
-          gcc -o fuzz_config_reader fuzz_config_reader.o config_reader.o logger.o -lavutil -lm
+          # Link with afl-clang-fast (needs AFL runtime), pass only linker libs directly
+          $CC -o fuzz_config_reader fuzz_config_reader.o config_reader.o logger.o -lavutil -lm
+          echo "Build successful: $(file fuzz_config_reader)"
 
       - name: Run AFL fuzzer (timed)
         run: |
