@@ -9,9 +9,6 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
   schedule:
     # Weekly on Monday at 06:30 UTC
     - cron: '30 6 * * 1'
@@ -39,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - name: Run OpenSSF Scorecard
-        uses: ossf/scorecard-action@f49aabe0b5af0936a0987cfb85d86b75b087b7b4 # v2.4.1
+        uses: ossf/scorecard-action@f49aabe0b5af0936a0987cfb85d86b75731b0186 # v2.4.1
         with:
           results_file: scorecard-results.sarif
           results_format: sarif
