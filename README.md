@@ -46,22 +46,7 @@ dvledtx reads a video source file (e.g., MP4), decodes it using FFmpeg, and tran
 
 ### Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  dvledtx                                                    │
-│                                                             │
-│  ┌──────────┐    ┌──────────────┐    ┌──────────────────┐  │
-│  │  FFmpeg   │───▶│ Frame Handler │───▶│ MTL / FFmpeg TX  │  │
-│  │  Decoder  │    │ (crop/scale) │    │ (ST 2110-20 RTP) │  │
-│  └──────────┘    └──────────────┘    └──────────────────┘  │
-│       ▲                                       │             │
-│       │                                       ▼             │
-│  ┌──────────┐                        ┌──────────────────┐  │
-│  │  Source   │                        │  NIC (DPDK PMD)  │  │
-│  │  Video    │                        │  via Hugepages   │  │
-│  └──────────┘                        └──────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-```
+![dvledtx Architecture](docs/architecture.png)
 
 ### System Requirements
 
