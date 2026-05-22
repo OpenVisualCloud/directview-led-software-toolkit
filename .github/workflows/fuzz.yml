@@ -45,15 +45,12 @@ jobs:
         run: |
           cd fuzz
           export CC=afl-clang-fast
-          export AFL_CC=afl-clang-fast
-          CFLAGS="-g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined -I../include $(pkg-config --cflags libavutil)"
-          LDFLAGS="$(pkg-config --libs libavutil) -lm -fsanitize=address,undefined"
-          # Compile objects separately to avoid too many params
-          $CC $CFLAGS -c fuzz_config_reader.c -o fuzz_config_reader.o
-          $CC $CFLAGS -c ../src/util/config_reader.c -o config_reader.o
-          $CC $CFLAGS -c ../src/util/logger.c -o logger.o
-          # Link
-          $CC -o fuzz_config_reader fuzz_config_reader.o config_reader.o logger.o $LDFLAGS
+          # Compile each file separately with minimal flags to avoid AFL MAX_PARAMS_NUM
+          $CC -g -O1 -fno-omit-frame-pointer -I../include -c fuzz_config_reader.c -o fuzz_config_reader.o
+          $CC -g -O1 -fno-omit-frame-pointer -I../include -c ../src/util/config_reader.c -o config_reader.o
+          $CC -g -O1 -fno-omit-frame-pointer -I../include -c ../src/util/logger.c -o logger.o
+          # Link with gcc to avoid AFL param limit on linker flags
+          gcc -o fuzz_config_reader fuzz_config_reader.o config_reader.o logger.o -lavutil -lm
 
       - name: Run AFL fuzzer (timed)
         run: |
