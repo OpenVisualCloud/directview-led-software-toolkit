@@ -26,12 +26,6 @@
 - [Contributing](#contributing)
 - [License](#license)
 
-## About
-
-This repository contains the **Direct View LED Software Toolkit** — an open-source transmitter application developed by [Intel](https://www.intel.com) as part of the [Open Visual Cloud](https://www.intel.com/content/www/us/en/developer/topic-technology/open-visual-cloud/overview.html) initiative. It is designed for professional AV-over-IP installations that drive direct-view LED video walls using the SMPTE ST 2110 suite of standards.
-
-The project is hosted at: https://github.com/OpenVisualCloud/directview-led-software-toolkit
-
 ## Overview
 
 Direct View LED Software Toolkit is a simplified, standalone transmitter application using FFmpeg APIs and Media Transport Library (MTL) plugin.
