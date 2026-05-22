@@ -1,0 +1,107 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: Fuzz Testing (AFL)
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Weekly on Wednesday at 04:00 UTC
+    - cron: '0 4 * * 3'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: AFL Fuzz - Config Parser
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y afl++ libavutil-dev libavformat-dev libavcodec-dev libswscale-dev pkg-config
+
+      - name: Verify environment
+        run: |
+          echo "=== AFL++ ==="
+          afl-clang-fast --version || { echo "ERROR: afl-clang-fast not found"; exit 1; }
+          echo ""
+          echo "=== libavutil ==="
+          dpkg -l libavutil-dev | grep -q ii || { echo "ERROR: libavutil-dev not installed"; exit 1; }
+          echo "  Header: $(find /usr/include -name 'avutil.h' | head -1)"
+          echo "  Library: $(find /usr/lib -name 'libavutil.so*' | head -1)"
+          echo ""
+          echo "=== Compiler ==="
+          gcc --version | head -1
+          echo ""
+          echo "Environment OK"
+
+      - name: Build fuzz harness
+        run: |
+          cd fuzz
+          export CC=afl-clang-fast
+          # Compile each file separately with minimal flags to avoid AFL MAX_PARAMS_NUM
+          $CC -g -O1 -fno-omit-frame-pointer -I../include -c fuzz_config_reader.c -o fuzz_config_reader.o
+          $CC -g -O1 -fno-omit-frame-pointer -I../include -c ../src/util/config_reader.c -o config_reader.o
+          $CC -g -O1 -fno-omit-frame-pointer -I../include -c ../src/util/logger.c -o logger.o
+          # Link with afl-clang-fast (needs AFL runtime), pass only linker libs directly
+          $CC -o fuzz_config_reader fuzz_config_reader.o config_reader.o logger.o -lavutil -lm
+          echo "Build successful: $(file fuzz_config_reader)"
+
+      - name: Run AFL fuzzer (timed)
+        run: |
+          cd fuzz
+          mkdir -p findings
+          export AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
+          export AFL_SKIP_CPUFREQ=1
+          # Run AFL for 5 minutes (CI time-boxed)
+          timeout 300 afl-fuzz -i corpus/ -o findings/ -V 300 -- ./fuzz_config_reader @@ || true
+
+      - name: Check for crashes
+        run: |
+          cd fuzz
+          CRASH_COUNT=$(find findings/default/crashes -type f ! -name "README.txt" 2>/dev/null | wc -l)
+          echo "Crashes found: $CRASH_COUNT"
+          if [ "$CRASH_COUNT" -gt 0 ]; then
+            echo "::error::AFL found $CRASH_COUNT crash(es)!"
+            ls -la findings/default/crashes/
+            exit 1
+          fi
+          echo "No crashes found — fuzzing passed."
+
+      - name: Sanitize AFL filenames for upload
+        if: always()
+        run: |
+          cd fuzz/findings
+          # Rename files with colons (AFL naming) to use underscores
+          find . -name '*:*' | while read f; do
+            mv "$f" "$(echo "$f" | tr ':' '_')"
+          done
+
+      - name: Upload fuzzing results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: afl-fuzz-results-${{ github.run_id }}
+          path: fuzz/findings/
+          retention-days: 14
