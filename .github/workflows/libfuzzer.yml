@@ -1,0 +1,94 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: Fuzz Testing (libFuzzer)
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Weekly on Thursday at 03:00 UTC
+    - cron: '0 3 * * 4'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  libfuzzer:
+    name: libFuzzer - Config Parser
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout repository
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libavutil-dev libavformat-dev libavcodec-dev libswscale-dev pkg-config
+
+      - name: Build fuzz harness (AddressSanitizer + libFuzzer)
+        run: |
+          cd fuzz
+          export CC=clang
+          $CC -fsanitize=fuzzer,address -g -O1 -fno-omit-frame-pointer -I../include \
+            fuzz_config_reader_libfuzzer.c \
+            ../src/util/config_reader.c \
+            ../src/util/logger.c \
+            -o fuzz_config_reader_libfuzzer \
+            $(pkg-config --cflags --libs libavutil) -lm
+          echo "Build successful: $(file fuzz_config_reader_libfuzzer)"
+
+      - name: Run libFuzzer (timed)
+        run: |
+          cd fuzz
+          mkdir -p libfuzzer_corpus
+          # Seed from existing corpus, run for 5 minutes
+          ./fuzz_config_reader_libfuzzer \
+            libfuzzer_corpus/ corpus/ \
+            -max_total_time=300 \
+            -print_final_stats=1 || FUZZ_EXIT=$?
+          if [ "${FUZZ_EXIT:-0}" -ne 0 ]; then
+            echo "::error::libFuzzer found a crash (exit code $FUZZ_EXIT)!"
+            exit 1
+          fi
+          echo "No crashes found — libFuzzer passed."
+
+      - name: Build fuzz harness (UndefinedBehaviorSanitizer + libFuzzer)
+        run: |
+          cd fuzz
+          export CC=clang
+          $CC -fsanitize=fuzzer,undefined -g -O1 -fno-omit-frame-pointer -I../include \
+            fuzz_config_reader_libfuzzer.c \
+            ../src/util/config_reader.c \
+            ../src/util/logger.c \
+            -o fuzz_config_reader_ubsan \
+            $(pkg-config --cflags --libs libavutil) -lm
+
+      - name: Run libFuzzer with UBSan (timed)
+        run: |
+          cd fuzz
+          mkdir -p ubsan_corpus
+          ./fuzz_config_reader_ubsan \
+            ubsan_corpus/ corpus/ \
+            -max_total_time=300 \
+            -print_final_stats=1 || FUZZ_EXIT=$?
+          if [ "${FUZZ_EXIT:-0}" -ne 0 ]; then
+            echo "::error::libFuzzer+UBSan found an issue (exit code $FUZZ_EXIT)!"
+            exit 1
+          fi
+          echo "No issues found — UBSan fuzzing passed."
