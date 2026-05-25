@@ -64,13 +64,6 @@ jobs:
       - name: cppcheck
         uses: ./.github/actions/analysis/cppcheck
 
-      # - name: Coverity Scan
-      #   uses: ./.github/actions/analysis/coverity
-      #   with:
-      #     coverity-url: ${{ secrets.COVERITY_URL }}
-      #     coverity-user: ${{ secrets.COVERITY_ARTIFACTORY_USER }}
-      #     coverity-password: ${{ secrets.COVERITY_ARTIFACTORY_PASSWORD }}
-
       - name: Trivy Scan
         uses: ./.github/actions/analysis/trivy
 
