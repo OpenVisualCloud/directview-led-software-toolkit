@@ -100,6 +100,31 @@ static void test_get_transport_format_unknown_returns_error(void **state)
 }
 
 /* =========================================================================
+ * get_input_format — 12-bit formats
+ * ========================================================================= */
+
+static void test_get_input_format_yuv422p12le(void **state)
+{
+    (void)state;
+    assert_int_equal(get_input_format(AV_PIX_FMT_YUV422P12LE),
+                     ST_FRAME_FMT_YUV422PLANAR12LE);
+}
+
+static void test_get_input_format_yuv444p12le(void **state)
+{
+    (void)state;
+    assert_int_equal(get_input_format(AV_PIX_FMT_YUV444P12LE),
+                     ST_FRAME_FMT_YUV444PLANAR12LE);
+}
+
+static void test_get_input_format_gbrp12le(void **state)
+{
+    (void)state;
+    assert_int_equal(get_input_format(AV_PIX_FMT_GBRP12LE),
+                     ST_FRAME_FMT_GBRPLANAR12LE);
+}
+
+/* =========================================================================
  * get_st_fps
  * ========================================================================= */
 
@@ -395,6 +420,11 @@ int main(void)
         cmocka_unit_test(test_get_transport_format_yuv444p12le),
         cmocka_unit_test(test_get_transport_format_gbrp12le),
         cmocka_unit_test(test_get_transport_format_unknown_returns_error),
+
+        /* get_input_format — 12-bit */
+        cmocka_unit_test(test_get_input_format_yuv422p12le),
+        cmocka_unit_test(test_get_input_format_yuv444p12le),
+        cmocka_unit_test(test_get_input_format_gbrp12le),
 
         /* get_st_fps */
         cmocka_unit_test(test_get_st_fps_25),
