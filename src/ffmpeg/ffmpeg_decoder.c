@@ -320,7 +320,7 @@ static void close_ffmpeg_decoder(
  * Open/close shared FFmpeg decoder (multi-session input path)
  * ========================================================================= */
 int open_shared_ffmpeg(struct shared_decode_ctx* dec, const char* filename) {
-  struct dvledtx_context* app = dec->app;
+  const struct dvledtx_context* app = dec->app;
   return open_ffmpeg_decoder(
     filename, "Shared decode",
     app->fmt, (int)app->width, (int)app->height,

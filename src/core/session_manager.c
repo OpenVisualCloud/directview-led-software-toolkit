@@ -173,7 +173,7 @@ static void* st20p_tx_thread(void* arg) {
   int crop_h = ctx->crop_height > 0 ? ctx->crop_height : (int)ctx->app->height;
 
   while (ctx->app->exit == false && session_manager_should_exit() == false) {
-    AVFrame* frame = tx_fetch_next_frame(ctx);
+    const AVFrame* frame = tx_fetch_next_frame(ctx);
     if (frame == NULL) {
       if (ctx->app->exit == false && session_manager_should_exit() == false)
         LOG_ERROR("ST20P TX(%d): tx_fetch_next_frame failed", ctx->idx);

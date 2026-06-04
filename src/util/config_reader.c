@@ -439,9 +439,13 @@ int validate_tx_config(const struct dvledtx_config* config) {
         strcmp(config->fmt, "yuv422p10le") != 0 &&
         strcmp(config->fmt, "yuv420") != 0 &&
         strcmp(config->fmt, "yuv444p10le") != 0 &&
-        strcmp(config->fmt, "gbrp10le") != 0) {
+        strcmp(config->fmt, "gbrp10le") != 0 &&
+        strcmp(config->fmt, "yuv422p12le") != 0 &&
+        strcmp(config->fmt, "yuv444p12le") != 0 &&
+        strcmp(config->fmt, "gbrp12le") != 0) {
         LOG_ERROR("unsupported pixel format '%s'", config->fmt);
-        LOG_ERROR("  Supported: yuv422p10le, yuv420, yuv444p10le, gbrp10le");
+        LOG_ERROR("  Supported: yuv422p10le, yuv420, yuv444p10le, gbrp10le, "
+                  "yuv422p12le, yuv444p12le, gbrp12le");
         return -1;
     }
 
@@ -591,6 +595,9 @@ int load_and_apply_config(struct dvledtx_context* app, const char* config_file) 
     else if (strcmp(config.fmt, "yuv420") == 0)        app->fmt = AV_PIX_FMT_YUV420P;
     else if (strcmp(config.fmt, "yuv444p10le") == 0)  app->fmt = AV_PIX_FMT_YUV444P10LE;
     else if (strcmp(config.fmt, "gbrp10le") == 0)     app->fmt = AV_PIX_FMT_GBRP10LE;
+    else if (strcmp(config.fmt, "yuv422p12le") == 0)  app->fmt = AV_PIX_FMT_YUV422P12LE;
+    else if (strcmp(config.fmt, "yuv444p12le") == 0)  app->fmt = AV_PIX_FMT_YUV444P12LE;
+    else if (strcmp(config.fmt, "gbrp12le") == 0)     app->fmt = AV_PIX_FMT_GBRP12LE;
     else {
         LOG_ERROR("Unsupported pixel format '%s'", config.fmt);
         return -1;
