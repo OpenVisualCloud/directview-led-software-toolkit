@@ -113,7 +113,7 @@ enum st_fps get_st_fps(int fps) {
  *   crop_x/y     — top-left corner in the full-width shared yuv_frame (luma coords)
  *   crop_w/h     — crop rectangle dimensions in luma pixels
  */
-void mtl_copy_crop_to_frame(struct st_frame* dst, AVFrame* src,
+void mtl_copy_crop_to_frame(struct st_frame* dst, const AVFrame* src,
                              int crop_x, int crop_y,
                              int crop_w, int crop_h,
                              enum AVPixelFormat fmt) {
@@ -302,7 +302,7 @@ void mtl_tx_session_free(struct st20p_tx_ctx* ctx) {
  * Returns 0 on success, -1 on error (e.g. get_frame returned NULL after
  * timeout, or copy failed).
  */
-int mtl_tx_send_yuv_frame(struct st20p_tx_ctx* ctx, AVFrame* src,
+int mtl_tx_send_yuv_frame(struct st20p_tx_ctx* ctx, const AVFrame* src,
                           int crop_x, int crop_y, int crop_w, int crop_h) {
   if (!ctx->handle || !src) return -1;
 
