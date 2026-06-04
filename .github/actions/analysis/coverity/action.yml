@@ -1,0 +1,156 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: 'Coverity Scan'
+description: 'Install Coverity, run static analysis, and emit JSON + SARIF reports'
+
+runs:
+  using: composite
+  steps:
+    - name: Install Coverity
+      shell: bash
+      env:
+        COVERITY_URL: ${{ env.COVERITY_URL }}
+        COVERITY_USER: ${{ env.COVERITY_USER }}
+        COVERITY_PASSWORD: ${{ env.COVERITY_PASSWORD }}
+      run: |
+        echo "===== Coverity Setup ====="
+        COVERITY_DIR="$HOME/coverity"
+        if [ -x "$COVERITY_DIR/bin/cov-build" ]; then
+          echo "  [OK] Coverity already installed at $COVERITY_DIR"
+          "$COVERITY_DIR/bin/cov-build" --ident | head -1 || true
+          exit 0
+        fi
+        mkdir -p "$COVERITY_DIR"
+        wget --no-proxy -q --user="$COVERITY_USER" --password="$COVERITY_PASSWORD" \
+          -O /tmp/coverity.tar.gz "$COVERITY_URL"
+        tar xzf /tmp/coverity.tar.gz --strip-components=1 -C "$COVERITY_DIR"
+        rm -f /tmp/coverity.tar.gz
+        "$COVERITY_DIR/bin/cov-build" --ident | head -1 || true
+
+    - name: Run Coverity analysis
+      shell: bash
+      run: |
+        export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
+        if ! pkg-config --exists mtl 2>/dev/null; then
+          MTL_PC=$(find /usr /home /opt -name "mtl.pc" 2>/dev/null | head -1)
+          if [ -z "$MTL_PC" ]; then
+            echo "ERROR: MTL pkg-config file not found."
+            exit 1
+          fi
+          MTL_PC_DIR=$(dirname "$MTL_PC")
+          echo "Found MTL pkgconfig at: $MTL_PC_DIR"
+          export PKG_CONFIG_PATH="${MTL_PC_DIR}:${PKG_CONFIG_PATH}"
+        fi
+
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
+        mkdir -p "$REPORT_DIR"
+
+        $HOME/coverity/bin/cov-configure --compiler cc --comptype gcc --template
+        rm -rf build coverity_output
+        meson setup build
+        $HOME/coverity/bin/cov-build --dir coverity_output/ ninja -C build
+
+        $HOME/coverity/bin/cov-analyze --dir coverity_output/ \
+          --concurrency --enable-constraint-fpp --enable-fnptr --enable-virtual \
+          --disable ASSERT_SIDE_EFFECT \
+          --disable AUTO_CAUSES_COPY \
+          --disable BAD_CHECK_OF_WAIT_COND \
+          --disable BAD_SHIFT \
+          --disable COPY_INSTEAD_OF_MOVE \
+          --disable CUDA.COLLECTIVE_WARP_SHUFFLE_WIDTH \
+          --disable CUDA.CUDEVICE_HANDLES \
+          --disable CUDA.DEVICE_DEPENDENT \
+          --disable CUDA.DEVICE_DEPENDENT_CALLBACKS \
+          --disable CUDA.DIVERGENCE_AT_COLLECTIVE_OPERATION \
+          --disable CUDA.ERROR_INTERFACE \
+          --disable CUDA.ERROR_KERNEL_LAUNCH \
+          --disable CUDA.FORK \
+          --disable CUDA.INACTIVE_THREAD_AT_COLLECTIVE_WARP \
+          --disable CUDA.INITIATION_OBJECT_DEVICE_THREAD_BLOCK \
+          --disable CUDA.INVALID_MEMORY_ACCESS \
+          --disable CUDA.SHARE_FUNCTION \
+          --disable CUDA.SHARE_OBJECT_STREAM_ASSOCIATED \
+          --disable CUDA.SPECIFIERS_INCONSISTENCY \
+          --disable CUDA.SYNCHRONIZE_TERMINATION \
+          --disable INEFFICIENT_RESERVE \
+          --disable MISSING_COMMA \
+          --disable MISSING_MOVE_ASSIGNMENT \
+          --disable OVERLAPPING_COPY \
+          --disable STREAM_FORMAT_STATE \
+          --disable UNINTENDED_INTEGER_DIVISION
+
+        $HOME/coverity/bin/cov-format-errors --dir coverity_output/ \
+          --json-output-v8 "$REPORT_DIR/coverity-report.json"
+
+    - name: Convert Coverity JSON to SARIF
+      shell: bash
+      run: |
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
+        python3 - <<'EOF'
+        import json, sys
+
+        sarif = {
+            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [{
+                "tool": {
+                    "driver": {
+                        "name": "Coverity",
+                        "informationUri": "https://www.synopsys.com/software-integrity/security-testing/static-analysis-sast.html",
+                        "rules": []
+                    }
+                },
+                "results": []
+            }]
+        }
+
+        try:
+            with open("reports/coverity-report.json") as f:
+                cov = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            with open("reports/coverity-results.sarif", "w") as f:
+                json.dump(sarif, f, indent=2)
+            sys.exit(0)
+
+        rules_map = {}
+        results = []
+
+        for issue in cov.get("issues", []):
+            checker = issue.get("checkerName", "unknown")
+            if checker not in rules_map:
+                rule_idx = len(rules_map)
+                rules_map[checker] = rule_idx
+                sarif["runs"][0]["tool"]["driver"]["rules"].append({
+                    "id": checker,
+                    "shortDescription": {"text": issue.get("checkerProperties", {}).get("subcategoryShortDescription", checker)},
+                    "helpUri": f"https://community.synopsys.com/s/article/{checker}"
+                })
+
+            events = issue.get("events", [])
+            main_event = events[0] if events else {}
+            file_path = main_event.get("strippedFilePathname", main_event.get("filePathname", "unknown"))
+            line = main_event.get("lineNumber", 1)
+
+            results.append({
+                "ruleId": checker,
+                "ruleIndex": rules_map[checker],
+                "level": "warning",
+                "message": {"text": issue.get("checkerProperties", {}).get("subcategoryLongDescription", checker)},
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": file_path, "uriBaseId": "%SRCROOT%"},
+                        "region": {"startLine": line}
+                    }
+                }]
+            })
+
+        sarif["runs"][0]["results"] = results
+
+        with open("reports/coverity-results.sarif", "w") as f:
+            json.dump(sarif, f, indent=2)
+
+        print(f"Converted {len(results)} Coverity issues to SARIF")
+        EOF
