@@ -1,0 +1,78 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: 'libFuzzer'
+description: 'Build and run libFuzzer with ASan and UBSan for config parser harness'
+
+inputs:
+  max-seconds:
+    description: 'Maximum libFuzzer run time in seconds per sanitizer mode'
+    required: false
+    default: '300'
+
+runs:
+  using: composite
+  steps:
+    - name: Install libFuzzer dependencies
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq clang libavutil-dev libavformat-dev libavcodec-dev libswscale-dev pkg-config
+
+    - name: Build and run libFuzzer (ASan)
+      shell: bash
+      env:
+        MAX_SECONDS: ${{ inputs.max-seconds }}
+      run: |
+        if ! [[ "$MAX_SECONDS" =~ ^[0-9]+$ ]]; then
+          echo "ERROR: max-seconds must be a positive integer"
+          exit 1
+        fi
+        cd fuzz
+        export CC=clang
+        $CC -fsanitize=fuzzer,address -g -O1 -fno-omit-frame-pointer -I../include \
+          fuzz_config_reader_libfuzzer.c \
+          ../src/util/config_reader.c \
+          ../src/util/logger.c \
+          -o fuzz_config_reader_libfuzzer \
+          $(pkg-config --cflags --libs libavutil) -lm
+
+        mkdir -p libfuzzer_corpus
+        ./fuzz_config_reader_libfuzzer \
+          libfuzzer_corpus/ corpus/ \
+          -max_total_time="$MAX_SECONDS" \
+          -print_final_stats=1 || FUZZ_EXIT=$?
+        if [ "${FUZZ_EXIT:-0}" -ne 0 ]; then
+          echo "::error::libFuzzer found a crash (exit code $FUZZ_EXIT)!"
+          exit 1
+        fi
+
+    - name: Build and run libFuzzer (UBSan)
+      shell: bash
+      env:
+        MAX_SECONDS: ${{ inputs.max-seconds }}
+      run: |
+        if ! [[ "$MAX_SECONDS" =~ ^[0-9]+$ ]]; then
+          echo "ERROR: max-seconds must be a positive integer"
+          exit 1
+        fi
+        cd fuzz
+        export CC=clang
+        $CC -fsanitize=fuzzer,undefined -g -O1 -fno-omit-frame-pointer -I../include \
+          fuzz_config_reader_libfuzzer.c \
+          ../src/util/config_reader.c \
+          ../src/util/logger.c \
+          -o fuzz_config_reader_ubsan \
+          $(pkg-config --cflags --libs libavutil) -lm
+
+        mkdir -p ubsan_corpus
+        ./fuzz_config_reader_ubsan \
+          ubsan_corpus/ corpus/ \
+          -max_total_time="$MAX_SECONDS" \
+          -print_final_stats=1 || FUZZ_EXIT=$?
+        if [ "${FUZZ_EXIT:-0}" -ne 0 ]; then
+          echo "::error::libFuzzer+UBSan found an issue (exit code $FUZZ_EXIT)!"
+          exit 1
+        fi

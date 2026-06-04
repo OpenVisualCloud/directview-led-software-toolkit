@@ -1,0 +1,86 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: 'AFL Fuzz'
+description: 'Build and run AFL++ fuzzing for config parser harness'
+
+inputs:
+  max-seconds:
+    description: 'Maximum AFL fuzzing run time in seconds'
+    required: false
+    default: '300'
+
+runs:
+  using: composite
+  steps:
+    - name: Install AFL dependencies
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq afl++ libavutil-dev libavformat-dev libavcodec-dev libswscale-dev pkg-config
+
+    - name: Verify AFL environment
+      shell: bash
+      run: |
+        echo "=== AFL++ ==="
+        afl-clang-fast --version || { echo "ERROR: afl-clang-fast not found"; exit 1; }
+        echo ""
+        echo "=== libavutil ==="
+        dpkg -l libavutil-dev | grep -q ii || { echo "ERROR: libavutil-dev not installed"; exit 1; }
+        echo "  Header: $(find /usr/include -name 'avutil.h' | head -1)"
+        echo "  Library: $(find /usr/lib -name 'libavutil.so*' | head -1)"
+        echo ""
+        echo "=== Compiler ==="
+        gcc --version | head -1
+        echo ""
+        echo "Environment OK"
+
+    - name: Build AFL fuzz harness
+      shell: bash
+      run: |
+        cd fuzz
+        export CC=afl-clang-fast
+        $CC -g -O1 -fno-omit-frame-pointer -I../include -c fuzz_config_reader.c -o fuzz_config_reader.o
+        $CC -g -O1 -fno-omit-frame-pointer -I../include -c ../src/util/config_reader.c -o config_reader.o
+        $CC -g -O1 -fno-omit-frame-pointer -I../include -c ../src/util/logger.c -o logger.o
+        $CC -o fuzz_config_reader fuzz_config_reader.o config_reader.o logger.o -lavutil -lm
+        echo "Build successful: $(file fuzz_config_reader)"
+
+    - name: Run AFL fuzzer
+      shell: bash
+      env:
+        MAX_SECONDS: ${{ inputs.max-seconds }}
+      run: |
+        cd fuzz
+        if ! [[ "$MAX_SECONDS" =~ ^[0-9]+$ ]]; then
+          echo "ERROR: max-seconds must be a positive integer"
+          exit 1
+        fi
+        mkdir -p findings
+        export AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
+        export AFL_SKIP_CPUFREQ=1
+        timeout "$MAX_SECONDS" afl-fuzz -i corpus/ -o findings/ -V "$MAX_SECONDS" -- ./fuzz_config_reader @@ || true
+
+    - name: Check AFL crashes
+      shell: bash
+      run: |
+        cd fuzz
+        CRASH_COUNT=$(find findings/default/crashes -type f ! -name "README.txt" 2>/dev/null | wc -l)
+        echo "Crashes found: $CRASH_COUNT"
+        if [ "$CRASH_COUNT" -gt 0 ]; then
+          echo "::error::AFL found $CRASH_COUNT crash(es)!"
+          ls -la findings/default/crashes/
+          exit 1
+        fi
+        echo "No crashes found - fuzzing passed."
+
+    - name: Sanitize AFL filenames
+      if: always()
+      shell: bash
+      run: |
+        cd fuzz/findings
+        find . -name '*:*' | while read -r f; do
+          mv "$f" "$(echo "$f" | tr ':' '_')"
+        done
