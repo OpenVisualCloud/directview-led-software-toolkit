@@ -353,7 +353,8 @@ static void test_validate_unsupported_fmt_fails(void **state)
 static void test_validate_all_supported_fmts_pass(void **state)
 {
     (void)state;
-    const char *fmts[] = {"yuv422p10le", "yuv420", "yuv444p10le", "gbrp10le"};
+    const char *fmts[] = {"yuv422p10le", "yuv420", "yuv444p10le", "gbrp10le",
+                          "yuv422p12le", "yuv444p12le", "gbrp12le"};
     for (size_t i = 0; i < sizeof(fmts) / sizeof(fmts[0]); i++) {
         struct dvledtx_config cfg;
         fill_valid_config(&cfg);

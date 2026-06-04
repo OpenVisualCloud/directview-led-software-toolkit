@@ -69,7 +69,7 @@ enum st_fps get_st_fps(int fps);
  * Handles all planar YUV formats (4:2:0, 4:2:2, 4:4:4) and GBRP at any
  * supported bit depth.
  */
-void mtl_copy_crop_to_frame(struct st_frame* dst, AVFrame* src,
+void mtl_copy_crop_to_frame(struct st_frame* dst, const AVFrame* src,
                              int crop_x, int crop_y,
                              int crop_w, int crop_h,
                              enum AVPixelFormat fmt);
@@ -121,7 +121,7 @@ void mtl_tx_session_free(struct st20p_tx_ctx* ctx);
  *
  * Returns 0 on success, -1 on error.
  */
-int mtl_tx_send_yuv_frame(struct st20p_tx_ctx* ctx, AVFrame* src,
+int mtl_tx_send_yuv_frame(struct st20p_tx_ctx* ctx, const AVFrame* src,
                            int crop_x, int crop_y, int crop_w, int crop_h);
 
 /*
