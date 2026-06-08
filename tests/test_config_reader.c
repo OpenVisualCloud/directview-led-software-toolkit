@@ -602,7 +602,7 @@ static void test_validate_resolution_exceeds_max_fails(void **state)
     (void)state;
     struct dvledtx_config cfg;
     fill_valid_config(&cfg);
-    cfg.width = 2000; /* > 1920 limit */
+    cfg.width = 4000; /* > 3840 limit */
     assert_int_equal(validate_tx_config(&cfg), -1);
 }
 
