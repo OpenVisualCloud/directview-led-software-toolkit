@@ -418,12 +418,12 @@ int validate_tx_config(const struct dvledtx_config* config) {
         return -1;
     }
     if (config->width > 3840 || config->height > 2160) {
-        LOG_ERROR("video resolution %dx%d exceeds maximum 3840x2160",
-               config->width, config->height);
+        LOG_ERROR("video resolution %ux%u exceeds maximum 3840x2160",
+               (unsigned)config->width, (unsigned)config->height);
         return -1;
     }
     if (config->width % 2 != 0) {
-        LOG_ERROR("video width %d must be even for YUV formats", config->width);
+        LOG_ERROR("video width %u must be even for YUV formats", (unsigned)config->width);
         return -1;
     }
 

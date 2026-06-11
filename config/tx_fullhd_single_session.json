@@ -1,0 +1,24 @@
+﻿{
+  "log_file": "dvledtx.log",
+  "interfaces": [
+    {
+      "name": "0000:03:00.1",
+      "sip":  "192.168.50.29",
+      "dip":  "239.168.85.20"
+    }
+  ],
+  "video": {
+    "width":  3840,
+    "height": 2160,
+    "fps":    60,
+    "fmt":    "gbrp10le",
+    "tx_url": "/home/intel/workspace/sample/ball_4k_gbrp10le_30fps_5min.mp4"
+  },
+  "tx_sessions": [
+    {
+      "udp_port":     20000,
+      "payload_type": 96,
+      "crop": { "x": 0, "y": 0, "w": 3840, "h": 2160 }
+    }
+  ]
+}

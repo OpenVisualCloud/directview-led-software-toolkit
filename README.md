@@ -138,7 +138,7 @@ dvledtx uses a JSON config file with three sections:
 | | `payload_type` | RTP payload type (typically 96) |
 | | `crop` | Region to transmit: `x`, `y`, `w`, `h` in pixels |
 
-Example (`config/tx_1session.json`):
+Example (`config/tx_fullhd_single_session.json`):
 ```json
 {
   "log_file": "dvledtx.log",
@@ -156,7 +156,7 @@ Example (`config/tx_1session.json`):
 }
 ```
 
-Multiple sessions can be defined in `tx_sessions` to transmit different crop regions of the same video simultaneously (see `config/tx_3sessions.json`).
+Multiple sessions can be defined in `tx_sessions` to transmit different crop regions of the same video simultaneously (see `config/tx_fullhd_multi_session.json`).
 
 ## Logging
 
@@ -188,7 +188,7 @@ When `log_file` is set, log output is written to that file in addition to the co
 
 #### Using JSON Configuration (recommended)
 ```bash
-./build/dvledtx --config config/tx_1session.json
+./build/dvledtx --config config/tx_fullhd_single_session.json
 ```
 
 ## Command-Line Options
@@ -227,7 +227,14 @@ When `log_file` is set, log output is written to that file in addition to the co
 - 60 fps
 
 ### Resolutions
-- Tested with 1920x1080
+
+| Resolution | Dimensions | Description |
+|------------|------------|-------------|
+| **1080p** (Full HD) | 1920x1080 | Standard HD resolution |
+| **2K** (QHD) | 2560x1440 | Quad HD / 2K resolution |
+| **4K** (UHD) | 3840x2160 | Ultra HD / 4K resolution |
+
+> **Note:** Maximum supported resolution is 3840x2160. Width must be even for YUV format alignment.
 
 ## Performance Considerations
 
