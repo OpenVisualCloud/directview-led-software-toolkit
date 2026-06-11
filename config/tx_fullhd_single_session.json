@@ -12,7 +12,7 @@
     "height": 2160,
     "fps":    60,
     "fmt":    "gbrp10le",
-    "tx_url": "/home/intel/workspace/sample/ball_4k_gbrp10le_30fps_5min.mp4"
+    "tx_url": "ball_4k_gbrp10le_30fps_5min.mp4"
   },
   "tx_sessions": [
     {

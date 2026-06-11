@@ -12,7 +12,7 @@
     "height": 2160,
     "fps":    30,
     "fmt":    "yuv422p10le",
-    "tx_url": "/home/intel/workspace/sample/ball_4k_yuv420p_30fps_5min.mp4"
+    "tx_url": "ball_4k_yuv420p_30fps_5min.mp4"
   },
   "tx_sessions": [
     {
