@@ -640,6 +640,117 @@ static void test_validate_4k_height_exceeds_max_fails(void **state)
     assert_int_equal(validate_tx_config(&cfg), -1);
 }
 
+/* ==========================================================================
+ * validate_tx_config — scaling tests
+ * ========================================================================== */
+
+static void test_validate_scale_upscale_1080p_to_4k_passes(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.width  = 1920;
+    cfg.height = 1080;
+    cfg.scale_width  = 3840;
+    cfg.scale_height = 2160;
+    cfg.sessions[0].crop_w = 3840;
+    cfg.sessions[0].crop_h = 2160;
+    assert_int_equal(validate_tx_config(&cfg), 0);
+}
+
+static void test_validate_scale_downscale_4k_to_1080p_passes(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.width  = 3840;
+    cfg.height = 2160;
+    cfg.scale_width  = 1920;
+    cfg.scale_height = 1080;
+    cfg.sessions[0].crop_w = 1920;
+    cfg.sessions[0].crop_h = 1080;
+    assert_int_equal(validate_tx_config(&cfg), 0);
+}
+
+static void test_validate_scale_width_only_fails(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.scale_width  = 3840;
+    cfg.scale_height = 0;
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+static void test_validate_scale_height_only_fails(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.scale_width  = 0;
+    cfg.scale_height = 2160;
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+static void test_validate_scale_exceeds_max_fails(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.scale_width  = 4096;
+    cfg.scale_height = 2160;
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+static void test_validate_scale_odd_width_fails(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.scale_width  = 1921;
+    cfg.scale_height = 1080;
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+static void test_validate_scale_crop_exceeds_scaled_dims_fails(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.width  = 3840;
+    cfg.height = 2160;
+    cfg.scale_width  = 1920;
+    cfg.scale_height = 1080;
+    /* crop is 3840x2160 but effective dims are 1920x1080 */
+    cfg.sessions[0].crop_w = 3840;
+    cfg.sessions[0].crop_h = 2160;
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+static void test_validate_scale_crop_within_scaled_dims_passes(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.width  = 3840;
+    cfg.height = 2160;
+    cfg.scale_width  = 2560;
+    cfg.scale_height = 1440;
+    cfg.sessions[0].crop_w = 2560;
+    cfg.sessions[0].crop_h = 1440;
+    assert_int_equal(validate_tx_config(&cfg), 0);
+}
+
+static void test_validate_no_scale_passes(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.scale_width  = 0;
+    cfg.scale_height = 0;
+    assert_int_equal(validate_tx_config(&cfg), 0);
+}
+
 static void test_validate_duplicate_udp_ports_fails(void **state)
 {
     (void)state;
@@ -1178,6 +1289,15 @@ int main(void)
         cmocka_unit_test(test_validate_2k_resolution_passes),
         cmocka_unit_test(test_validate_4k_resolution_passes),
         cmocka_unit_test(test_validate_4k_height_exceeds_max_fails),
+        cmocka_unit_test(test_validate_scale_upscale_1080p_to_4k_passes),
+        cmocka_unit_test(test_validate_scale_downscale_4k_to_1080p_passes),
+        cmocka_unit_test(test_validate_scale_width_only_fails),
+        cmocka_unit_test(test_validate_scale_height_only_fails),
+        cmocka_unit_test(test_validate_scale_exceeds_max_fails),
+        cmocka_unit_test(test_validate_scale_odd_width_fails),
+        cmocka_unit_test(test_validate_scale_crop_exceeds_scaled_dims_fails),
+        cmocka_unit_test(test_validate_scale_crop_within_scaled_dims_passes),
+        cmocka_unit_test(test_validate_no_scale_passes),
         cmocka_unit_test(test_validate_duplicate_udp_ports_fails),
         cmocka_unit_test(test_validate_crop_x_misaligned_for_yuv422_fails),
         cmocka_unit_test(test_validate_tx_url_nonexistent_file_fails),

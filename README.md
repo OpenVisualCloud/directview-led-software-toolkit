@@ -129,8 +129,10 @@ dvledtx uses a JSON config file with three sections:
 | **interfaces** | `name` | PCI BDF address of the NIC (e.g. `0000:06:00.0`) |
 | | `sip` | Source IP address |
 | | `dip` | Destination multicast IP address |
-| **video** | `width` | Frame width in pixels |
-| | `height` | Frame height in pixels |
+| **video** | `width` | Source frame width in pixels |
+| | `height` | Source frame height in pixels |
+| | `scale_width` | (Optional) Output width after scaling |
+| | `scale_height` | (Optional) Output height after scaling |
 | | `fps` | Frames per second (25, 30, 50, 60) |
 | | `fmt` | Pixel format (see [Supported Formats](#supported-formats)) |
 | | `tx_url` | Path to the source video file |
@@ -235,6 +237,41 @@ When `log_file` is set, log output is written to that file in addition to the co
 | **4K** (UHD) | 3840x2160 | Ultra HD / 4K resolution |
 
 > **Note:** Maximum supported resolution is 3840x2160. Width must be even for YUV format alignment.
+
+### Video Scaling
+
+dvledtx supports upscaling and downscaling via optional `scale_width` and `scale_height` fields in the video configuration block. When set, the decoded source video is scaled to the specified dimensions before crop regions are applied.
+
+| Feature | Description |
+|---------|-------------|
+| **Upscale** | Scale smaller source (e.g. 1080p) to larger output (e.g. 4K) |
+| **Downscale** | Scale larger source (e.g. 4K) to smaller output (e.g. 1080p) |
+| **Single session** | Full scaled frame transmitted as one stream |
+| **Multi-session** | Crop regions applied to scaled frame for tiled LED walls |
+| **Max output** | 3840x2160 (4K UHD) |
+
+Example — upscale 1080p source to 4K output:
+```json
+{
+  "video": {
+    "width": 1920, "height": 1080,
+    "scale_width": 3840, "scale_height": 2160,
+    "fps": 30, "fmt": "yuv422p10le",
+    "tx_url": "source_1080p.mp4"
+  },
+  "tx_sessions": [
+    { "udp_port": 20000, "payload_type": 96, "crop": { "x": 0, "y": 0, "w": 3840, "h": 2160 } }
+  ]
+}
+```
+
+Log output when scaling is active:
+```
+[INFO ] Video: 1920x1080 -> scale 3840x2160 30fps yuv422p10le  tx_url=source_1080p.mp4
+[INFO ]   Session 0: udp_port=20000 pt=96 crop=[0,0 3840x2160]
+```
+
+> **Note:** When `scale_width`/`scale_height` are set, crop bounds are validated against the scaled dimensions, not the source dimensions. Both fields must be specified together.
 
 ## Performance Considerations
 

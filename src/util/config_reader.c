@@ -261,6 +261,8 @@ int parse_tx_config(const char* config_file, struct dvledtx_config* config) {
         int v;
         v = extract_json_int(video_obj, video_end, "width");  if (v > 0) config->width  = v;
         v = extract_json_int(video_obj, video_end, "height"); if (v > 0) config->height = v;
+        v = extract_json_int(video_obj, video_end, "scale_width");  if (v > 0) config->scale_width  = v;
+        v = extract_json_int(video_obj, video_end, "scale_height"); if (v > 0) config->scale_height = v;
         v = extract_json_int(video_obj, video_end, "fps");    if (v > 0) config->fps    = v;
         extract_json_string(video_obj, video_end, "fmt",    config->fmt,    sizeof(config->fmt));
         extract_json_string(video_obj, video_end, "tx_url", config->tx_url, sizeof(config->tx_url));
@@ -427,6 +429,28 @@ int validate_tx_config(const struct dvledtx_config* config) {
         return -1;
     }
 
+    /* Scale dimensions validation (optional — 0 means no scaling) */
+    if (config->scale_width != 0 || config->scale_height != 0) {
+        if (config->scale_width == 0 || config->scale_height == 0) {
+            LOG_ERROR("scale_width and scale_height must both be set or both omitted");
+            return -1;
+        }
+        if (config->scale_width > 3840 || config->scale_height > 2160) {
+            LOG_ERROR("scale resolution %ux%u exceeds maximum 3840x2160",
+                   (unsigned)config->scale_width, (unsigned)config->scale_height);
+            return -1;
+        }
+        if (config->scale_width % 2 != 0) {
+            LOG_ERROR("scale_width %u must be even for YUV formats",
+                   (unsigned)config->scale_width);
+            return -1;
+        }
+    }
+
+    /* Effective output dimensions (after scaling) for crop validation */
+    uint32_t eff_width  = config->scale_width  > 0 ? config->scale_width  : config->width;
+    uint32_t eff_height = config->scale_height > 0 ? config->scale_height : config->height;
+
     /* FPS validation */
     if (config->fps != 25 && config->fps != 30 &&
         config->fps != 50 && config->fps != 60) {
@@ -494,16 +518,16 @@ int validate_tx_config(const struct dvledtx_config* config) {
                    s->crop_w, s->crop_h);
             return -1;
         }
-        if ((uint32_t)s->crop_x + (uint32_t)s->crop_w > config->width) {
-            LOG_ERROR("session %d: crop x=%d + w=%d = %u exceeds video width %u",
+        if ((uint32_t)s->crop_x + (uint32_t)s->crop_w > eff_width) {
+            LOG_ERROR("session %d: crop x=%d + w=%d = %u exceeds effective width %u",
                    i, s->crop_x, s->crop_w,
-                   (uint32_t)s->crop_x + (uint32_t)s->crop_w, config->width);
+                   (uint32_t)s->crop_x + (uint32_t)s->crop_w, eff_width);
             return -1;
         }
-        if ((uint32_t)s->crop_y + (uint32_t)s->crop_h > config->height) {
-            LOG_ERROR("session %d: crop y=%d + h=%d = %u exceeds video height %u",
+        if ((uint32_t)s->crop_y + (uint32_t)s->crop_h > eff_height) {
+            LOG_ERROR("session %d: crop y=%d + h=%d = %u exceeds effective height %u",
                    i, s->crop_y, s->crop_h,
-                   (uint32_t)s->crop_y + (uint32_t)s->crop_h, config->height);
+                   (uint32_t)s->crop_y + (uint32_t)s->crop_h, eff_height);
             return -1;
         }
         if (s->crop_w % 2 != 0) {
@@ -589,6 +613,8 @@ int load_and_apply_config(struct dvledtx_context* app, const char* config_file) 
     /* Video */
     app->width  = config.width;
     app->height = config.height;
+    app->scale_width  = config.scale_width;
+    app->scale_height = config.scale_height;
     app->fps    = config.fps;
 
     if (strcmp(config.fmt, "yuv422p10le") == 0)       app->fmt = AV_PIX_FMT_YUV422P10LE;
@@ -636,9 +662,16 @@ int load_and_apply_config(struct dvledtx_context* app, const char* config_file) 
            config_file, config.interface_name,
            config.interface_sip[0] ? config.interface_sip : "dhcp",
            config.interface_dip);
-    LOG_INFO("Video: %dx%d %dfps %s  tx_url=%s",
-           config.width, config.height, config.fps, config.fmt,
-           config.tx_url[0] ? config.tx_url : "<none>");
+    if (config.scale_width > 0 && config.scale_height > 0)
+        LOG_INFO("Video: %ux%u -> scale %ux%u %dfps %s  tx_url=%s",
+               config.width, config.height,
+               config.scale_width, config.scale_height,
+               config.fps, config.fmt,
+               config.tx_url[0] ? config.tx_url : "<none>");
+    else
+        LOG_INFO("Video: %ux%u %dfps %s  tx_url=%s",
+               config.width, config.height, config.fps, config.fmt,
+               config.tx_url[0] ? config.tx_url : "<none>");
     for (int i = 0; i < config.session_count; i++)
         LOG_INFO("  Session %d: udp_port=%u pt=%u crop=[%d,%d %dx%d]", i,
                config.sessions[i].udp_port, config.sessions[i].payload_type,

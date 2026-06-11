@@ -10,6 +10,8 @@
   "video": {
     "width":  3840,
     "height": 2160,
+    "scale_width":  3840,
+    "scale_height": 2160,
     "fps":    60,
     "fmt":    "gbrp10le",
     "tx_url": "ball_4k_gbrp10le_30fps_5min.mp4"

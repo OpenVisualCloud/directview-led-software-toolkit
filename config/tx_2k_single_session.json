@@ -10,6 +10,8 @@
   "video": {
     "width":  2560,
     "height": 1440,
+    "scale_width":  2560,
+    "scale_height": 1440,
     "fps":    30,
     "fmt":    "yuv422p10le",
     "tx_url": "ball_2k_yuv420p_30fps_5min.mp4"
