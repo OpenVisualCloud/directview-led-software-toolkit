@@ -32,8 +32,8 @@
 #  error "FIXTURE_DIR must be defined by the build system (-DFIXTURE_DIR=...)"
 #endif
 
-#define FIXTURE_3SESSIONS  FIXTURE_DIR "/tx_3sessions.json"
-#define FIXTURE_1SESSION   FIXTURE_DIR "/tx_1session.json"
+#define FIXTURE_3SESSIONS  FIXTURE_DIR "/tx_fullhd_multi_session.json"
+#define FIXTURE_1SESSION   FIXTURE_DIR "/tx_fullhd_single_session.json"
 
 /* --------------------------------------------------------------------------
  * Helper: write content to a new temp file, return heap-allocated path.
@@ -449,7 +449,7 @@ static void test_validate_zero_session_count_fails(void **state)
 static void test_validate_3sessions_tiled_layout_passes(void **state)
 {
     (void)state;
-    /* Mirrors tx_3sessions.json: three 640-wide horizontal tiles */
+    /* Mirrors tx_fullhd_multi_session.json: three 640-wide horizontal tiles */
     struct dvledtx_config cfg;
     memset(&cfg, 0, sizeof(cfg));
     strncpy(cfg.interface_name, "0000:06:00.0",   sizeof(cfg.interface_name) - 1);
@@ -602,7 +602,41 @@ static void test_validate_resolution_exceeds_max_fails(void **state)
     (void)state;
     struct dvledtx_config cfg;
     fill_valid_config(&cfg);
-    cfg.width = 2000; /* > 1920 limit */
+    cfg.width = 4000; /* > 3840 limit */
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+static void test_validate_2k_resolution_passes(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.width  = 2560;
+    cfg.height = 1440;
+    cfg.sessions[0].crop_w = 2560;
+    cfg.sessions[0].crop_h = 1440;
+    assert_int_equal(validate_tx_config(&cfg), 0);
+}
+
+static void test_validate_4k_resolution_passes(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.width  = 3840;
+    cfg.height = 2160;
+    cfg.sessions[0].crop_w = 3840;
+    cfg.sessions[0].crop_h = 2160;
+    assert_int_equal(validate_tx_config(&cfg), 0);
+}
+
+static void test_validate_4k_height_exceeds_max_fails(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.width  = 3840;
+    cfg.height = 2162; /* > 2160 limit */
     assert_int_equal(validate_tx_config(&cfg), -1);
 }
 
@@ -1141,6 +1175,9 @@ int main(void)
         cmocka_unit_test(test_validate_zero_session_count_fails),
         cmocka_unit_test(test_validate_3sessions_tiled_layout_passes),
         cmocka_unit_test(test_validate_resolution_exceeds_max_fails),
+        cmocka_unit_test(test_validate_2k_resolution_passes),
+        cmocka_unit_test(test_validate_4k_resolution_passes),
+        cmocka_unit_test(test_validate_4k_height_exceeds_max_fails),
         cmocka_unit_test(test_validate_duplicate_udp_ports_fails),
         cmocka_unit_test(test_validate_crop_x_misaligned_for_yuv422_fails),
         cmocka_unit_test(test_validate_tx_url_nonexistent_file_fails),
