@@ -137,7 +137,7 @@ dvledtx uses a JSON config file with three sections:
 | | `fps` | Frames per second (25, 30, 50, 60) |
 | | `fmt` | Pixel format (see [Supported Formats](#supported-formats)) |
 | **tx_sessions[]** | `udp_port` | UDP port for the session |
-| | `payload_type` | (Optional) RTP payload type — defaults to `96` |
+| | `payload_type` | (Optional) RTP payload type — defaults to `96` if not present |
 | | `crop` | Region to transmit: `x`, `y`, `w`, `h` in pixels |
 
 Example (`config/tx_fullhd_single_session.json`):
