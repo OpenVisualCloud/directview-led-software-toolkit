@@ -131,13 +131,13 @@ dvledtx uses a JSON config file with three sections:
 | | `dip` | Destination multicast IP address |
 | **video** | `width` | Source frame width in pixels |
 | | `height` | Source frame height in pixels |
-| | `scale_width` | (Optional) Output width after scaling |
+| | `tx_url` | Path to the source video file |
+| **tx_video** | `scale_width` | (Optional) Output width after scaling |
 | | `scale_height` | (Optional) Output height after scaling |
 | | `fps` | Frames per second (25, 30, 50, 60) |
 | | `fmt` | Pixel format (see [Supported Formats](#supported-formats)) |
-| | `tx_url` | Path to the source video file |
 | **tx_sessions[]** | `udp_port` | UDP port for the session |
-| | `payload_type` | RTP payload type (typically 96) |
+| | `payload_type` | (Optional) RTP payload type — defaults to `96` |
 | | `crop` | Region to transmit: `x`, `y`, `w`, `h` in pixels |
 
 Example (`config/tx_fullhd_single_session.json`):
@@ -148,12 +148,14 @@ Example (`config/tx_fullhd_single_session.json`):
     { "name": "0000:06:00.0", "sip": "192.168.50.29", "dip": "239.168.85.20" }
   ],
   "video": {
-    "width": 1920, "height": 1080, "fps": 30,
-    "fmt": "yuv422p10le",
+    "width": 1920, "height": 1080,
     "tx_url": "bbb_sunflower_1080p_30fps_normal.mp4"
   },
+  "tx_video": {
+    "fps": 30, "fmt": "yuv422p10le"
+  },
   "tx_sessions": [
-    { "udp_port": 20000, "payload_type": 96, "crop": { "x": 0, "y": 0, "w": 1920, "h": 1080 } }
+    { "udp_port": 20000, "crop": { "x": 0, "y": 0, "w": 1920, "h": 1080 } }
   ]
 }
 ```
@@ -255,12 +257,14 @@ Example — upscale 1080p source to 4K output:
 {
   "video": {
     "width": 1920, "height": 1080,
-    "scale_width": 3840, "scale_height": 2160,
-    "fps": 30, "fmt": "yuv422p10le",
     "tx_url": "source_1080p.mp4"
   },
+  "tx_video": {
+    "scale_width": 3840, "scale_height": 2160,
+    "fps": 30, "fmt": "yuv422p10le"
+  },
   "tx_sessions": [
-    { "udp_port": 20000, "payload_type": 96, "crop": { "x": 0, "y": 0, "w": 3840, "h": 2160 } }
+    { "udp_port": 20000, "crop": { "x": 0, "y": 0, "w": 3840, "h": 2160 } }
   ]
 }
 ```
