@@ -560,7 +560,7 @@ static void test_parse_session_udp_port_exceeds_65535_fails(void **state)
     assert_int_equal(ret, -1);
 }
 
-static void test_parse_session_missing_payload_type_fails(void **state)
+static void test_parse_session_missing_payload_type_defaults_to_96(void **state)
 {
     (void)state;
     char *path = write_tmpfile(
@@ -574,7 +574,8 @@ static void test_parse_session_missing_payload_type_fails(void **state)
     struct dvledtx_config cfg;
     int ret = parse_tx_config(path, &cfg);
     unlink(path); free(path);
-    assert_int_equal(ret, -1);
+    assert_int_equal(ret, 0);
+    assert_int_equal(cfg.sessions[0].payload_type, 96);
 }
 
 static void test_parse_session_no_crop_object_fails(void **state)
@@ -709,6 +710,19 @@ static void test_validate_scale_odd_width_fails(void **state)
     fill_valid_config(&cfg);
     cfg.scale_width  = 1921;
     cfg.scale_height = 1080;
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+static void test_validate_scale_odd_height_yuv420_fails(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    strncpy(cfg.fmt, "yuv420", sizeof(cfg.fmt) - 1);
+    cfg.scale_width  = 1920;
+    cfg.scale_height = 1081; /* yuv420 requires even height */
+    cfg.sessions[0].crop_w = 1920;
+    cfg.sessions[0].crop_h = 1080;
     assert_int_equal(validate_tx_config(&cfg), -1);
 }
 
@@ -1138,7 +1152,8 @@ static void test_load_and_apply_config_nonexistent_file_returns_minus1(void **st
     "{" \
     "  \"interfaces\": [{\"name\":\"0000:06:00.0\"," \
     "    \"sip\":\"192.168.50.29\",\"dip\":\"239.168.85.20\"}]," \
-    "  \"video\": {\"width\":1920,\"height\":1080,\"fps\":30,\"fmt\":\"" fmt_str "\"}," \
+    "  \"video\": {\"width\":1920,\"height\":1080}," \
+    "  \"tx_video\": {\"fps\":30,\"fmt\":\"" fmt_str "\"}," \
     "  \"tx_sessions\": [{\"udp_port\":20000,\"payload_type\":96," \
     "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]" \
     "}"
@@ -1221,7 +1236,8 @@ static void test_load_and_apply_config_copies_log_file(void **state)
         "{"
         "  \"log_file\": \"myapp.log\","
         "  \"interfaces\": [{\"name\":\"0000:06:00.0\",\"sip\":\"192.168.50.29\",\"dip\":\"239.168.85.20\"}],"
-        "  \"video\": {\"width\":1920,\"height\":1080,\"fps\":25,\"fmt\":\"yuv422p10le\"},"
+        "  \"video\": {\"width\":1920,\"height\":1080},"
+        "  \"tx_video\": {\"fps\":25,\"fmt\":\"yuv422p10le\"},"
         "  \"tx_sessions\": [{\"udp_port\":20000,\"payload_type\":96,"
         "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]"
         "}");
@@ -1257,7 +1273,7 @@ int main(void)
         cmocka_unit_test(test_parse_returns_zero_fields_when_video_missing),
         cmocka_unit_test(test_parse_session_missing_udp_port_fails),
         cmocka_unit_test(test_parse_session_udp_port_exceeds_65535_fails),
-        cmocka_unit_test(test_parse_session_missing_payload_type_fails),
+        cmocka_unit_test(test_parse_session_missing_payload_type_defaults_to_96),
         cmocka_unit_test(test_parse_session_no_crop_object_fails),
         cmocka_unit_test(test_parse_session_negative_crop_x_fails),
         cmocka_unit_test(test_parse_session_zero_crop_w_fails),
@@ -1295,6 +1311,7 @@ int main(void)
         cmocka_unit_test(test_validate_scale_height_only_fails),
         cmocka_unit_test(test_validate_scale_exceeds_max_fails),
         cmocka_unit_test(test_validate_scale_odd_width_fails),
+        cmocka_unit_test(test_validate_scale_odd_height_yuv420_fails),
         cmocka_unit_test(test_validate_scale_crop_exceeds_scaled_dims_fails),
         cmocka_unit_test(test_validate_scale_crop_within_scaled_dims_passes),
         cmocka_unit_test(test_validate_no_scale_passes),

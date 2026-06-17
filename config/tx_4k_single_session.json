@@ -10,11 +10,13 @@
   "video": {
     "width":  3840,
     "height": 2160,
+    "tx_url": "ball_4k_gbrp10le_60fps_5min.mp4"
+  },
+  "tx_video": {
     "scale_width":  900,
     "scale_height": 600,
     "fps":    60,
-    "fmt":    "gbrp10le",
-    "tx_url": "/home/intel/workspace/sample/ball_4k_gbrp10le_60fps_5min.mp4"
+    "fmt":    "gbrp10le"
   },
   "tx_sessions": [
     {

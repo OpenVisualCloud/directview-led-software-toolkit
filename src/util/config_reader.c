@@ -199,7 +199,8 @@ int peek_config_log_file(const char* config_file, char* out_buf, size_t out_size
  * Expected JSON structure:
  *   {
  *     "interfaces": [ { "name": "...", "sip": "...", "dip": "..." } ],
- *     "video": { "width": N, "height": N, "fps": N, "fmt": "...", "tx_url": "..." },
+ *     "video": { "width": N, "height": N, "tx_url": "..." },
+ *     "tx_video": { "scale_width": N, "scale_height": N, "fps": N, "fmt": "..." },
  *     "log_file": "/path/to/dvledtx.log",  (optional — omit for console-only logging)
  *     "tx_sessions": [
  *       { "udp_port": N, "payload_type": N, "crop": { "x":N, "y":N, "w":N, "h":N } },
@@ -261,11 +262,19 @@ int parse_tx_config(const char* config_file, struct dvledtx_config* config) {
         int v;
         v = extract_json_int(video_obj, video_end, "width");  if (v > 0) config->width  = v;
         v = extract_json_int(video_obj, video_end, "height"); if (v > 0) config->height = v;
-        v = extract_json_int(video_obj, video_end, "scale_width");  if (v > 0) config->scale_width  = v;
-        v = extract_json_int(video_obj, video_end, "scale_height"); if (v > 0) config->scale_height = v;
-        v = extract_json_int(video_obj, video_end, "fps");    if (v > 0) config->fps    = v;
-        extract_json_string(video_obj, video_end, "fmt",    config->fmt,    sizeof(config->fmt));
         extract_json_string(video_obj, video_end, "tx_url", config->tx_url, sizeof(config->tx_url));
+    }
+
+    /* --- tx_video block (transmission parameters) --- */
+    const char* tx_video_obj = find_object(json, buf_end, "tx_video");
+    if (tx_video_obj != NULL) {
+        const char* tx_video_end = find_object_end(tx_video_obj, buf_end);
+        if (tx_video_end == NULL) tx_video_end = buf_end;
+        int v;
+        v = extract_json_int(tx_video_obj, tx_video_end, "scale_width");  if (v > 0) config->scale_width  = v;
+        v = extract_json_int(tx_video_obj, tx_video_end, "scale_height"); if (v > 0) config->scale_height = v;
+        v = extract_json_int(tx_video_obj, tx_video_end, "fps");    if (v > 0) config->fps    = v;
+        extract_json_string(tx_video_obj, tx_video_end, "fmt",    config->fmt,    sizeof(config->fmt));
     }
 
     /* --- optional top-level log_file --- */
@@ -311,10 +320,7 @@ int parse_tx_config(const char* config_file, struct dvledtx_config* config) {
         if (v > 0 && v <= 255) {
             s->payload_type = (uint8_t)v;
         } else {
-            LOG_ERROR("session %d: payload_type not set or invalid (%d)",
-                   config->session_count, v);
-            free(json);
-            return -1;
+            s->payload_type = 96; /* default to 96 (first dynamic RTP payload type) */
         }
 
         /* crop sub-object */
@@ -440,10 +446,26 @@ int validate_tx_config(const struct dvledtx_config* config) {
                    (unsigned)config->scale_width, (unsigned)config->scale_height);
             return -1;
         }
-        if (config->scale_width % 2 != 0) {
-            LOG_ERROR("scale_width %u must be even for YUV formats",
-                   (unsigned)config->scale_width);
-            return -1;
+        /* Validate scaled dimensions against pixel format chroma alignment */
+        {
+            const char* fmt_lookup = config->fmt[0] ? config->fmt : "yuv422p10le";
+            if (strcmp(fmt_lookup, "yuv420") == 0) fmt_lookup = "yuv420p";
+            enum AVPixelFormat pix_fmt = av_get_pix_fmt(fmt_lookup);
+            const AVPixFmtDescriptor* desc =
+                (pix_fmt != AV_PIX_FMT_NONE) ? av_pix_fmt_desc_get(pix_fmt) : NULL;
+            int x_align = desc ? (1 << desc->log2_chroma_w) : 2;
+            int y_align = desc ? (1 << desc->log2_chroma_h) : 1;
+
+            if (x_align > 1 && config->scale_width % x_align != 0) {
+                LOG_ERROR("scale_width %u must be a multiple of %d for pixel format '%s'",
+                       (unsigned)config->scale_width, x_align, config->fmt);
+                return -1;
+            }
+            if (y_align > 1 && config->scale_height % y_align != 0) {
+                LOG_ERROR("scale_height %u must be a multiple of %d for pixel format '%s'",
+                       (unsigned)config->scale_height, y_align, config->fmt);
+                return -1;
+            }
         }
     }
 
@@ -540,8 +562,9 @@ int validate_tx_config(const struct dvledtx_config* config) {
          * Use the pixel format descriptor (if available) to determine
          * the required alignment from log2_chroma_w/h. */
         {
-            enum AVPixelFormat pix_fmt = av_get_pix_fmt(
-                config->fmt[0] ? config->fmt : "yuv422p10le");
+            const char* fmt_lookup = config->fmt[0] ? config->fmt : "yuv422p10le";
+            if (strcmp(fmt_lookup, "yuv420") == 0) fmt_lookup = "yuv420p";
+            enum AVPixelFormat pix_fmt = av_get_pix_fmt(fmt_lookup);
             const AVPixFmtDescriptor* desc =
                 (pix_fmt != AV_PIX_FMT_NONE) ? av_pix_fmt_desc_get(pix_fmt) : NULL;
             int x_align = desc ? (1 << desc->log2_chroma_w) : 2;

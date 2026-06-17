@@ -271,7 +271,7 @@ Log output when scaling is active:
 [INFO ]   Session 0: udp_port=20000 pt=96 crop=[0,0 3840x2160]
 ```
 
-> **Note:** When `scale_width`/`scale_height` are set, crop bounds are validated against the scaled dimensions, not the source dimensions. Both fields must be specified together.
+> **Note:** When `scale_width`/`scale_height` are set, crop bounds are validated against the scaled dimensions, not the source dimensions. Both fields must be specified together, and the scaled dimensions must satisfy the pixel format's chroma-alignment constraints (e.g. `yuv420` requires even width and height; `yuv422*` requires even width).
 
 ## Performance Considerations
 
