@@ -321,9 +321,11 @@ static void close_ffmpeg_decoder(
  * ========================================================================= */
 int open_shared_ffmpeg(struct shared_decode_ctx* dec, const char* filename) {
   const struct dvledtx_context* app = dec->app;
+  int target_w = (int)(app->scale_width  > 0 ? app->scale_width  : app->width);
+  int target_h = (int)(app->scale_height > 0 ? app->scale_height : app->height);
   return open_ffmpeg_decoder(
     filename, "Shared decode",
-    app->fmt, (int)app->width, (int)app->height,
+    app->fmt, target_w, target_h,
     &dec->fmt_ctx, &dec->codec_ctx, &dec->sws_ctx,
     &dec->av_frame, &dec->yuv_frame, &dec->av_packet,
     &dec->video_stream_idx);
@@ -341,9 +343,11 @@ void close_shared_ffmpeg(struct shared_decode_ctx* dec) {
 static int open_ffmpeg_source(struct st20p_tx_ctx* ctx, const char* filename) {
   char log_prefix[64];
   snprintf(log_prefix, sizeof(log_prefix), "ST20P TX(%d)", ctx->idx);
+  int target_w = (int)(ctx->app->scale_width  > 0 ? ctx->app->scale_width  : ctx->app->width);
+  int target_h = (int)(ctx->app->scale_height > 0 ? ctx->app->scale_height : ctx->app->height);
   int ret = open_ffmpeg_decoder(
     filename, log_prefix,
-    ctx->app->fmt, (int)ctx->app->width, (int)ctx->app->height,
+    ctx->app->fmt, target_w, target_h,
     &ctx->fmt_ctx, &ctx->codec_ctx, &ctx->sws_ctx,
     &ctx->av_frame, &ctx->yuv_frame, &ctx->av_packet,
     &ctx->video_stream_idx);

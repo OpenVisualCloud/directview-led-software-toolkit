@@ -199,7 +199,8 @@ int peek_config_log_file(const char* config_file, char* out_buf, size_t out_size
  * Expected JSON structure:
  *   {
  *     "interfaces": [ { "name": "...", "sip": "...", "dip": "..." } ],
- *     "video": { "width": N, "height": N, "fps": N, "fmt": "...", "tx_url": "..." },
+ *     "video": { "width": N, "height": N, "tx_url": "..." },
+ *     "tx_video": { "scale_width": N, "scale_height": N, "fps": N, "fmt": "..." },
  *     "log_file": "/path/to/dvledtx.log",  (optional — omit for console-only logging)
  *     "tx_sessions": [
  *       { "udp_port": N, "payload_type": N, "crop": { "x":N, "y":N, "w":N, "h":N } },
@@ -261,9 +262,19 @@ int parse_tx_config(const char* config_file, struct dvledtx_config* config) {
         int v;
         v = extract_json_int(video_obj, video_end, "width");  if (v > 0) config->width  = v;
         v = extract_json_int(video_obj, video_end, "height"); if (v > 0) config->height = v;
-        v = extract_json_int(video_obj, video_end, "fps");    if (v > 0) config->fps    = v;
-        extract_json_string(video_obj, video_end, "fmt",    config->fmt,    sizeof(config->fmt));
         extract_json_string(video_obj, video_end, "tx_url", config->tx_url, sizeof(config->tx_url));
+    }
+
+    /* --- tx_video block (transmission parameters) --- */
+    const char* tx_video_obj = find_object(json, buf_end, "tx_video");
+    if (tx_video_obj != NULL) {
+        const char* tx_video_end = find_object_end(tx_video_obj, buf_end);
+        if (tx_video_end == NULL) tx_video_end = buf_end;
+        int v;
+        v = extract_json_int(tx_video_obj, tx_video_end, "scale_width");  if (v > 0) config->scale_width  = v;
+        v = extract_json_int(tx_video_obj, tx_video_end, "scale_height"); if (v > 0) config->scale_height = v;
+        v = extract_json_int(tx_video_obj, tx_video_end, "fps");    if (v > 0) config->fps    = v;
+        extract_json_string(tx_video_obj, tx_video_end, "fmt",    config->fmt,    sizeof(config->fmt));
     }
 
     /* --- optional top-level log_file --- */
@@ -309,10 +320,7 @@ int parse_tx_config(const char* config_file, struct dvledtx_config* config) {
         if (v > 0 && v <= 255) {
             s->payload_type = (uint8_t)v;
         } else {
-            LOG_ERROR("session %d: payload_type not set or invalid (%d)",
-                   config->session_count, v);
-            free(json);
-            return -1;
+            s->payload_type = 96; /* default to 96 (first dynamic RTP payload type) */
         }
 
         /* crop sub-object */
@@ -427,6 +435,44 @@ int validate_tx_config(const struct dvledtx_config* config) {
         return -1;
     }
 
+    /* Scale dimensions validation (optional — 0 means no scaling) */
+    if (config->scale_width != 0 || config->scale_height != 0) {
+        if (config->scale_width == 0 || config->scale_height == 0) {
+            LOG_ERROR("scale_width and scale_height must both be set or both omitted");
+            return -1;
+        }
+        if (config->scale_width > 3840 || config->scale_height > 2160) {
+            LOG_ERROR("scale resolution %ux%u exceeds maximum 3840x2160",
+                   (unsigned)config->scale_width, (unsigned)config->scale_height);
+            return -1;
+        }
+        /* Validate scaled dimensions against pixel format chroma alignment */
+        {
+            const char* fmt_lookup = config->fmt[0] ? config->fmt : "yuv422p10le";
+            if (strcmp(fmt_lookup, "yuv420") == 0) fmt_lookup = "yuv420p";
+            enum AVPixelFormat pix_fmt = av_get_pix_fmt(fmt_lookup);
+            const AVPixFmtDescriptor* desc =
+                (pix_fmt != AV_PIX_FMT_NONE) ? av_pix_fmt_desc_get(pix_fmt) : NULL;
+            int x_align = desc ? (1 << desc->log2_chroma_w) : 2;
+            int y_align = desc ? (1 << desc->log2_chroma_h) : 1;
+
+            if (x_align > 1 && config->scale_width % x_align != 0) {
+                LOG_ERROR("scale_width %u must be a multiple of %d for pixel format '%s'",
+                       (unsigned)config->scale_width, x_align, config->fmt);
+                return -1;
+            }
+            if (y_align > 1 && config->scale_height % y_align != 0) {
+                LOG_ERROR("scale_height %u must be a multiple of %d for pixel format '%s'",
+                       (unsigned)config->scale_height, y_align, config->fmt);
+                return -1;
+            }
+        }
+    }
+
+    /* Effective output dimensions (after scaling) for crop validation */
+    uint32_t eff_width  = config->scale_width  > 0 ? config->scale_width  : config->width;
+    uint32_t eff_height = config->scale_height > 0 ? config->scale_height : config->height;
+
     /* FPS validation */
     if (config->fps != 25 && config->fps != 30 &&
         config->fps != 50 && config->fps != 60) {
@@ -494,16 +540,16 @@ int validate_tx_config(const struct dvledtx_config* config) {
                    s->crop_w, s->crop_h);
             return -1;
         }
-        if ((uint32_t)s->crop_x + (uint32_t)s->crop_w > config->width) {
-            LOG_ERROR("session %d: crop x=%d + w=%d = %u exceeds video width %u",
+        if ((uint32_t)s->crop_x + (uint32_t)s->crop_w > eff_width) {
+            LOG_ERROR("session %d: crop x=%d + w=%d = %u exceeds effective width %u",
                    i, s->crop_x, s->crop_w,
-                   (uint32_t)s->crop_x + (uint32_t)s->crop_w, config->width);
+                   (uint32_t)s->crop_x + (uint32_t)s->crop_w, eff_width);
             return -1;
         }
-        if ((uint32_t)s->crop_y + (uint32_t)s->crop_h > config->height) {
-            LOG_ERROR("session %d: crop y=%d + h=%d = %u exceeds video height %u",
+        if ((uint32_t)s->crop_y + (uint32_t)s->crop_h > eff_height) {
+            LOG_ERROR("session %d: crop y=%d + h=%d = %u exceeds effective height %u",
                    i, s->crop_y, s->crop_h,
-                   (uint32_t)s->crop_y + (uint32_t)s->crop_h, config->height);
+                   (uint32_t)s->crop_y + (uint32_t)s->crop_h, eff_height);
             return -1;
         }
         if (s->crop_w % 2 != 0) {
@@ -516,8 +562,9 @@ int validate_tx_config(const struct dvledtx_config* config) {
          * Use the pixel format descriptor (if available) to determine
          * the required alignment from log2_chroma_w/h. */
         {
-            enum AVPixelFormat pix_fmt = av_get_pix_fmt(
-                config->fmt[0] ? config->fmt : "yuv422p10le");
+            const char* fmt_lookup = config->fmt[0] ? config->fmt : "yuv422p10le";
+            if (strcmp(fmt_lookup, "yuv420") == 0) fmt_lookup = "yuv420p";
+            enum AVPixelFormat pix_fmt = av_get_pix_fmt(fmt_lookup);
             const AVPixFmtDescriptor* desc =
                 (pix_fmt != AV_PIX_FMT_NONE) ? av_pix_fmt_desc_get(pix_fmt) : NULL;
             int x_align = desc ? (1 << desc->log2_chroma_w) : 2;
@@ -589,6 +636,8 @@ int load_and_apply_config(struct dvledtx_context* app, const char* config_file) 
     /* Video */
     app->width  = config.width;
     app->height = config.height;
+    app->scale_width  = config.scale_width;
+    app->scale_height = config.scale_height;
     app->fps    = config.fps;
 
     if (strcmp(config.fmt, "yuv422p10le") == 0)       app->fmt = AV_PIX_FMT_YUV422P10LE;
@@ -636,9 +685,16 @@ int load_and_apply_config(struct dvledtx_context* app, const char* config_file) 
            config_file, config.interface_name,
            config.interface_sip[0] ? config.interface_sip : "dhcp",
            config.interface_dip);
-    LOG_INFO("Video: %dx%d %dfps %s  tx_url=%s",
-           config.width, config.height, config.fps, config.fmt,
-           config.tx_url[0] ? config.tx_url : "<none>");
+    if (config.scale_width > 0 && config.scale_height > 0)
+        LOG_INFO("Video: %ux%u -> scale %ux%u %dfps %s  tx_url=%s",
+               config.width, config.height,
+               config.scale_width, config.scale_height,
+               config.fps, config.fmt,
+               config.tx_url[0] ? config.tx_url : "<none>");
+    else
+        LOG_INFO("Video: %ux%u %dfps %s  tx_url=%s",
+               config.width, config.height, config.fps, config.fmt,
+               config.tx_url[0] ? config.tx_url : "<none>");
     for (int i = 0; i < config.session_count; i++)
         LOG_INFO("  Session %d: udp_port=%u pt=%u crop=[%d,%d %dx%d]", i,
                config.sessions[i].udp_port, config.sessions[i].payload_type,

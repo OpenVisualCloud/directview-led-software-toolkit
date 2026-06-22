@@ -51,8 +51,10 @@ static void* st20p_tx_thread_shared(void* arg) {
   struct shared_decode_ctx* dec = ctx->shared_dec;
   int crop_x = ctx->crop_x_offset;
   int crop_y = ctx->crop_y_offset;
-  int crop_w = ctx->crop_width  > 0 ? ctx->crop_width  : (int)ctx->app->width;
-  int crop_h = ctx->crop_height > 0 ? ctx->crop_height : (int)ctx->app->height;
+  int eff_w  = (int)(ctx->app->scale_width  > 0 ? ctx->app->scale_width  : ctx->app->width);
+  int eff_h  = (int)(ctx->app->scale_height > 0 ? ctx->app->scale_height : ctx->app->height);
+  int crop_w = ctx->crop_width  > 0 ? ctx->crop_width  : eff_w;
+  int crop_h = ctx->crop_height > 0 ? ctx->crop_height : eff_h;
 
   LOG_INFO("ST20P TX(%d): shared thread started (crop x=%d y=%d w=%d h=%d)",
            ctx->idx, crop_x, crop_y, crop_w, crop_h);
@@ -169,8 +171,10 @@ static void* st20p_tx_thread(void* arg) {
    * Path B yuv_frame is already crop-sized (strip) → no offset needed. */
   int crop_x = (ctx->use_ffmpeg == true) ? ctx->crop_x_offset : 0;
   int crop_y = (ctx->use_ffmpeg == true) ? ctx->crop_y_offset : 0;
-  int crop_w = ctx->crop_width  > 0 ? ctx->crop_width  : (int)ctx->app->width;
-  int crop_h = ctx->crop_height > 0 ? ctx->crop_height : (int)ctx->app->height;
+  int eff_w  = (int)(ctx->app->scale_width  > 0 ? ctx->app->scale_width  : ctx->app->width);
+  int eff_h  = (int)(ctx->app->scale_height > 0 ? ctx->app->scale_height : ctx->app->height);
+  int crop_w = ctx->crop_width  > 0 ? ctx->crop_width  : eff_w;
+  int crop_h = ctx->crop_height > 0 ? ctx->crop_height : eff_h;
 
   while (ctx->app->exit == false && session_manager_should_exit() == false) {
     const AVFrame* frame = tx_fetch_next_frame(ctx);
@@ -217,13 +221,15 @@ int create_st20p_tx_session(session_manager_t* manager, struct dvledtx_context* 
   /* Fallback: divide the frame width evenly across all sessions */
   if (ctx->crop_width == 0 || ctx->crop_height == 0) {
     int total   = app->st20p_sessions > 0 ? app->st20p_sessions : 1;
-    int strip_w = (int)app->width / total;
+    int eff_w   = (int)(app->scale_width  > 0 ? app->scale_width  : app->width);
+    int eff_h   = (int)(app->scale_height > 0 ? app->scale_height : app->height);
+    int strip_w = eff_w / total;
     ctx->crop_x_offset = session_idx * strip_w;
     ctx->crop_y_offset = 0;
     ctx->crop_width  = (session_idx == total - 1)
-                       ? ((int)app->width - ctx->crop_x_offset)
+                       ? (eff_w - ctx->crop_x_offset)
                        : strip_w;
-    ctx->crop_height = (int)app->height;
+    ctx->crop_height = eff_h;
   }
   LOG_INFO("ST20P TX session %d: crop rect x=%d y=%d w=%d h=%d",
            session_idx, ctx->crop_x_offset, ctx->crop_y_offset,
