@@ -9,28 +9,108 @@ description: 'Install Coverity, run static analysis, and emit JSON + SARIF repor
 runs:
   using: composite
   steps:
-    - name: Install Coverity
+    - name: Detect Coverity credentials
+      id: coverity_secrets
       shell: bash
       env:
         COVERITY_URL: ${{ env.COVERITY_URL }}
         COVERITY_USER: ${{ env.COVERITY_USER }}
         COVERITY_PASSWORD: ${{ env.COVERITY_PASSWORD }}
+        COVERITY_TOKEN: ${{ env.COVERITY_TOKEN }}
+        COVERITY_SCAN_USER: ${{ env.COVERITY_SCAN_USER }}
+        COVERITY_SCAN_PASSWORD: ${{ env.COVERITY_SCAN_PASSWORD }}
       run: |
+        set -euo pipefail
+        if [ -n "${COVERITY_TOKEN:-}" ] || \
+           { [ -n "${COVERITY_SCAN_USER:-}" ] && [ -n "${COVERITY_SCAN_PASSWORD:-}" ]; } || \
+           { [ -n "${COVERITY_URL:-}" ] && [ -n "${COVERITY_USER:-}" ] && [ -n "${COVERITY_PASSWORD:-}" ]; }; then
+          echo "available=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "available=false" >> "$GITHUB_OUTPUT"
+          echo "Coverity secrets are not available; skipping Coverity analysis."
+        fi
+
+    - name: Install Coverity
+      if: steps.coverity_secrets.outputs.available == 'true'
+      shell: bash
+      env:
+        COVERITY_URL: ${{ env.COVERITY_URL }}
+        COVERITY_USER: ${{ env.COVERITY_USER }}
+        COVERITY_PASSWORD: ${{ env.COVERITY_PASSWORD }}
+        COVERITY_TOKEN: ${{ env.COVERITY_TOKEN }}
+        COVERITY_PROJECT: ${{ env.COVERITY_PROJECT }}
+        COVERITY_SCAN_USER: ${{ env.COVERITY_SCAN_USER }}
+        COVERITY_SCAN_PASSWORD: ${{ env.COVERITY_SCAN_PASSWORD }}
+      run: |
+        set -euo pipefail
         echo "===== Coverity Setup ====="
         COVERITY_DIR="$HOME/coverity"
+        COVERITY_TARBALL="/tmp/coverity.tar.gz"
         if [ -x "$COVERITY_DIR/bin/cov-build" ]; then
           echo "  [OK] Coverity already installed at $COVERITY_DIR"
           "$COVERITY_DIR/bin/cov-build" --ident | head -1 || true
           exit 0
         fi
+
+        rm -f "$COVERITY_TARBALL"
         mkdir -p "$COVERITY_DIR"
-        wget --no-proxy -q --user="$COVERITY_USER" --password="$COVERITY_PASSWORD" \
-          -O /tmp/coverity.tar.gz "$COVERITY_URL"
-        tar xzf /tmp/coverity.tar.gz --strip-components=1 -C "$COVERITY_DIR"
-        rm -f /tmp/coverity.tar.gz
+
+        DOWNLOAD_OK=0
+
+        if [ -n "${COVERITY_TOKEN:-}" ]; then
+          echo "  Downloading Coverity from scan.coverity.com (token/project mode)..."
+          PROJECT_RAW="${COVERITY_PROJECT:-OpenVisualCloud/directview-led-software-toolkit}"
+          PROJECT_ENCODED="${PROJECT_RAW//\//%2F}"
+          if wget -q --post-data "token=${COVERITY_TOKEN}&project=${PROJECT_ENCODED}" \
+            -O "$COVERITY_TARBALL" "https://scan.coverity.com/download/linux64"; then
+            DOWNLOAD_OK=1
+            echo "  [OK] Downloaded from scan.coverity.com for project ${PROJECT_RAW}"
+          else
+            echo "  [WARN] scan.coverity.com token/project download failed, trying fallback source"
+            rm -f "$COVERITY_TARBALL"
+          fi
+        fi
+
+        if [ "$DOWNLOAD_OK" -eq 0 ] && [ -n "${COVERITY_SCAN_USER:-}" ] && [ -n "${COVERITY_SCAN_PASSWORD:-}" ]; then
+          echo "  Downloading Coverity from scan.coverity.com (user/password mode)..."
+          if wget -q --user="$COVERITY_SCAN_USER" --password="$COVERITY_SCAN_PASSWORD" \
+            -O "$COVERITY_TARBALL" "https://scan.coverity.com/download/cxx/linux64"; then
+            DOWNLOAD_OK=1
+            echo "  [OK] Downloaded from scan.coverity.com"
+          else
+            echo "  [WARN] scan.coverity.com user/password download failed, trying fallback source"
+            rm -f "$COVERITY_TARBALL"
+          fi
+        fi
+
+        if [ "$DOWNLOAD_OK" -eq 0 ] && [ -n "${COVERITY_URL:-}" ] && [ -n "${COVERITY_USER:-}" ] && [ -n "${COVERITY_PASSWORD:-}" ]; then
+          echo "  Downloading Coverity from configured COVERITY_URL..."
+          wget --no-proxy -q --user="$COVERITY_USER" --password="$COVERITY_PASSWORD" \
+            -O "$COVERITY_TARBALL" "$COVERITY_URL"
+          DOWNLOAD_OK=1
+          echo "  [OK] Downloaded from COVERITY_URL"
+        fi
+
+        if [ "$DOWNLOAD_OK" -eq 0 ] || [ ! -s "$COVERITY_TARBALL" ]; then
+          echo "ERROR: Coverity download failed."
+          echo "Set either COVERITY_TOKEN (and optionally COVERITY_PROJECT),"
+          echo "or COVERITY_SCAN_USER/COVERITY_SCAN_PASSWORD,"
+          echo "or COVERITY_URL/COVERITY_USER/COVERITY_PASSWORD."
+          exit 1
+        fi
+
+        tar xzf "$COVERITY_TARBALL" --strip-components=1 -C "$COVERITY_DIR"
+        rm -f "$COVERITY_TARBALL"
+
+        if [ ! -x "$COVERITY_DIR/bin/cov-build" ] || [ ! -x "$COVERITY_DIR/bin/cov-configure" ]; then
+          echo "ERROR: Coverity install incomplete (missing cov-build/cov-configure)."
+          exit 1
+        fi
+
         "$COVERITY_DIR/bin/cov-build" --ident | head -1 || true
 
     - name: Run Coverity analysis
+      if: steps.coverity_secrets.outputs.available == 'true'
       shell: bash
       run: |
         export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
@@ -86,6 +166,7 @@ runs:
           --json-output-v8 "$REPORT_DIR/coverity-report.json"
 
     - name: Convert Coverity JSON to SARIF
+      if: steps.coverity_secrets.outputs.available == 'true'
       shell: bash
       run: |
         REPORT_DIR="$GITHUB_WORKSPACE/reports"
@@ -153,4 +234,17 @@ runs:
             json.dump(sarif, f, indent=2)
 
         print(f"Converted {len(results)} Coverity issues to SARIF")
+        EOF
+
+    - name: Write empty SARIF when Coverity is skipped
+      if: steps.coverity_secrets.outputs.available != 'true'
+      shell: bash
+      run: |
+        mkdir -p "$GITHUB_WORKSPACE/reports"
+        cat > "$GITHUB_WORKSPACE/reports/coverity-results.sarif" <<'EOF'
+        {
+          "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+          "version": "2.1.0",
+          "runs": []
+        }
         EOF

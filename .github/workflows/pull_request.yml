@@ -26,6 +26,7 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
+      security-events: write
 
     steps:
       - name: Clean up previous run
@@ -61,6 +62,24 @@ jobs:
 
       - name: cppcheck
         uses: ./.github/actions/analysis/cppcheck
+
+      - name: Coverity Scan
+        uses: ./.github/actions/analysis/coverity
+        env:
+          COVERITY_TOKEN: ${{ secrets.COVERITY_TOKEN }}
+          COVERITY_PROJECT: OpenVisualCloud/directview-led-software-toolkit
+          COVERITY_SCAN_USER: ${{ secrets.COVERITY_SCAN_USER }}
+          COVERITY_SCAN_PASSWORD: ${{ secrets.COVERITY_SCAN_PASSWORD }}
+          COVERITY_URL: ${{ secrets.COVERITY_URL }}
+          COVERITY_USER: ${{ secrets.COVERITY_ARTIFACTORY_USER }}
+          COVERITY_PASSWORD: ${{ secrets.COVERITY_ARTIFACTORY_PASSWORD }}
+
+      - name: Upload SARIF to Security tab
+        uses: github/codeql-action/upload-sarif@ff0a06e83cb2de871e5a09832bc6a81e7276941f # v3.28.18
+        if: always()
+        with:
+          sarif_file: reports/coverity-results.sarif
+          category: coverity
 
       - name: Upload PR reports
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
