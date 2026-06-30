@@ -64,7 +64,7 @@ jobs:
 
           if [ -n "${COVERITY_TOKEN:-}" ]; then
             echo "  Downloading Coverity from scan.coverity.com (token/project mode)..."
-            PROJECT_RAW="${COVERITY_PROJECT:-OpenVisualCloud%2directview-led-software-toolkit}"
+            PROJECT_RAW="${COVERITY_PROJECT:-OpenVisualCloud/directview-led-software-toolkit}"
             if [ -z "$PROJECT_RAW" ]; then
               echo "  [WARN] No project provided via COVERITY_PROJECT or GITHUB_REPOSITORY"
             else
