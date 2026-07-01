@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
 [![CI](https://github.com/OpenVisualCloud/directview-led-software-toolkit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/OpenVisualCloud/directview-led-software-toolkit/actions/workflows/ci.yml)
-[![Coverity Scan](https://scan.coverity.com/projects/OpenVisualCloud-directview-led-software-toolkit/badge.svg)](https://scan.coverity.com/projects/OpenVisualCloud-directview-led-software-toolkit)
+<a href="https://scan.coverity.com/projects/openvisualcloud-directview-led-software-toolkit"><img alt="Coverity Scan Build Status" src="https://scan.coverity.com/projects/33108/badge.svg"/></a>
 [![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20|%2024.04-orange.svg)](https://releases.ubuntu.com/jammy/)
 [![MTL](https://img.shields.io/badge/MTL-v26.01+-green.svg)](https://github.com/OpenVisualCloud/Media-Transport-Library)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/OpenVisualCloud/directview-led-software-toolkit/badge)](https://securityscorecards.dev/viewer/?uri=github.com/OpenVisualCloud/directview-led-software-toolkit)
