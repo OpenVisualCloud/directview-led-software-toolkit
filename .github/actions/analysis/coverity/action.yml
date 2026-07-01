@@ -31,6 +31,7 @@ runs:
         fi
 
     - name: Install Coverity
+      id: install_coverity
       if: steps.coverity_secrets.outputs.available == 'true'
       shell: bash
       env:
@@ -49,6 +50,11 @@ runs:
         if [ -x "$COVERITY_DIR/bin/cov-build" ]; then
           echo "  [OK] Coverity already installed at $COVERITY_DIR"
           "$COVERITY_DIR/bin/cov-build" --ident | head -1 || true
+          if [ -x "$COVERITY_DIR/bin/cov-analyze" ]; then
+            echo "coverity_mode=local" >> "$GITHUB_OUTPUT"
+          else
+            echo "coverity_mode=scan" >> "$GITHUB_OUTPUT"
+          fi
           exit 0
         fi
 
@@ -109,9 +115,21 @@ runs:
 
         "$COVERITY_DIR/bin/cov-build" --ident | head -1 || true
 
+        # Detect whether full Coverity (with cov-analyze) is available
+        if [ -x "$COVERITY_DIR/bin/cov-analyze" ]; then
+          echo "coverity_mode=local" >> "$GITHUB_OUTPUT"
+        else
+          echo "  [INFO] cov-analyze not found; scan.coverity.com build-only package detected."
+          echo "  Build results will be submitted to scan.coverity.com for server-side analysis."
+          echo "coverity_mode=scan" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Run Coverity analysis
       if: steps.coverity_secrets.outputs.available == 'true'
       shell: bash
+      env:
+        COVERITY_TOKEN: ${{ env.COVERITY_TOKEN }}
+        COVERITY_PROJECT: ${{ env.COVERITY_PROJECT }}
       run: |
         export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
         if ! pkg-config --exists mtl 2>/dev/null; then
@@ -133,37 +151,65 @@ runs:
         meson setup build
         $HOME/coverity/bin/cov-build --dir coverity_output/ ninja -C build
 
-        $HOME/coverity/bin/cov-analyze --dir coverity_output/ \
-          --concurrency --enable-constraint-fpp --enable-fnptr --enable-virtual \
-          --disable ASSERT_SIDE_EFFECT \
-          --disable AUTO_CAUSES_COPY \
-          --disable BAD_CHECK_OF_WAIT_COND \
-          --disable BAD_SHIFT \
-          --disable COPY_INSTEAD_OF_MOVE \
-          --disable CUDA.COLLECTIVE_WARP_SHUFFLE_WIDTH \
-          --disable CUDA.CUDEVICE_HANDLES \
-          --disable CUDA.DEVICE_DEPENDENT \
-          --disable CUDA.DEVICE_DEPENDENT_CALLBACKS \
-          --disable CUDA.DIVERGENCE_AT_COLLECTIVE_OPERATION \
-          --disable CUDA.ERROR_INTERFACE \
-          --disable CUDA.ERROR_KERNEL_LAUNCH \
-          --disable CUDA.FORK \
-          --disable CUDA.INACTIVE_THREAD_AT_COLLECTIVE_WARP \
-          --disable CUDA.INITIATION_OBJECT_DEVICE_THREAD_BLOCK \
-          --disable CUDA.INVALID_MEMORY_ACCESS \
-          --disable CUDA.SHARE_FUNCTION \
-          --disable CUDA.SHARE_OBJECT_STREAM_ASSOCIATED \
-          --disable CUDA.SPECIFIERS_INCONSISTENCY \
-          --disable CUDA.SYNCHRONIZE_TERMINATION \
-          --disable INEFFICIENT_RESERVE \
-          --disable MISSING_COMMA \
-          --disable MISSING_MOVE_ASSIGNMENT \
-          --disable OVERLAPPING_COPY \
-          --disable STREAM_FORMAT_STATE \
-          --disable UNINTENDED_INTEGER_DIVISION
+        COVERITY_MODE="${{ steps.install_coverity.outputs.coverity_mode }}"
 
-        $HOME/coverity/bin/cov-format-errors --dir coverity_output/ \
-          --json-output-v8 "$REPORT_DIR/coverity-report.json"
+        if [ "$COVERITY_MODE" = "local" ]; then
+          echo "===== Running local Coverity analysis ====="
+          $HOME/coverity/bin/cov-analyze --dir coverity_output/ \
+            --concurrency --enable-constraint-fpp --enable-fnptr --enable-virtual \
+            --disable ASSERT_SIDE_EFFECT \
+            --disable AUTO_CAUSES_COPY \
+            --disable BAD_CHECK_OF_WAIT_COND \
+            --disable BAD_SHIFT \
+            --disable COPY_INSTEAD_OF_MOVE \
+            --disable CUDA.COLLECTIVE_WARP_SHUFFLE_WIDTH \
+            --disable CUDA.CUDEVICE_HANDLES \
+            --disable CUDA.DEVICE_DEPENDENT \
+            --disable CUDA.DEVICE_DEPENDENT_CALLBACKS \
+            --disable CUDA.DIVERGENCE_AT_COLLECTIVE_OPERATION \
+            --disable CUDA.ERROR_INTERFACE \
+            --disable CUDA.ERROR_KERNEL_LAUNCH \
+            --disable CUDA.FORK \
+            --disable CUDA.INACTIVE_THREAD_AT_COLLECTIVE_WARP \
+            --disable CUDA.INITIATION_OBJECT_DEVICE_THREAD_BLOCK \
+            --disable CUDA.INVALID_MEMORY_ACCESS \
+            --disable CUDA.SHARE_FUNCTION \
+            --disable CUDA.SHARE_OBJECT_STREAM_ASSOCIATED \
+            --disable CUDA.SPECIFIERS_INCONSISTENCY \
+            --disable CUDA.SYNCHRONIZE_TERMINATION \
+            --disable INEFFICIENT_RESERVE \
+            --disable MISSING_COMMA \
+            --disable MISSING_MOVE_ASSIGNMENT \
+            --disable OVERLAPPING_COPY \
+            --disable STREAM_FORMAT_STATE \
+            --disable UNINTENDED_INTEGER_DIVISION
+
+          $HOME/coverity/bin/cov-format-errors --dir coverity_output/ \
+            --json-output-v8 "$REPORT_DIR/coverity-report.json"
+        else
+          echo "===== Submitting build to scan.coverity.com for server-side analysis ====="
+          PROJECT_RAW="${COVERITY_PROJECT:-OpenVisualCloud/directview-led-software-toolkit}"
+          PROJECT_ENCODED="${PROJECT_RAW//\//%2F}"
+          TARBALL="/tmp/coverity-results.tar.gz"
+          tar czf "$TARBALL" coverity_output/
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            --form "token=${COVERITY_TOKEN}" \
+            --form "email=coverity@openvisualcloud.org" \
+            --form "file=@${TARBALL}" \
+            --form "version=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+            --form "description=CI build from branch ${GITHUB_REF_NAME:-unknown}" \
+            "https://scan.coverity.com/builds?project=${PROJECT_ENCODED}")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          rm -f "$TARBALL"
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "  [OK] Build submitted to scan.coverity.com (HTTP $HTTP_CODE)"
+          else
+            echo "  [WARN] Submission returned HTTP $HTTP_CODE: $BODY"
+          fi
+          echo '{"issues":[]}' > "$REPORT_DIR/coverity-report.json"
+          echo "  Results will be available at: https://scan.coverity.com/projects/${PROJECT_ENCODED}"
+        fi
 
     - name: Convert Coverity JSON to SARIF
       if: steps.coverity_secrets.outputs.available == 'true'
@@ -248,3 +294,4 @@ runs:
           "runs": []
         }
         EOF
+
