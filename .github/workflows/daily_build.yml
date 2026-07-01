@@ -9,10 +9,6 @@ on:
   schedule:
     # Run at 10:00 PM UTC, Monday through Friday
     - cron: '0 22 * * 1-5'
-
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions: {}
@@ -25,8 +21,10 @@ jobs:
   build:
     name: Daily Build
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
+      security-events: write # Required to upload SARIF results to GitHub Security tab
 
     steps:
       - name: Clean up previous run
@@ -67,6 +65,27 @@ jobs:
       - name: Trivy Scan
         uses: ./.github/actions/analysis/trivy
 
+      - name: checksec Analysis
+        uses: ./.github/actions/analysis/checksec
+
+      - name: Coverity Scan
+        uses: ./.github/actions/analysis/coverity
+        env:
+          COVERITY_TOKEN: ${{ secrets.COVERITY_TOKEN }}
+          COVERITY_PROJECT: OpenVisualCloud/directview-led-software-toolkit
+          COVERITY_SCAN_USER: ${{ secrets.COVERITY_SCAN_USER }}
+          COVERITY_SCAN_PASSWORD: ${{ secrets.COVERITY_SCAN_PASSWORD }}
+          COVERITY_URL: ${{ secrets.COVERITY_URL }}
+          COVERITY_USER: ${{ secrets.COVERITY_ARTIFACTORY_USER }}
+          COVERITY_PASSWORD: ${{ secrets.COVERITY_ARTIFACTORY_PASSWORD }}
+
+      - name: Upload SARIF to Security tab
+        uses: github/codeql-action/upload-sarif@ff0a06e83cb2de871e5a09832bc6a81e7276941f # v3.28.18
+        if: always()
+        with:
+          sarif_file: reports/coverity-results.sarif
+          category: coverity
+
       - name: Upload daily build reports
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -74,3 +93,63 @@ jobs:
           name: DVLED-SW-TK-DailyBuild-${{ github.run_id }}
           path: ${{ github.workspace }}/reports/
           retention-days: 30
+
+  afl-fuzz:
+    name: Daily AFL Fuzz
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: AFL Fuzz
+        uses: ./.github/actions/analysis/afl-fuzz
+        with:
+          max-seconds: '300'
+
+      - name: Upload AFL fuzzing results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: afl-fuzz-results-${{ github.run_id }}
+          path: fuzz/findings/
+          retention-days: 14
+
+  libfuzzer:
+    name: Daily libFuzzer
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: libFuzzer
+        uses: ./.github/actions/analysis/libfuzzer
+        with:
+          max-seconds: '300'
+
+      - name: Upload libFuzzer corpora
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: libfuzzer-results-${{ github.run_id }}
+          path: |
+            fuzz/libfuzzer_corpus/
+            fuzz/ubsan_corpus/
+          retention-days: 14
+
+

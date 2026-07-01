@@ -1,0 +1,192 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: 'Coverity Scan'
+description: 'Install Coverity, run static analysis, and emit JSON + SARIF reports'
+
+runs:
+  using: composite
+  steps:
+    - name: Detect Coverity credentials
+      id: coverity_secrets
+      shell: bash
+      env:
+        COVERITY_TOKEN: ${{ env.COVERITY_TOKEN }}
+      run: |
+        set -euo pipefail
+        if [ -n "${COVERITY_TOKEN:-}" ]; then
+          echo "available=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "available=false" >> "$GITHUB_OUTPUT"
+          echo "Coverity secrets are not available; skipping Coverity analysis."
+        fi
+
+    - name: Install Coverity
+      if: steps.coverity_secrets.outputs.available == 'true'
+      shell: bash
+      env:
+        COVERITY_TOKEN: ${{ env.COVERITY_TOKEN }}
+      run: |
+        set -euo pipefail
+        echo "===== Coverity Setup ====="
+        COVERITY_DIR="$HOME/coverity"
+        COVERITY_TARBALL="/tmp/coverity.tar.gz"
+
+        if [ -x "$COVERITY_DIR/bin/cov-build" ]; then
+          echo "  [OK] Coverity already installed at $COVERITY_DIR"
+          "$COVERITY_DIR/bin/cov-build" --ident | head -1 || true
+          exit 0
+        fi
+
+        rm -f "$COVERITY_TARBALL"
+        mkdir -p "$COVERITY_DIR"
+
+        echo "  Downloading Coverity from scan.coverity.com..."
+        wget -q --post-data "token=${COVERITY_TOKEN}&project=OpenVisualCloud%2Fdirectview-led-software-toolkit" \
+          -O "$COVERITY_TARBALL" "https://scan.coverity.com/download/linux64"
+
+        if [ ! -s "$COVERITY_TARBALL" ]; then
+          echo "ERROR: Coverity download failed."
+          exit 1
+        fi
+
+        tar xzf "$COVERITY_TARBALL" --strip-components=1 -C "$COVERITY_DIR"
+        rm -f "$COVERITY_TARBALL"
+
+        if [ ! -x "$COVERITY_DIR/bin/cov-build" ]; then
+          echo "ERROR: Coverity install incomplete (missing cov-build)."
+          exit 1
+        fi
+
+        echo "  [OK] Downloaded from scan.coverity.com"
+        "$COVERITY_DIR/bin/cov-build" --ident | head -1 || true
+
+    - name: Run Coverity analysis
+      if: steps.coverity_secrets.outputs.available == 'true'
+      shell: bash
+      env:
+        COVERITY_TOKEN: ${{ env.COVERITY_TOKEN }}
+      run: |
+        set -euo pipefail
+        export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
+        if ! pkg-config --exists mtl 2>/dev/null; then
+          MTL_PC=$(find /usr /home /opt -name "mtl.pc" 2>/dev/null | head -1)
+          if [ -z "$MTL_PC" ]; then
+            echo "ERROR: MTL pkg-config file not found."
+            exit 1
+          fi
+          MTL_PC_DIR=$(dirname "$MTL_PC")
+          echo "Found MTL pkgconfig at: $MTL_PC_DIR"
+          export PKG_CONFIG_PATH="${MTL_PC_DIR}:${PKG_CONFIG_PATH}"
+        fi
+
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
+        mkdir -p "$REPORT_DIR"
+
+        $HOME/coverity/bin/cov-configure --compiler cc --comptype gcc --template
+        rm -rf build cov-int
+        meson setup build
+        $HOME/coverity/bin/cov-build --dir cov-int ninja -C build
+
+        echo "===== Submitting build to scan.coverity.com ====="
+        tail cov-int/build-log.txt
+        tar czf /tmp/cov-int.tar.gz cov-int/
+        ls -lh /tmp/cov-int.tar.gz
+
+        curl --form "token=${COVERITY_TOKEN}" \
+          --form "email=karthik.d.m@intel.com" \
+          --form "file=@/tmp/cov-int.tar.gz" \
+          --form "version=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+          --form "description=CI build from branch ${GITHUB_REF_NAME:-unknown}" \
+          "https://scan.coverity.com/builds?project=OpenVisualCloud%2Fdirectview-led-software-toolkit"
+
+        rm -f /tmp/cov-int.tar.gz
+        echo '{"issues":[]}' > "$REPORT_DIR/coverity-report.json"
+        echo "  Results will be available at: https://scan.coverity.com/projects/openvisualcloud-directview-led-software-toolkit"
+
+    - name: Convert Coverity JSON to SARIF
+      if: steps.coverity_secrets.outputs.available == 'true'
+      shell: bash
+      run: |
+        REPORT_DIR="$GITHUB_WORKSPACE/reports"
+        python3 - <<'EOF'
+        import json, sys
+
+        sarif = {
+            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [{
+                "tool": {
+                    "driver": {
+                        "name": "Coverity",
+                        "informationUri": "https://www.synopsys.com/software-integrity/security-testing/static-analysis-sast.html",
+                        "rules": []
+                    }
+                },
+                "results": []
+            }]
+        }
+
+        try:
+            with open("reports/coverity-report.json") as f:
+                cov = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            with open("reports/coverity-results.sarif", "w") as f:
+                json.dump(sarif, f, indent=2)
+            sys.exit(0)
+
+        rules_map = {}
+        results = []
+
+        for issue in cov.get("issues", []):
+            checker = issue.get("checkerName", "unknown")
+            if checker not in rules_map:
+                rule_idx = len(rules_map)
+                rules_map[checker] = rule_idx
+                sarif["runs"][0]["tool"]["driver"]["rules"].append({
+                    "id": checker,
+                    "shortDescription": {"text": issue.get("checkerProperties", {}).get("subcategoryShortDescription", checker)},
+                    "helpUri": f"https://community.synopsys.com/s/article/{checker}"
+                })
+
+            events = issue.get("events", [])
+            main_event = events[0] if events else {}
+            file_path = main_event.get("strippedFilePathname", main_event.get("filePathname", "unknown"))
+            line = main_event.get("lineNumber", 1)
+
+            results.append({
+                "ruleId": checker,
+                "ruleIndex": rules_map[checker],
+                "level": "warning",
+                "message": {"text": issue.get("checkerProperties", {}).get("subcategoryLongDescription", checker)},
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": file_path, "uriBaseId": "%SRCROOT%"},
+                        "region": {"startLine": line}
+                    }
+                }]
+            })
+
+        sarif["runs"][0]["results"] = results
+
+        with open("reports/coverity-results.sarif", "w") as f:
+            json.dump(sarif, f, indent=2)
+
+        print(f"Converted {len(results)} Coverity issues to SARIF")
+        EOF
+
+    - name: Write empty SARIF when Coverity is skipped
+      if: steps.coverity_secrets.outputs.available != 'true'
+      shell: bash
+      run: |
+        mkdir -p "$GITHUB_WORKSPACE/reports"
+        cat > "$GITHUB_WORKSPACE/reports/coverity-results.sarif" <<'EOF'
+        {
+          "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+          "version": "2.1.0",
+          "runs": []
+        }
+        EOF
+

@@ -14,7 +14,7 @@ inputs:
   mtl-version:
     description: 'MTL release tag to build'
     required: false
-    default: 'v26.01'
+    default: 'ffmpeg-plugin-extra-pixel-format'
   ffmpeg-version:
     description: 'FFmpeg release branch to build'
     required: false
