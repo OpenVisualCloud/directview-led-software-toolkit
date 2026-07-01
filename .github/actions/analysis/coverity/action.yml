@@ -39,7 +39,6 @@ runs:
         COVERITY_USER: ${{ env.COVERITY_USER }}
         COVERITY_PASSWORD: ${{ env.COVERITY_PASSWORD }}
         COVERITY_TOKEN: ${{ env.COVERITY_TOKEN }}
-        COVERITY_PROJECT: ${{ env.COVERITY_PROJECT }}
         COVERITY_SCAN_USER: ${{ env.COVERITY_SCAN_USER }}
         COVERITY_SCAN_PASSWORD: ${{ env.COVERITY_SCAN_PASSWORD }}
       run: |
@@ -47,14 +46,17 @@ runs:
         echo "===== Coverity Setup ====="
         COVERITY_DIR="$HOME/coverity"
         COVERITY_TARBALL="/tmp/coverity.tar.gz"
+
+        # Determine mode based on credentials provided
+        if [ -n "${COVERITY_URL:-}" ] && [ -n "${COVERITY_USER:-}" ] && [ -n "${COVERITY_PASSWORD:-}" ]; then
+          echo "coverity_mode=local" >> "$GITHUB_OUTPUT"
+        else
+          echo "coverity_mode=scan" >> "$GITHUB_OUTPUT"
+        fi
+
         if [ -x "$COVERITY_DIR/bin/cov-build" ]; then
           echo "  [OK] Coverity already installed at $COVERITY_DIR"
           "$COVERITY_DIR/bin/cov-build" --ident | head -1 || true
-          if [ -x "$COVERITY_DIR/bin/cov-analyze" ]; then
-            echo "coverity_mode=local" >> "$GITHUB_OUTPUT"
-          else
-            echo "coverity_mode=scan" >> "$GITHUB_OUTPUT"
-          fi
           exit 0
         fi
 
@@ -65,12 +67,11 @@ runs:
 
         if [ -n "${COVERITY_TOKEN:-}" ]; then
           echo "  Downloading Coverity from scan.coverity.com (token/project mode)..."
-          PROJECT_RAW="${COVERITY_PROJECT:-OpenVisualCloud/directview-led-software-toolkit}"
-          PROJECT_ENCODED="${PROJECT_RAW//\//%2F}"
+          PROJECT_ENCODED="OpenVisualCloud%2Fdirectview-led-software-toolkit"
           if wget -q --post-data "token=${COVERITY_TOKEN}&project=${PROJECT_ENCODED}" \
             -O "$COVERITY_TARBALL" "https://scan.coverity.com/download/linux64"; then
             DOWNLOAD_OK=1
-            echo "  [OK] Downloaded from scan.coverity.com for project ${PROJECT_RAW}"
+            echo "  [OK] Downloaded from scan.coverity.com"
           else
             echo "  [WARN] scan.coverity.com token/project download failed, trying fallback source"
             rm -f "$COVERITY_TARBALL"
@@ -99,7 +100,7 @@ runs:
 
         if [ "$DOWNLOAD_OK" -eq 0 ] || [ ! -s "$COVERITY_TARBALL" ]; then
           echo "ERROR: Coverity download failed."
-          echo "Set either COVERITY_TOKEN (and optionally COVERITY_PROJECT),"
+          echo "Set either COVERITY_TOKEN,"
           echo "or COVERITY_SCAN_USER/COVERITY_SCAN_PASSWORD,"
           echo "or COVERITY_URL/COVERITY_USER/COVERITY_PASSWORD."
           exit 1
@@ -108,29 +109,20 @@ runs:
         tar xzf "$COVERITY_TARBALL" --strip-components=1 -C "$COVERITY_DIR"
         rm -f "$COVERITY_TARBALL"
 
-        if [ ! -x "$COVERITY_DIR/bin/cov-build" ] || [ ! -x "$COVERITY_DIR/bin/cov-configure" ]; then
-          echo "ERROR: Coverity install incomplete (missing cov-build/cov-configure)."
+        if [ ! -x "$COVERITY_DIR/bin/cov-build" ]; then
+          echo "ERROR: Coverity install incomplete (missing cov-build)."
           exit 1
         fi
 
         "$COVERITY_DIR/bin/cov-build" --ident | head -1 || true
-
-        # Detect whether full Coverity (with cov-analyze) is available
-        if [ -x "$COVERITY_DIR/bin/cov-analyze" ]; then
-          echo "coverity_mode=local" >> "$GITHUB_OUTPUT"
-        else
-          echo "  [INFO] cov-analyze not found; scan.coverity.com build-only package detected."
-          echo "  Build results will be submitted to scan.coverity.com for server-side analysis."
-          echo "coverity_mode=scan" >> "$GITHUB_OUTPUT"
-        fi
 
     - name: Run Coverity analysis
       if: steps.coverity_secrets.outputs.available == 'true'
       shell: bash
       env:
         COVERITY_TOKEN: ${{ env.COVERITY_TOKEN }}
-        COVERITY_PROJECT: ${{ env.COVERITY_PROJECT }}
       run: |
+        set -euo pipefail
         export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
         if ! pkg-config --exists mtl 2>/dev/null; then
           MTL_PC=$(find /usr /home /opt -name "mtl.pc" 2>/dev/null | head -1)
@@ -188,27 +180,20 @@ runs:
             --json-output-v8 "$REPORT_DIR/coverity-report.json"
         else
           echo "===== Submitting build to scan.coverity.com for server-side analysis ====="
-          PROJECT_RAW="${COVERITY_PROJECT:-OpenVisualCloud/directview-led-software-toolkit}"
-          PROJECT_ENCODED="${PROJECT_RAW//\//%2F}"
-          TARBALL="/tmp/coverity-results.tar.gz"
-          tar czf "$TARBALL" coverity_output/
-          RESPONSE=$(curl -s -w "\n%{http_code}" \
-            --form "token=${COVERITY_TOKEN}" \
+          tail coverity_output/build-log.txt
+          tar czf /tmp/coverity-results.tar.gz coverity_output/
+          ls -lh /tmp/coverity-results.tar.gz
+
+          curl --form "token=${COVERITY_TOKEN}" \
             --form "email=coverity@openvisualcloud.org" \
-            --form "file=@${TARBALL}" \
+            --form "file=@/tmp/coverity-results.tar.gz" \
             --form "version=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
             --form "description=CI build from branch ${GITHUB_REF_NAME:-unknown}" \
-            "https://scan.coverity.com/builds?project=${PROJECT_ENCODED}")
-          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
-          rm -f "$TARBALL"
-          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-            echo "  [OK] Build submitted to scan.coverity.com (HTTP $HTTP_CODE)"
-          else
-            echo "  [WARN] Submission returned HTTP $HTTP_CODE: $BODY"
-          fi
+            "https://scan.coverity.com/builds?project=OpenVisualCloud%2Fdirectview-led-software-toolkit"
+
+          rm -f /tmp/coverity-results.tar.gz
           echo '{"issues":[]}' > "$REPORT_DIR/coverity-report.json"
-          echo "  Results will be available at: https://scan.coverity.com/projects/${PROJECT_ENCODED}"
+          echo "  Results will be available at: https://scan.coverity.com/projects/OpenVisualCloud%2Fdirectview-led-software-toolkit"
         fi
 
     - name: Convert Coverity JSON to SARIF
