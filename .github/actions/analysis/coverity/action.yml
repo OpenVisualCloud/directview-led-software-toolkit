@@ -86,23 +86,23 @@ runs:
         mkdir -p "$REPORT_DIR"
 
         $HOME/coverity/bin/cov-configure --compiler cc --comptype gcc --template
-        rm -rf build coverity_output
+        rm -rf build cov-int
         meson setup build
-        $HOME/coverity/bin/cov-build --dir coverity_output/ ninja -C build
+        $HOME/coverity/bin/cov-build --dir cov-int ninja -C build
 
         echo "===== Submitting build to scan.coverity.com ====="
-        tail coverity_output/build-log.txt
-        tar czf /tmp/coverity-results.tar.gz coverity_output/
-        ls -lh /tmp/coverity-results.tar.gz
+        tail cov-int/build-log.txt
+        tar czf /tmp/cov-int.tar.gz cov-int/
+        ls -lh /tmp/cov-int.tar.gz
 
         curl --form "token=${COVERITY_TOKEN}" \
           --form "email=karthik.d.m@intel.com" \
-          --form "file=@/tmp/coverity-results.tar.gz" \
+          --form "file=@/tmp/cov-int.tar.gz" \
           --form "version=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
           --form "description=CI build from branch ${GITHUB_REF_NAME:-unknown}" \
           "https://scan.coverity.com/builds?project=OpenVisualCloud%2Fdirectview-led-software-toolkit"
 
-        rm -f /tmp/coverity-results.tar.gz
+        rm -f /tmp/cov-int.tar.gz
         echo '{"issues":[]}' > "$REPORT_DIR/coverity-report.json"
         echo "  Results will be available at: https://scan.coverity.com/projects/openvisualcloud-directview-led-software-toolkit"
 
