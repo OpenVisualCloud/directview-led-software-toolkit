@@ -96,7 +96,7 @@ runs:
         ls -lh /tmp/coverity-results.tar.gz
 
         curl --form "token=${COVERITY_TOKEN}" \
-          --form "email=coverity@openvisualcloud.org" \
+          --form "email=karthik.d.m@intel.com" \
           --form "file=@/tmp/coverity-results.tar.gz" \
           --form "version=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
           --form "description=CI build from branch ${GITHUB_REF_NAME:-unknown}" \
