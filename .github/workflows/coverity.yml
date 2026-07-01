@@ -7,16 +7,11 @@ name: Coverity Scan
 
 on:
   workflow_dispatch:
-    inputs:
-      branch:
-        description: 'Branch to scan'
-        required: true
-        default: 'main'
 
 permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.branch || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -38,7 +33,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ inputs.branch || github.ref }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
