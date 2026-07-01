@@ -44,7 +44,7 @@ runs:
         mkdir -p "$COVERITY_DIR"
 
         echo "  Downloading Coverity from scan.coverity.com..."
-        PROJECT_ENCODED="OpenVisualCloud%2Fdirectview-led-software-toolkit"
+        PROJECT_ENCODED="openvisualcloud-directview-led-software-toolkit"
         wget -q --post-data "token=${COVERITY_TOKEN}&project=${PROJECT_ENCODED}" \
           -O "$COVERITY_TARBALL" "https://scan.coverity.com/download/linux64"
 
@@ -101,11 +101,11 @@ runs:
           --form "file=@/tmp/coverity-results.tar.gz" \
           --form "version=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
           --form "description=CI build from branch ${GITHUB_REF_NAME:-unknown}" \
-          "https://scan.coverity.com/builds?project=OpenVisualCloud%2Fdirectview-led-software-toolkit"
+          "https://scan.coverity.com/builds?project=openvisualcloud-directview-led-software-toolkit"
 
         rm -f /tmp/coverity-results.tar.gz
         echo '{"issues":[]}' > "$REPORT_DIR/coverity-report.json"
-        echo "  Results will be available at: https://scan.coverity.com/projects/OpenVisualCloud%2Fdirectview-led-software-toolkit"
+        echo "  Results will be available at: https://scan.coverity.com/projects/openvisualcloud-directview-led-software-toolkit"
 
     - name: Convert Coverity JSON to SARIF
       if: steps.coverity_secrets.outputs.available == 'true'
