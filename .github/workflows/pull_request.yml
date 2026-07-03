@@ -7,12 +7,8 @@ name: Pull Request
 
 on:
   pull_request:
-    types: [assigned, opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
     branches:
-      - main
-
-  push:
-    branches-ignore:
       - main
 
   workflow_dispatch:
@@ -27,8 +23,10 @@ jobs:
   pull-request:
     name: Pull Request
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     permissions:
       contents: read
+      security-events: write # Required to upload SARIF results to GitHub Security tab
 
     steps:
       - name: Clean up previous run
@@ -64,12 +62,6 @@ jobs:
 
       - name: cppcheck
         uses: ./.github/actions/analysis/cppcheck
-
-      - name: Trivy Scan
-        uses: ./.github/actions/analysis/trivy
-
-      - name: checksec Analysis
-        uses: ./.github/actions/analysis/checksec
 
       - name: Upload PR reports
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

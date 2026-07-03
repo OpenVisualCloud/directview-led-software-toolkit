@@ -30,6 +30,8 @@ struct dvledtx_config {
   /* video block */
   uint32_t width;
   uint32_t height;
+  uint32_t scale_width;   /* 0 = no scaling (use source width) */
+  uint32_t scale_height;  /* 0 = no scaling (use source height) */
   int      fps;
   char     fmt[32];         /* e.g. "yuv422p10le" */
   char     tx_url[256];

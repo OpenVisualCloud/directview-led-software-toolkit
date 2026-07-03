@@ -37,6 +37,8 @@ struct dvledtx_context {
   /* Video parameters */
   uint32_t width;
   uint32_t height;
+  uint32_t scale_width;       /* output width after scaling (0 = no scaling) */
+  uint32_t scale_height;      /* output height after scaling (0 = no scaling) */
   int fps;                    /* frames per second: 25, 30, 50, 60 */
   enum AVPixelFormat fmt;     /* e.g. AV_PIX_FMT_YUV422P10LE */
 
