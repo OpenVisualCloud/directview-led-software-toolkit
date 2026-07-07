@@ -18,6 +18,7 @@
 - [Usage](#usage)
   - [Binding Ethernet Controller to DPDK PMD and Hugepage Setup](#binding-ethernet-controller-to-dpdk-pmd-and-hugepage-setup)
   - [JSON Configuration](#json-configuration)
+    - [Screen capture on a headless machine (no physical monitor)](#screen-capture-on-a-headless-machine-no-physical-monitor)
 - [Logging](#logging)
 - [Command-Line Options](#command-line-options)
 - [Supported Formats](#supported-formats)
@@ -93,6 +94,19 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
     - [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md#2-dpdk-build-and-install)
     - [Build and install MTL](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md#3-build-media-transport-library-and-app)
 - [FFmpeg 7.0 with MTL Plugin](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/ecosystem/ffmpeg_plugin/README.md#1-build)
+  - **Screen capture support (`input_mode: screen_capture`) requires FFmpeg's `x11grab` device.** It is auto-detected and compiled in by FFmpeg's `./configure` script, but only if these packages are installed *before* building FFmpeg:
+    ```bash
+    sudo apt-get install -y libx11-dev libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev
+    ```
+    After building, verify support with:
+    ```bash
+    ffmpeg -devices | grep x11grab
+    ```
+    If this prints nothing, FFmpeg needs to be reconfigured/rebuilt after installing the packages above — screen capture will otherwise fail at runtime with `x11grab input format not found`.
+  - **Headless machines (no physical monitor)** additionally need a virtual display to capture from — see [Screen capture on a headless machine](#screen-capture-on-a-headless-machine-no-physical-monitor) below, which requires:
+    ```bash
+    sudo apt-get install -y xvfb ubuntu-desktop
+    ```
 
 ### Build Steps
 
