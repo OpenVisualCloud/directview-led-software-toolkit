@@ -352,8 +352,12 @@ int open_shared_ffmpeg(struct shared_decode_ctx* dec, const char* filename) {
   const struct dvledtx_context* app = dec->app;
   int target_w = (int)(app->scale_width  > 0 ? app->scale_width  : app->width);
   int target_h = (int)(app->scale_height > 0 ? app->scale_height : app->height);
+  /* filename may be empty when screen capture is enabled (app->tx_url is
+   * not required in that mode); use the screen_input descriptor instead so
+   * log messages stay meaningful. */
+  const char* effective_source = app->use_screen_capture ? app->screen_input : filename;
   return open_ffmpeg_decoder(
-    filename, "Shared decode",
+    effective_source, "Shared decode",
     app->use_screen_capture, app->screen_input, (int)app->width, (int)app->height, app->fps,
     app->fmt, target_w, target_h,
     &dec->fmt_ctx, &dec->codec_ctx, &dec->sws_ctx,

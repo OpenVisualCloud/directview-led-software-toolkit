@@ -516,21 +516,16 @@ int validate_tx_config(const struct dvledtx_config* config) {
         return -1;
     }
 
-    /* Video source validation */
-    if (strcmp(config->input_mode, "screen_capture") == 0) {
-        if (config->screen_input[0] == '\0') {
-            LOG_ERROR("video.screen_input must be non-empty for screen_capture mode");
+    /* Video source file validation — screen_input was already validated
+     * above in the "Input mode validation" block, so only check the file
+     * path here when not in screen-capture mode. */
+    if (strcmp(config->input_mode, "screen_capture") != 0 && config->tx_url[0] != '\0') {
+        FILE* f = fopen(config->tx_url, "rb");
+        if (!f) {
+            LOG_ERROR("video source file not found: %s", config->tx_url);
             return -1;
         }
-    } else {
-        if (config->tx_url[0] != '\0') {
-            FILE* f = fopen(config->tx_url, "rb");
-            if (!f) {
-                LOG_ERROR("video source file not found: %s", config->tx_url);
-                return -1;
-            }
-            fclose(f);
-        }
+        fclose(f);
     }
 
     /* Session validation */

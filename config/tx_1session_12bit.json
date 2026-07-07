@@ -9,9 +9,11 @@
   "video": {
     "width":  1920,
     "height": 1080,
-    "fps":    30,
-    "fmt":    "yuv422p12le",
     "tx_url": "bbb_sunflower_1080p_30fps_normal.mp4"
+  },
+  "tx_video": {
+    "fps": 30,
+    "fmt": "yuv422p12le"
   },
   "tx_sessions": [
     {

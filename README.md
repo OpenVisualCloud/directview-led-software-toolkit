@@ -157,7 +157,8 @@ dvledtx uses a JSON config file with three sections:
 | | `payload_type` | (Optional) RTP payload type — defaults to `96` if not present |
 | | `crop` | Region to transmit: `x`, `y`, `w`, `h` in pixels |
 
-Example (`config/tx_fullhd_single_session.json`):
+#### Example: MP4 file input (`config/tx_fullhd_single_session.json`)
+
 ```json
 {
   "log_file": "dvledtx.log",
@@ -179,39 +180,11 @@ Example (`config/tx_fullhd_single_session.json`):
 
 Multiple sessions can be defined in `tx_sessions` to transmit different crop regions of the same video simultaneously (see `config/tx_fullhd_multi_session.json`).
 
-Example screen-capture input (`config/tx_fullhd_screen_capture.json`):
-```json
-{
-  "interfaces": [
-    { "name": "0000:06:00.0", "sip": "192.168.50.29", "dip": "239.168.85.20" }
-  ],
-  "video": {
-    "width": 1920,
-    "height": 1080,
-    "input_mode": "screen_capture",
-    "screen_input": ":0.0+0,0"
-  },
-  "tx_video": {
-    "fps": 30,
-    "fmt": "yuv422p10le"
-  },
-  "tx_sessions": [
-    { "udp_port": 20000, "crop": { "x": 0, "y": 0, "w": 1920, "h": 1080 } }
-  ]
-}
-```
-
-`screen_input` follows FFmpeg's `x11grab` URL syntax: `<display>[+<x>,<y>]` (e.g. `:0.0+0,0` captures display `:0` starting at offset `0,0`). The capture resolution/framerate are taken from the `width`/`height`/`fps` fields above.
-
 #### Screen capture on a headless machine (no physical monitor)
 
 `x11grab` needs a real X11 display to attach to — it does not work against a raw framebuffer or DRM device. On a machine with no monitor connected, create a virtual display with `Xvfb` and run a desktop session on it so there's actual content to capture:
 
-1. **Install prerequisites** (once):
-   ```bash
-   sudo apt-get install -y xvfb ubuntu-desktop
-   ```
-   FFmpeg itself must also be built with `x11grab` support — this requires `libxcb1-dev`, `libxcb-shm0-dev`, and `libxcb-xfixes0-dev` to be present when FFmpeg's `./configure` runs (it auto-detects them, no explicit `--enable-x11grab` flag needed). Verify with `ffmpeg -devices | grep x11grab`.
+1. **Install prerequisites** (once): see [Software Requirements](#software-requirements) for the `xvfb`/`ubuntu-desktop` packages and the `x11grab`-enabled FFmpeg build.
 
 2. **Start a virtual display** at the resolution you intend to transmit:
    ```bash
@@ -230,23 +203,41 @@ Example screen-capture input (`config/tx_fullhd_screen_capture.json`):
    DISPLAY=:99 ffmpeg -f x11grab -video_size 1920x1080 -i :99.0+0,0 -frames:v 1 -update 1 /tmp/check.png
    ```
 
-4. **Point `screen_input` at the virtual display** (see `config/tx_fullhd_virtual_display.json`):
-   ```json
-   "screen_input": ":99.0+0,0"
-   ```
+#### Example: screen-capture input (`config/tx_fullhd_screen_capture.json`)
 
-5. **Run dvledtx** as usual — `x11grab` will capture whatever is rendered on `:99` (desktop, windows, applications) and transmit it, exactly as it would for a physical display:
-   ```bash
-   ./build/dvledtx --config config/tx_fullhd_virtual_display.json
-   ```
+```json
+{
+  "interfaces": [
+    { "name": "0000:06:00.0", "sip": "192.168.50.29", "dip": "239.168.85.20" }
+  ],
+  "video": {
+    "width": 1920,
+    "height": 1080,
+    "input_mode": "screen_capture",
+    "screen_input": ":99.0+0,0"
+  },
+  "tx_video": {
+    "fps": 30,
+    "fmt": "yuv422p10le"
+  },
+  "tx_sessions": [
+    { "udp_port": 20000, "crop": { "x": 0, "y": 0, "w": 1920, "h": 1080 } }
+  ]
+}
+```
 
-6. **Tear down** when done:
-   ```bash
-   pkill -f "gnome-session --session=ubuntu"
-   pkill -f "Xvfb :99"
-   ```
+`screen_input` follows FFmpeg's `x11grab` URL syntax: `<display>[+<x>,<y>]` (e.g. `:99.0+0,0` captures display `:99`, matching the virtual display created above, starting at offset `0,0`). The capture resolution/framerate are taken from the `width`/`height`/`fps` fields above.
 
-A lighter-weight alternative to a full GNOME session is a minimal window manager (e.g. `xfce4`), which starts faster and uses less memory if you only need a generic desktop background rather than the full Ubuntu shell.
+Run dvledtx as usual — `x11grab` will capture whatever is rendered on the display (desktop, windows, applications) and transmit it, exactly as it would for a physical display:
+```bash
+./build/dvledtx --config config/tx_fullhd_screen_capture.json
+```
+
+**Tear down** the virtual display when done:
+```bash
+pkill -f "gnome-session --session=ubuntu"
+pkill -f "Xvfb :99"
+```
 
 ## Logging
 

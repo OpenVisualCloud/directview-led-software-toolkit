@@ -10,7 +10,7 @@
     "width": 1920,
     "height": 1080,
     "input_mode": "screen_capture",
-    "screen_input": ":0.0+0,0"
+    "screen_input": ":99.0+0,0"
   },
   "tx_video": {
     "fps": 30,

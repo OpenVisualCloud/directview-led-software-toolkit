@@ -1,2 +1,2 @@
-option('enable_mtl_tx', type: 'boolean', value: true,
+option('enable_mtl_tx', type: 'boolean', value: false,
   description: 'Use MTL pipeline APIs (st20p_tx_get_frame / st20p_tx_put_frame) directly for TX instead of the FFmpeg mtl_st20p libavdevice muxer. When enabled: links libmtl, defines -DENABLE_MTL_TX, and bypasses avformat_write_header / av_write_frame on the TX path. When disabled (default): the existing FFmpeg mtl_st20p muxer path is used.')
