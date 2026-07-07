@@ -2,7 +2,7 @@
   "log_file": "dvledtx.log",
   "interfaces": [
     {
-      "name": "0000:06:00.0",
+      "name": "0000:03:00.1",
       "sip":  "192.168.50.29",
       "dip":  "239.168.85.20"
     }
@@ -10,7 +10,7 @@
   "video": {
     "width":  2560,
     "height": 1440,
-    "tx_url": "bbb_sunflower_1080p_30fps_normal.mp4"
+    "tx_url": "ball_2k_yuv420p_30fps_5min.mp4"
   },
   "tx_video": {
     "scale_width":  2560,
@@ -21,14 +21,17 @@
   "tx_sessions": [
     {
       "udp_port":     20000,
+      "payload_type": 96,
       "crop": { "x": 0,    "y": 0, "w": 854, "h": 1440 }
     },
     {
       "udp_port":     20002,
+      "payload_type": 96,
       "crop": { "x": 854,  "y": 0, "w": 854, "h": 1440 }
     },
     {
       "udp_port":     20004,
+      "payload_type": 96,
       "crop": { "x": 1708, "y": 0, "w": 852, "h": 1440 }
     }
   ]

@@ -7,24 +7,17 @@
 /*
  * mtl_tx.h — public API for the direct MTL pipeline TX path.
  *
- * When -DENABLE_MTL_TX is set, dvledtx transmits frames by calling the MTL
- * pipeline API directly (st20p_tx_get_frame / st20p_tx_put_frame) instead
- * of going through the FFmpeg libavdevice mtl_st20p muxer.
+ * mtl_tx_init() / mtl_tx_uninit() are declared unconditionally so that the
+ * FFmpeg avdevice path can also pre-initialise MTL with ALL NIC ports before
+ * opening any mtl_st20p session.  Without this, DPDK EAL is initialised by
+ * the first avformat_write_header() call with only one port, causing
+ * "mt_port_by_name … is not valid" for every subsequent NIC.
  *
- * This file declares:
- *   - Format mapping helpers (AVPixelFormat → MTL enums).
- *   - mtl_copy_crop_to_frame(): copies a crop rectangle from a decoded
- *     AVFrame into an MTL st_frame DMA buffer.
- *   - mtl_tx_init() / mtl_tx_uninit(): MTL library lifecycle.
- *   - mtl_tx_session_create() / mtl_tx_session_free(): per-session lifecycle.
- *   - mtl_tx_send_yuv_frame(): decoded frame crop-and-send via MTL API.
- *   - mtl_tx_send_raw_yuv(): raw YUV buffer send via MTL API.
+ * All other symbols (format helpers, session create/free, send functions)
+ * are only needed when ENABLE_MTL_TX is defined.
  *
  * Implementation: src/mtl/mtl_tx.c
- * Only compiled when ENABLE_MTL_TX is defined.
  */
-
-#ifdef ENABLE_MTL_TX
 
 #include "mtl_api.h"
 #include "st_pipeline_api.h"
@@ -35,6 +28,25 @@
 struct dvledtx_context;
 struct st20p_tx_ctx;
 typedef struct session_manager_s session_manager_t;
+
+/* -------------------------------------------------------------------------
+ * MTL library lifecycle — always available (FFmpeg and direct-MTL paths)
+ * ---------------------------------------------------------------------- */
+
+/*
+ * mtl_tx_init() — initialise the MTL/DPDK library with ALL ports from app.
+ *   Must be called once before any TX session (FFmpeg or direct) is opened.
+ *   Stores the handle in manager->mtl.
+ * Returns 0 on success, -1 on failure.
+ */
+int  mtl_tx_init(session_manager_t* manager, struct dvledtx_context* app);
+
+/*
+ * mtl_tx_uninit() — release the MTL library instance stored in manager->mtl.
+ */
+void mtl_tx_uninit(session_manager_t* manager);
+
+#ifdef ENABLE_MTL_TX
 
 /* -------------------------------------------------------------------------
  * Format mapping
@@ -73,22 +85,6 @@ void mtl_copy_crop_to_frame(struct st_frame* dst, const AVFrame* src,
                              int crop_x, int crop_y,
                              int crop_w, int crop_h,
                              enum AVPixelFormat fmt);
-
-/* -------------------------------------------------------------------------
- * MTL library lifecycle
- * ---------------------------------------------------------------------- */
-
-/*
- * mtl_tx_init() — initialise the MTL library with parameters from app.
- *   Stores the handle in manager->mtl.
- * Returns 0 on success, -1 on failure.
- */
-int  mtl_tx_init(session_manager_t* manager, struct dvledtx_context* app);
-
-/*
- * mtl_tx_uninit() — release the MTL library instance stored in manager->mtl.
- */
-void mtl_tx_uninit(session_manager_t* manager);
 
 /* -------------------------------------------------------------------------
  * Per-session TX session lifecycle

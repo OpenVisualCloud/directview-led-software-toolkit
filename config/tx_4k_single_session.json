@@ -15,12 +15,13 @@
   "tx_video": {
     "scale_width":  900,
     "scale_height": 600,
-    "fps":    30,
-    "fmt":    "yuv422p10le"
+    "fps":    60,
+    "fmt":    "gbrp10le"
   },
   "tx_sessions": [
     {
       "udp_port":     20000,
+      "payload_type": 96,
       "crop": { "x": 0, "y": 0, "w": 900, "h": 600 }
     }
   ]

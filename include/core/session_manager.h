@@ -16,9 +16,11 @@
 #include <libavutil/imgutils.h>
 #include <libswscale/swscale.h>
 
-/* MTL pipeline API headers — only when building the direct MTL TX path */
-#ifdef ENABLE_MTL_TX
+/* MTL API headers — always included; mtl_tx_init/uninit are always compiled
+ * to allow pre-initialising all NIC ports regardless of TX path. */
 #include "mtl_api.h"
+
+#ifdef ENABLE_MTL_TX
 #include "st_pipeline_api.h"
 #endif
 
@@ -120,9 +122,7 @@ typedef struct session_manager_s {
 
   struct shared_decode_ctx* shared_dec;
 
-#ifdef ENABLE_MTL_TX
   mtl_handle mtl;   /* MTL library instance — owns all st20p_tx sessions */
-#endif
 
   bool running;
 } session_manager_t;

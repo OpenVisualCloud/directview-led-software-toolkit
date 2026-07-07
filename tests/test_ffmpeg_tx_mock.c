@@ -158,17 +158,19 @@ fail_enc:
 static void fill_app_16x16(struct dvledtx_context* app, int sessions)
 {
     memset(app, 0, sizeof(*app));
-    strncpy(app->port,         "0000:06:00.0",  sizeof(app->port) - 1);
-    strncpy(app->sip_addr_str, "192.168.50.29", sizeof(app->sip_addr_str) - 1);
-    strncpy(app->dip_addr_str, "239.168.85.20", sizeof(app->dip_addr_str) - 1);
+
+    dvledtx_context_alloc(app, 1, sessions);
+
+    strncpy(app->nics[0].port,         "0000:06:00.0",  sizeof(app->nics[0].port) - 1);
+    strncpy(app->nics[0].sip_addr_str, "192.168.50.29", sizeof(app->nics[0].sip_addr_str) - 1);
+    strncpy(app->nics[0].dip_addr_str, "239.168.85.20", sizeof(app->nics[0].dip_addr_str) - 1);
     app->width          = 16;
     app->height         = 16;
     app->fps            = 25;
     app->fmt            = AV_PIX_FMT_YUV422P10LE;
     app->udp_port       = 20000;
     app->payload_type   = 96;
-    app->st20p_sessions = sessions;
-    for (int i = 0; i < sessions && i < MAX_TX_SESSIONS; i++) {
+    for (int i = 0; i < sessions; i++) {
         app->session_net[i].udp_port     = 20000 + i * 2;
         app->session_net[i].payload_type = 96;
         app->session_net[i].crop_w       = 16;
@@ -216,7 +218,7 @@ static void test_open_ffmpeg_tx_uses_app_defaults(void **state)
     fill_app_16x16(&app, 1);
     /* Clear per-session network config — open_ffmpeg_tx must fall back to
      * app-level width/height. */
-    memset(app.session_net, 0, sizeof(app.session_net));
+    memset(app.session_net, 0, (size_t)app.st20p_sessions * sizeof(*app.session_net));
 
     struct st20p_tx_ctx ctx;
     memset(&ctx, 0, sizeof(ctx));

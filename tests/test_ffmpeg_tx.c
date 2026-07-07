@@ -64,16 +64,18 @@ const AVOutputFormat* __wrap_av_guess_format(const char* short_name,
 
 static void fill_app(struct dvledtx_context* app) {
     memset(app, 0, sizeof(*app));
-    strncpy(app->port,         "0000:06:00.0",  sizeof(app->port) - 1);
-    strncpy(app->sip_addr_str, "192.168.50.29", sizeof(app->sip_addr_str) - 1);
-    strncpy(app->dip_addr_str, "239.168.85.20", sizeof(app->dip_addr_str) - 1);
+
+    dvledtx_context_alloc(app, 1, 1);
+
+    strncpy(app->nics[0].port,         "0000:06:00.0",  sizeof(app->nics[0].port) - 1);
+    strncpy(app->nics[0].sip_addr_str, "192.168.50.29", sizeof(app->nics[0].sip_addr_str) - 1);
+    strncpy(app->nics[0].dip_addr_str, "239.168.85.20", sizeof(app->nics[0].dip_addr_str) - 1);
     app->width        = 640;
     app->height       = 1080;
     app->fps          = 30;
     app->fmt          = AV_PIX_FMT_YUV422P10LE;
     app->udp_port     = 20000;
     app->payload_type = 96;
-    app->st20p_sessions = 1;
     app->session_net[0].udp_port     = 20000;
     app->session_net[0].payload_type = 96;
     app->session_net[0].crop_x = 0;

@@ -21,6 +21,7 @@
   "tx_sessions": [
     {
       "udp_port":     20000,
+      "payload_type": 96,
       "crop": { "x": 0, "y": 0, "w": 1920, "h": 1080 }
     }
   ]

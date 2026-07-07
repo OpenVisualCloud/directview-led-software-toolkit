@@ -310,7 +310,9 @@ int main(int argc, char** argv) {
   }
 
   LOG_INFO("dvledtx started successfully");
-  LOG_INFO("Port: %s, DIP: %s, UDP: %d", app.port, app.dip_addr_str, app.udp_port);
+  if (app.nic_count > 0)
+    LOG_INFO("Port[0]: %s, DIP[0]: %s, UDP: %d",
+             app.nics[0].port, app.nics[0].dip_addr_str, app.udp_port);
   LOG_INFO("Video: %dx%d, ST20P sessions: %d",
          app.width, app.height, app.st20p_sessions);
 
@@ -339,6 +341,7 @@ int main(int argc, char** argv) {
 cleanup:
   /* Stop and cleanup session manager */
   session_manager_cleanup(&session_manager);
+  dvledtx_context_free(&app);
   LOG_INFO("dvledtx shutdown complete");
 cleanup_logger:
   /* Cleanup logger */
