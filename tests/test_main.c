@@ -107,12 +107,22 @@ int peek_config_log_file(const char* f, char* buf, size_t sz)
 int load_and_apply_config(struct dvledtx_context* app, const char* f)
 {
     (void)f;
-    if (stub_load_and_apply_config_ret == 0 && stub_load_config_set_ips) {
-        /* Allocate dynamic arrays for the stub */
+    if (stub_load_and_apply_config_ret == 0) {
+        /* Allocate dynamic arrays for the stub — always, so that nic_count > 0
+         * and resolve_ip_addrs() actually exercises its validation logic
+         * instead of trivially "succeeding" on a zero-length loop (which
+         * previously let tx_app_real_main() fall through into the
+         * infinite transmit loop and hang the whole test binary). */
         dvledtx_context_free(app);
         dvledtx_context_alloc(app, 1, 1);
-        strncpy(app->nics[0].sip_addr_str, "192.168.50.29", sizeof(app->nics[0].sip_addr_str) - 1);
-        strncpy(app->nics[0].dip_addr_str, "239.168.85.20", sizeof(app->nics[0].dip_addr_str) - 1);
+        if (stub_load_config_set_ips) {
+            strncpy(app->nics[0].sip_addr_str, "192.168.50.29", sizeof(app->nics[0].sip_addr_str) - 1);
+            strncpy(app->nics[0].dip_addr_str, "239.168.85.20", sizeof(app->nics[0].dip_addr_str) - 1);
+        } else {
+            /* Leave dip_addr_str empty → resolve_ip_addrs() must fail. */
+            app->nics[0].sip_addr_str[0] = '\0';
+            app->nics[0].dip_addr_str[0] = '\0';
+        }
         app->test_time_s = stub_load_config_test_time_s;
         app->exit = stub_load_config_set_exit;
     }

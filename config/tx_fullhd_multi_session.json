@@ -10,7 +10,7 @@
   "video": {
     "width":  1920,
     "height": 1080,
-    "tx_url": "/home/intel/workspace/sample/ball_1080p_yuv420p_30fps_15min.mp4"
+    "tx_url": "ball_fullhd_yuv422p10_30fps_5min.mp4"
   },
   "tx_video": {
     "scale_width":  1920,

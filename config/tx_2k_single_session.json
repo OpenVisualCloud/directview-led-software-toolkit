@@ -10,7 +10,7 @@
   "video": {
     "width":  2560,
     "height": 1440,
-    "tx_url": "ball_2k_yuv420p_30fps_5min.mp4"
+    "tx_url": "ball_2k_yuv422p10_30fps_5min.mp4"
   },
   "tx_video": {
     "scale_width":  2560,
