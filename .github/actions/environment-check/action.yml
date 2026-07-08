@@ -30,7 +30,7 @@ runs:
         path: |
           ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
-        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-version }}-ffmpeg-${{ inputs.ffmpeg-version }}-x11grab1-${{ runner.os }}
+        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-version }}-ffmpeg-${{ inputs.ffmpeg-version }}-${{ runner.os }}
 
     - name: Deploy cache to system
       if: steps.env-cache.outputs.cache-hit == 'true'
@@ -252,8 +252,7 @@ runs:
         cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.c libavdevice/
         cp "$MTL_SOURCE"/ecosystem/ffmpeg_plugin/mtl_*.h libavdevice/
         ./configure --enable-shared --disable-static --enable-pic \
-           --enable-libopenh264 --enable-encoder=libopenh264 --enable-mtl \
-           --enable-x11grab
+           --enable-libopenh264 --enable-encoder=libopenh264 --enable-mtl
         make -j "$(nproc)"
         make install DESTDIR="$RUNNER_TEMP/dvledtx-deps"
         sudo make install
@@ -341,4 +340,4 @@ runs:
         path: |
           ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
-        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-version }}-ffmpeg-${{ inputs.ffmpeg-version }}-x11grab1-${{ runner.os }}
+        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-version }}-ffmpeg-${{ inputs.ffmpeg-version }}-${{ runner.os }}
