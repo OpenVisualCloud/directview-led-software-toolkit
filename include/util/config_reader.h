@@ -18,14 +18,17 @@ struct tx_session_config {
   int      crop_y;
   int      crop_w;
   int      crop_h;
+  int      nic_index;  /* which NIC (index into interface arrays); default 0 */
 };
 
 /* Full application configuration parsed from JSON */
 struct dvledtx_config {
-  /* interfaces[0] */
-  char interface_name[64];  /* PCI address, e.g. "0000:02:00.0" */
-  char interface_sip[32];   /* source IP, e.g. "192.168.50.29" */
-  char interface_dip[32];   /* destination IP, e.g. "239.168.85.20" */
+  /* interfaces array — dynamically allocated */
+  int  nic_count;                              /* number of interfaces parsed */
+  int  nic_cap;                                /* allocated capacity */
+  char (*interface_name)[64];                  /* PCI address per NIC */
+  char (*interface_sip)[32];                   /* source IP per NIC */
+  char (*interface_dip)[32];                   /* destination multicast IP per NIC */
 
   /* video block */
   uint32_t width;
@@ -39,9 +42,10 @@ struct dvledtx_config {
   /* optional log file path (empty = console only) */
   char log_file[256];
 
-  /* tx_sessions array — count drives st20p_sessions */
+  /* tx_sessions array — dynamically allocated */
   int session_count;
-  struct tx_session_config sessions[MAX_TX_SESSIONS];
+  int session_cap;                             /* allocated capacity */
+  struct tx_session_config* sessions;
 };
 
 /* Quickly extract only the "log_file" value from a config file without a full parse.
@@ -60,3 +64,6 @@ int load_and_apply_config(struct dvledtx_context* app, const char* config_file);
 /* Convert sip_addr_str / dip_addr_str to packed binary (struct in_addr).
  * Call once after load_and_apply_config().  Returns 0 on success, -1 on error. */
 int resolve_ip_addrs(struct dvledtx_context* ctx);
+
+/* Free dynamically allocated members of dvledtx_config (interface arrays, sessions). */
+void dvledtx_config_free(struct dvledtx_config* config);

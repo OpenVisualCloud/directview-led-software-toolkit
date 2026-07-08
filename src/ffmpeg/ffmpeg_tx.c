@@ -86,16 +86,44 @@ int open_ffmpeg_tx(struct st20p_tx_ctx* ctx) {
   int payload_type = ctx->app->session_net[ctx->idx].payload_type;
   if (payload_type == 0) payload_type = ctx->app->payload_type;
 
-  ret = av_opt_set    (ctx->out_fmt_ctx->priv_data, "p_port",       ctx->app->port,         0);
+  int nic = ctx->app->session_net[ctx->idx].nic_index;
+
+  ret = av_opt_set    (ctx->out_fmt_ctx->priv_data, "p_port",       ctx->app->nics[nic].port,         0);
   if (ret < 0) LOG_WARN("ST20P TX(%d): av_opt_set p_port failed (ret=%d)", ctx->idx, ret);
-  ret = av_opt_set    (ctx->out_fmt_ctx->priv_data, "p_sip",        ctx->app->sip_addr_str, 0);
+  ret = av_opt_set    (ctx->out_fmt_ctx->priv_data, "p_sip",        ctx->app->nics[nic].sip_addr_str, 0);
   if (ret < 0) LOG_WARN("ST20P TX(%d): av_opt_set p_sip failed (ret=%d)", ctx->idx, ret);
-  ret = av_opt_set    (ctx->out_fmt_ctx->priv_data, "p_tx_ip",      ctx->app->dip_addr_str, 0);
+  ret = av_opt_set    (ctx->out_fmt_ctx->priv_data, "p_tx_ip",      ctx->app->nics[nic].dip_addr_str, 0);
   if (ret < 0) LOG_WARN("ST20P TX(%d): av_opt_set p_tx_ip failed (ret=%d)", ctx->idx, ret);
   ret = av_opt_set_int(ctx->out_fmt_ctx->priv_data, "udp_port",     (int64_t)udp_port,      0);
   if (ret < 0) LOG_WARN("ST20P TX(%d): av_opt_set_int udp_port failed (ret=%d)", ctx->idx, ret);
   ret = av_opt_set_int(ctx->out_fmt_ctx->priv_data, "payload_type", (int64_t)payload_type,  0);
   if (ret < 0) LOG_WARN("ST20P TX(%d): av_opt_set_int payload_type failed (ret=%d)", ctx->idx, ret);
+
+  /* Multi-NIC: The FFmpeg mtl_st20p plugin's mtl_dev_get() uses a singleton
+   * shared MTL handle — the FIRST avformat_write_header() call creates the
+   * MTL instance via mtl_init(), which initialises DPDK EAL.  EAL cannot be
+   * re-initialised, so all NIC ports must be registered at that first call.
+   *
+   * Pass the second NIC as the "redundant" port (r_port / r_sip) on the
+   * first session so mtl_init() registers both ports with EAL.  Subsequent
+   * sessions on either NIC will reuse the shared handle.
+   *
+   * ctx->idx == 0 identifies the first session deterministically. A
+   * function-static flag would never reset across multiple start/stop
+   * cycles or repeated init calls within the same process (e.g. unit
+   * tests), so later runs could silently skip this redundant-port
+   * registration even when nic_count == 2. */
+  if (ctx->idx == 0 && ctx->app->nic_count == 2) {
+    int other = (nic == 0) ? 1 : 0;
+    ret = av_opt_set(ctx->out_fmt_ctx->priv_data, "r_port",  ctx->app->nics[other].port, 0);
+    if (ret < 0) LOG_WARN("ST20P TX(%d): av_opt_set r_port failed (ret=%d)", ctx->idx, ret);
+    ret = av_opt_set(ctx->out_fmt_ctx->priv_data, "r_sip",   ctx->app->nics[other].sip_addr_str, 0);
+    if (ret < 0) LOG_WARN("ST20P TX(%d): av_opt_set r_sip failed (ret=%d)", ctx->idx, ret);
+    ret = av_opt_set(ctx->out_fmt_ctx->priv_data, "r_tx_ip", ctx->app->nics[other].dip_addr_str, 0);
+    if (ret < 0) LOG_WARN("ST20P TX(%d): av_opt_set r_tx_ip failed (ret=%d)", ctx->idx, ret);
+    LOG_INFO("ST20P TX(%d): registering second NIC %s with MTL for multi-NIC support",
+             ctx->idx, ctx->app->nics[other].port);
+  }
 
   /* RAWVIDEO stream — no encoder; MTL accepts raw packed pixel data directly. */
   ctx->out_stream = avformat_new_stream(ctx->out_fmt_ctx, NULL);
@@ -168,7 +196,7 @@ int open_ffmpeg_tx(struct st20p_tx_ctx* ctx) {
   ctx->pts = 0;
   LOG_INFO("ST20P TX(%d): ffmpeg_tx opened (%dx%d %s @ %dfps) -> %s:%u via %s",
            ctx->idx, out_w, height, ffmpeg_fmt_name(ctx->app->fmt), ctx->app->fps,
-           ctx->app->dip_addr_str, (unsigned)udp_port, ctx->app->port);
+           ctx->app->nics[nic].dip_addr_str, (unsigned)udp_port, ctx->app->nics[nic].port);
   return 0;
 }
 

@@ -127,7 +127,7 @@ dvledtx uses a JSON config file with three sections:
 | Section | Field | Description |
 |---------|-------|-------------|
 | **log_file** | `log_file` | (Optional) Path/name of the log output file (e.g. `dvledtx.log`). If omitted, logging goes to console only. |
-| **interfaces** | `name` | PCI BDF address of the NIC (e.g. `0000:06:00.0`) |
+| **interfaces[]** | `name` | PCI BDF address of the NIC (e.g. `0000:06:00.0`) |
 | | `sip` | Source IP address |
 | | `dip` | Destination multicast IP address |
 | **video** | `width` | Source frame width in pixels |
@@ -137,26 +137,31 @@ dvledtx uses a JSON config file with three sections:
 | | `scale_height` | (Optional) Output height after scaling |
 | | `fps` | Frames per second (25, 30, 50, 60) |
 | | `fmt` | Pixel format (see [Supported Formats](#supported-formats)) |
-| **tx_sessions[]** | `udp_port` | UDP port for the session |
+| **tx_sessions[]** | `nic_index` | (Optional) Index into `interfaces[]` selecting which NIC this session uses (default: `0`) |
+| | `udp_port` | UDP port for the session |
 | | `payload_type` | (Optional) RTP payload type — defaults to `96` if not present |
 | | `crop` | Region to transmit: `x`, `y`, `w`, `h` in pixels |
 
-Example (`config/tx_fullhd_single_session.json`):
+Example (`config/tx_fullhd_multi_nic.json`):
 ```json
 {
   "log_file": "dvledtx.log",
   "interfaces": [
-    { "name": "0000:06:00.0", "sip": "192.168.50.29", "dip": "239.168.85.20" }
+    { "name": "0000:03:10.0", "sip": "192.168.50.30", "dip": "239.168.85.20" },
+    { "name": "0000:03:10.2", "sip": "192.168.50.29", "dip": "239.168.85.21" }
   ],
   "video": {
     "width": 1920, "height": 1080,
     "tx_url": "bbb_sunflower_1080p_30fps_normal.mp4"
   },
   "tx_video": {
-    "fps": 30, "fmt": "yuv422p10le"
+    "scale_width": 1920, "scale_height": 1080,
+    "fps": 30,
+    "fmt": "yuv422p10le"
   },
   "tx_sessions": [
-    { "udp_port": 20000, "crop": { "x": 0, "y": 0, "w": 1920, "h": 1080 } }
+    { "nic_index": 0, "udp_port": 20000, "payload_type": 96, "crop": { "x": 0,   "y": 0, "w": 960, "h": 1080 } },
+    { "nic_index": 1, "udp_port": 20002, "payload_type": 96, "crop": { "x": 960, "y": 0, "w": 960, "h": 1080 } }
   ]
 }
 ```
@@ -265,7 +270,7 @@ Example — upscale 1080p source to 4K output:
     "fps": 30, "fmt": "yuv422p10le"
   },
   "tx_sessions": [
-    { "udp_port": 20000, "crop": { "x": 0, "y": 0, "w": 3840, "h": 2160 } }
+    { "udp_port": 20000, "payload_type": 96, "crop": { "x": 0, "y": 0, "w": 3840, "h": 2160 } }
   ]
 }
 ```

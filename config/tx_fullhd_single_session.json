@@ -10,7 +10,7 @@
   "video": {
     "width":  3840,
     "height": 2160,
-    "tx_url": "bbb_sunflower_1080p_30fps_normal.mp4"
+    "tx_url": "ball_fullhd_yuv422p10_30fps_5min.mp4"
   },
   "tx_video": {
     "scale_width":  3840,
@@ -21,6 +21,7 @@
   "tx_sessions": [
     {
       "udp_port":     20000,
+      "payload_type": 96,
       "crop": { "x": 0, "y": 0, "w": 1920, "h": 1080 }
     }
   ]

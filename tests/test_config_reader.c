@@ -60,14 +60,24 @@ static char *write_tmpfile(const char *content)
 static void fill_valid_config(struct dvledtx_config *cfg)
 {
     memset(cfg, 0, sizeof(*cfg));
-    strncpy(cfg->interface_name, "0000:06:00.0",   sizeof(cfg->interface_name) - 1);
-    strncpy(cfg->interface_sip,  "192.168.50.29",  sizeof(cfg->interface_sip)  - 1);
-    strncpy(cfg->interface_dip,  "239.168.85.20",  sizeof(cfg->interface_dip)  - 1);
+
+    /* Allocate dynamic arrays */
+    cfg->nic_cap = 1;
+    cfg->interface_name = calloc(1, sizeof(*cfg->interface_name));
+    cfg->interface_sip  = calloc(1, sizeof(*cfg->interface_sip));
+    cfg->interface_dip  = calloc(1, sizeof(*cfg->interface_dip));
+    cfg->nic_count = 1;
+
+    strncpy(cfg->interface_name[0], "0000:06:00.0",   sizeof(cfg->interface_name[0]) - 1);
+    strncpy(cfg->interface_sip[0],  "192.168.50.29",  sizeof(cfg->interface_sip[0])  - 1);
+    strncpy(cfg->interface_dip[0],  "239.168.85.20",  sizeof(cfg->interface_dip[0])  - 1);
     cfg->width  = 1920;
     cfg->height = 1080;
     cfg->fps    = 30;
     strncpy(cfg->fmt, "yuv422p10le", sizeof(cfg->fmt) - 1);
     /* tx_url intentionally left empty — skips file-open check in validate */
+    cfg->session_cap = 1;
+    cfg->sessions = calloc(1, sizeof(*cfg->sessions));
     cfg->session_count = 1;
     cfg->sessions[0].udp_port     = 20000;
     cfg->sessions[0].payload_type = 96;
@@ -119,9 +129,9 @@ static void test_parse_3sessions_interface_fields(void **state)
     (void)state;
     struct dvledtx_config cfg;
     assert_int_equal(parse_tx_config(FIXTURE_3SESSIONS, &cfg), 0);
-    assert_string_equal(cfg.interface_name, "0000:06:00.0");
-    assert_string_equal(cfg.interface_sip,  "192.168.50.29");
-    assert_string_equal(cfg.interface_dip,  "239.168.85.20");
+    assert_string_equal(cfg.interface_name[0], "0000:03:10.1");
+    assert_string_equal(cfg.interface_sip[0],  "192.168.50.29");
+    assert_string_equal(cfg.interface_dip[0],  "239.168.85.21");
 }
 
 static void test_parse_3sessions_video_params(void **state)
@@ -255,6 +265,7 @@ static void test_validate_valid_config_passes(void **state)
     struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_missing_interface_name_fails(void **state)
@@ -262,8 +273,9 @@ static void test_validate_missing_interface_name_fails(void **state)
     (void)state;
     struct dvledtx_config cfg;
     fill_valid_config(&cfg);
-    cfg.interface_name[0] = '\0';
+    cfg.interface_name[0][0] = '\0';
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_missing_dip_fails(void **state)
@@ -271,8 +283,9 @@ static void test_validate_missing_dip_fails(void **state)
     (void)state;
     struct dvledtx_config cfg;
     fill_valid_config(&cfg);
-    cfg.interface_dip[0] = '\0';
+    cfg.interface_dip[0][0] = '\0';
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_invalid_sip_fails(void **state)
@@ -280,8 +293,9 @@ static void test_validate_invalid_sip_fails(void **state)
     (void)state;
     struct dvledtx_config cfg;
     fill_valid_config(&cfg);
-    strncpy(cfg.interface_sip, "not.an.ip.address", sizeof(cfg.interface_sip) - 1);
+    strncpy(cfg.interface_sip[0], "not.an.ip.address", sizeof(cfg.interface_sip[0]) - 1);
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_invalid_dip_fails(void **state)
@@ -289,8 +303,9 @@ static void test_validate_invalid_dip_fails(void **state)
     (void)state;
     struct dvledtx_config cfg;
     fill_valid_config(&cfg);
-    strncpy(cfg.interface_dip, "999.999.999.999", sizeof(cfg.interface_dip) - 1);
+    strncpy(cfg.interface_dip[0], "999.999.999.999", sizeof(cfg.interface_dip[0]) - 1);
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_zero_width_fails(void **state)
@@ -300,6 +315,7 @@ static void test_validate_zero_width_fails(void **state)
     fill_valid_config(&cfg);
     cfg.width = 0;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_zero_height_fails(void **state)
@@ -309,6 +325,7 @@ static void test_validate_zero_height_fails(void **state)
     fill_valid_config(&cfg);
     cfg.height = 0;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_odd_width_fails(void **state)
@@ -318,6 +335,7 @@ static void test_validate_odd_width_fails(void **state)
     fill_valid_config(&cfg);
     cfg.width = 1921;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_supported_fps_values_all_pass(void **state)
@@ -329,6 +347,7 @@ static void test_validate_supported_fps_values_all_pass(void **state)
         fill_valid_config(&cfg);
         cfg.fps = valid_fps[i];
         assert_int_equal(validate_tx_config(&cfg), 0);
+        dvledtx_config_free(&cfg);
     }
 }
 
@@ -339,6 +358,7 @@ static void test_validate_unsupported_fps_fails(void **state)
     fill_valid_config(&cfg);
     cfg.fps = 24;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_unsupported_fmt_fails(void **state)
@@ -348,6 +368,7 @@ static void test_validate_unsupported_fmt_fails(void **state)
     fill_valid_config(&cfg);
     strncpy(cfg.fmt, "rgb24", sizeof(cfg.fmt) - 1);
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_all_supported_fmts_pass(void **state)
@@ -360,6 +381,7 @@ static void test_validate_all_supported_fmts_pass(void **state)
         fill_valid_config(&cfg);
         strncpy(cfg.fmt, fmts[i], sizeof(cfg.fmt) - 1);
         assert_int_equal(validate_tx_config(&cfg), 0);
+        dvledtx_config_free(&cfg);
     }
 }
 
@@ -370,6 +392,7 @@ static void test_validate_zero_udp_port_fails(void **state)
     fill_valid_config(&cfg);
     cfg.sessions[0].udp_port = 0;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_payload_type_below_96_fails(void **state)
@@ -379,6 +402,7 @@ static void test_validate_payload_type_below_96_fails(void **state)
     fill_valid_config(&cfg);
     cfg.sessions[0].payload_type = 95;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_payload_type_above_127_fails(void **state)
@@ -388,6 +412,7 @@ static void test_validate_payload_type_above_127_fails(void **state)
     fill_valid_config(&cfg);
     cfg.sessions[0].payload_type = 128;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_payload_type_boundary_96_passes(void **state)
@@ -397,6 +422,7 @@ static void test_validate_payload_type_boundary_96_passes(void **state)
     fill_valid_config(&cfg);
     cfg.sessions[0].payload_type = 96;
     assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_payload_type_boundary_127_passes(void **state)
@@ -406,6 +432,7 @@ static void test_validate_payload_type_boundary_127_passes(void **state)
     fill_valid_config(&cfg);
     cfg.sessions[0].payload_type = 127;
     assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_crop_x_plus_w_exceeds_width_fails(void **state)
@@ -416,6 +443,7 @@ static void test_validate_crop_x_plus_w_exceeds_width_fails(void **state)
     cfg.sessions[0].crop_x = 100;
     cfg.sessions[0].crop_w = 1920; /* 100 + 1920 = 2020 > 1920 */
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_crop_y_plus_h_exceeds_height_fails(void **state)
@@ -426,6 +454,7 @@ static void test_validate_crop_y_plus_h_exceeds_height_fails(void **state)
     cfg.sessions[0].crop_y = 100;
     cfg.sessions[0].crop_h = 1080; /* 100 + 1080 = 1180 > 1080 */
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_odd_crop_w_fails(void **state)
@@ -435,6 +464,7 @@ static void test_validate_odd_crop_w_fails(void **state)
     fill_valid_config(&cfg);
     cfg.sessions[0].crop_w = 641;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_zero_session_count_fails(void **state)
@@ -444,6 +474,7 @@ static void test_validate_zero_session_count_fails(void **state)
     fill_valid_config(&cfg);
     cfg.session_count = 0;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_3sessions_tiled_layout_passes(void **state)
@@ -452,13 +483,23 @@ static void test_validate_3sessions_tiled_layout_passes(void **state)
     /* Mirrors tx_fullhd_multi_session.json: three 640-wide horizontal tiles */
     struct dvledtx_config cfg;
     memset(&cfg, 0, sizeof(cfg));
-    strncpy(cfg.interface_name, "0000:06:00.0",   sizeof(cfg.interface_name) - 1);
-    strncpy(cfg.interface_sip,  "192.168.50.29",  sizeof(cfg.interface_sip)  - 1);
-    strncpy(cfg.interface_dip,  "239.168.85.20",  sizeof(cfg.interface_dip)  - 1);
+
+    cfg.nic_cap = 1;
+    cfg.interface_name = calloc(1, sizeof(*cfg.interface_name));
+    cfg.interface_sip  = calloc(1, sizeof(*cfg.interface_sip));
+    cfg.interface_dip  = calloc(1, sizeof(*cfg.interface_dip));
+    cfg.nic_count = 1;
+
+    strncpy(cfg.interface_name[0], "0000:06:00.0",   sizeof(cfg.interface_name[0]) - 1);
+    strncpy(cfg.interface_sip[0],  "192.168.50.29",  sizeof(cfg.interface_sip[0])  - 1);
+    strncpy(cfg.interface_dip[0],  "239.168.85.20",  sizeof(cfg.interface_dip[0])  - 1);
     cfg.width  = 1920;
     cfg.height = 1080;
     cfg.fps    = 30;
     strncpy(cfg.fmt, "yuv420", sizeof(cfg.fmt) - 1);
+
+    cfg.session_cap = 3;
+    cfg.sessions = calloc(3, sizeof(*cfg.sessions));
     cfg.session_count = 3;
 
     const uint16_t ports[] = {20000, 20002, 20004};
@@ -472,6 +513,7 @@ static void test_validate_3sessions_tiled_layout_passes(void **state)
         cfg.sessions[i].crop_h = 1080;
     }
     assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
 }
 
 /* ==========================================================================
@@ -605,6 +647,7 @@ static void test_validate_resolution_exceeds_max_fails(void **state)
     fill_valid_config(&cfg);
     cfg.width = 4000; /* > 3840 limit */
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_2k_resolution_passes(void **state)
@@ -617,6 +660,7 @@ static void test_validate_2k_resolution_passes(void **state)
     cfg.sessions[0].crop_w = 2560;
     cfg.sessions[0].crop_h = 1440;
     assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_4k_resolution_passes(void **state)
@@ -629,6 +673,7 @@ static void test_validate_4k_resolution_passes(void **state)
     cfg.sessions[0].crop_w = 3840;
     cfg.sessions[0].crop_h = 2160;
     assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_4k_height_exceeds_max_fails(void **state)
@@ -639,6 +684,7 @@ static void test_validate_4k_height_exceeds_max_fails(void **state)
     cfg.width  = 3840;
     cfg.height = 2162; /* > 2160 limit */
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 /* ==========================================================================
@@ -657,6 +703,7 @@ static void test_validate_scale_upscale_1080p_to_4k_passes(void **state)
     cfg.sessions[0].crop_w = 3840;
     cfg.sessions[0].crop_h = 2160;
     assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_scale_downscale_4k_to_1080p_passes(void **state)
@@ -671,6 +718,7 @@ static void test_validate_scale_downscale_4k_to_1080p_passes(void **state)
     cfg.sessions[0].crop_w = 1920;
     cfg.sessions[0].crop_h = 1080;
     assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_scale_width_only_fails(void **state)
@@ -681,6 +729,7 @@ static void test_validate_scale_width_only_fails(void **state)
     cfg.scale_width  = 3840;
     cfg.scale_height = 0;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_scale_height_only_fails(void **state)
@@ -691,6 +740,7 @@ static void test_validate_scale_height_only_fails(void **state)
     cfg.scale_width  = 0;
     cfg.scale_height = 2160;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_scale_exceeds_max_fails(void **state)
@@ -701,6 +751,7 @@ static void test_validate_scale_exceeds_max_fails(void **state)
     cfg.scale_width  = 4096;
     cfg.scale_height = 2160;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_scale_odd_width_fails(void **state)
@@ -711,6 +762,7 @@ static void test_validate_scale_odd_width_fails(void **state)
     cfg.scale_width  = 1921;
     cfg.scale_height = 1080;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_scale_odd_height_yuv420_fails(void **state)
@@ -724,6 +776,7 @@ static void test_validate_scale_odd_height_yuv420_fails(void **state)
     cfg.sessions[0].crop_w = 1920;
     cfg.sessions[0].crop_h = 1080;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_scale_crop_exceeds_scaled_dims_fails(void **state)
@@ -739,6 +792,7 @@ static void test_validate_scale_crop_exceeds_scaled_dims_fails(void **state)
     cfg.sessions[0].crop_w = 3840;
     cfg.sessions[0].crop_h = 2160;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_scale_crop_within_scaled_dims_passes(void **state)
@@ -753,6 +807,7 @@ static void test_validate_scale_crop_within_scaled_dims_passes(void **state)
     cfg.sessions[0].crop_w = 2560;
     cfg.sessions[0].crop_h = 1440;
     assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_no_scale_passes(void **state)
@@ -763,6 +818,7 @@ static void test_validate_no_scale_passes(void **state)
     cfg.scale_width  = 0;
     cfg.scale_height = 0;
     assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_duplicate_udp_ports_fails(void **state)
@@ -770,11 +826,21 @@ static void test_validate_duplicate_udp_ports_fails(void **state)
     (void)state;
     struct dvledtx_config cfg;
     memset(&cfg, 0, sizeof(cfg));
-    strncpy(cfg.interface_name, "0000:06:00.0", sizeof(cfg.interface_name) - 1);
-    strncpy(cfg.interface_sip,  "192.168.1.1",  sizeof(cfg.interface_sip)  - 1);
-    strncpy(cfg.interface_dip,  "239.0.0.1",    sizeof(cfg.interface_dip)  - 1);
+
+    cfg.nic_cap = 1;
+    cfg.interface_name = calloc(1, sizeof(*cfg.interface_name));
+    cfg.interface_sip  = calloc(1, sizeof(*cfg.interface_sip));
+    cfg.interface_dip  = calloc(1, sizeof(*cfg.interface_dip));
+    cfg.nic_count = 1;
+
+    strncpy(cfg.interface_name[0], "0000:06:00.0", sizeof(cfg.interface_name[0]) - 1);
+    strncpy(cfg.interface_sip[0],  "192.168.1.1",  sizeof(cfg.interface_sip[0])  - 1);
+    strncpy(cfg.interface_dip[0],  "239.0.0.1",    sizeof(cfg.interface_dip[0])  - 1);
     cfg.width = 1920; cfg.height = 1080; cfg.fps = 25;
     strncpy(cfg.fmt, "yuv422p10le", sizeof(cfg.fmt) - 1);
+
+    cfg.session_cap = 2;
+    cfg.sessions = calloc(2, sizeof(*cfg.sessions));
     cfg.session_count = 2;
     cfg.sessions[0].udp_port = 20000; cfg.sessions[0].payload_type = 96;
     cfg.sessions[0].crop_x = 0;   cfg.sessions[0].crop_y = 0;
@@ -784,6 +850,7 @@ static void test_validate_duplicate_udp_ports_fails(void **state)
     cfg.sessions[1].crop_x = 960; cfg.sessions[1].crop_y = 0;
     cfg.sessions[1].crop_w = 960; cfg.sessions[1].crop_h = 1080;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_crop_x_misaligned_for_yuv422_fails(void **state)
@@ -795,6 +862,7 @@ static void test_validate_crop_x_misaligned_for_yuv422_fails(void **state)
     cfg.sessions[0].crop_x = 1;
     cfg.sessions[0].crop_w = 1918; /* crop_x + crop_w = 1919 < 1920; crop_w even */
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_tx_url_nonexistent_file_fails(void **state)
@@ -804,6 +872,7 @@ static void test_validate_tx_url_nonexistent_file_fails(void **state)
     fill_valid_config(&cfg);
     strncpy(cfg.tx_url, "/tmp/dvledtx_no_such_video_xyz.mp4", sizeof(cfg.tx_url) - 1);
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_tx_url_existing_file_passes(void **state)
@@ -816,6 +885,7 @@ static void test_validate_tx_url_existing_file_passes(void **state)
     strncpy(cfg.tx_url, path, sizeof(cfg.tx_url) - 1);
     int ret = validate_tx_config(&cfg);
     unlink(path); free(path);
+    dvledtx_config_free(&cfg);
     assert_int_equal(ret, 0);
 }
 
@@ -829,8 +899,9 @@ static void test_validate_non_multicast_dip_fails(void **state)
     (void)state;
     struct dvledtx_config cfg;
     fill_valid_config(&cfg);
-    strncpy(cfg.interface_dip, "192.168.1.100", sizeof(cfg.interface_dip) - 1);
+    strncpy(cfg.interface_dip[0], "192.168.1.100", sizeof(cfg.interface_dip[0]) - 1);
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 /* S-2: PCI BDF must match DDDD:DD:DD.D hex pattern */
@@ -839,8 +910,9 @@ static void test_validate_invalid_bdf_format_fails(void **state)
     (void)state;
     struct dvledtx_config cfg;
     fill_valid_config(&cfg);
-    strncpy(cfg.interface_name, "eth0", sizeof(cfg.interface_name) - 1);
+    strncpy(cfg.interface_name[0], "eth0", sizeof(cfg.interface_name[0]) - 1);
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_valid_bdf_passes(void **state)
@@ -848,8 +920,9 @@ static void test_validate_valid_bdf_passes(void **state)
     (void)state;
     struct dvledtx_config cfg;
     fill_valid_config(&cfg);
-    strncpy(cfg.interface_name, "0000:af:00.1", sizeof(cfg.interface_name) - 1);
+    strncpy(cfg.interface_name[0], "0000:af:00.1", sizeof(cfg.interface_name[0]) - 1);
     assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
 }
 
 /* D-3: UDP port must be >= 1024 (above privileged range) */
@@ -860,6 +933,7 @@ static void test_validate_privileged_udp_port_fails(void **state)
     fill_valid_config(&cfg);
     cfg.sessions[0].udp_port = 80;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 /* ==========================================================================
@@ -997,6 +1071,7 @@ static void test_validate_crop_x_plus_w_unsigned_overflow_safe(void **state)
     cfg.sessions[0].crop_x = 2147483647; /* INT_MAX */
     cfg.sessions[0].crop_w = 2;          /* even, so passes alignment */
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_validate_crop_y_plus_h_unsigned_overflow_safe(void **state)
@@ -1007,6 +1082,7 @@ static void test_validate_crop_y_plus_h_unsigned_overflow_safe(void **state)
     cfg.sessions[0].crop_y = 2147483647; /* INT_MAX */
     cfg.sessions[0].crop_h = 2;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 /* D-3: 224.x.x.x is in the multicast range — passes (with a warning) */
@@ -1015,10 +1091,11 @@ static void test_validate_low_multicast_dip_passes_with_warning(void **state)
     (void)state;
     struct dvledtx_config cfg;
     fill_valid_config(&cfg);
-    strncpy(cfg.interface_dip, "224.0.0.50", sizeof(cfg.interface_dip) - 1);
+    strncpy(cfg.interface_dip[0], "224.0.0.50", sizeof(cfg.interface_dip[0]) - 1);
     /* In multicast range but outside the 239.0.0.0/8 administratively-scoped
      * range — must still validate (a warning is logged). */
     assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
 }
 
 /* D-3: 240.x.x.x is OUTSIDE the multicast range (224.0.0.0/4) — must fail */
@@ -1027,8 +1104,9 @@ static void test_validate_above_multicast_dip_fails(void **state)
     (void)state;
     struct dvledtx_config cfg;
     fill_valid_config(&cfg);
-    strncpy(cfg.interface_dip, "240.0.0.1", sizeof(cfg.interface_dip) - 1);
+    strncpy(cfg.interface_dip[0], "240.0.0.1", sizeof(cfg.interface_dip[0]) - 1);
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 /* D-3: UDP port at the boundary (1024) must pass */
@@ -1039,6 +1117,7 @@ static void test_validate_udp_port_boundary_1024_passes(void **state)
     fill_valid_config(&cfg);
     cfg.sessions[0].udp_port = 1024;
     assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
 }
 
 /* D-3: UDP port 1023 (just below boundary) must fail */
@@ -1049,6 +1128,7 @@ static void test_validate_udp_port_boundary_1023_fails(void **state)
     fill_valid_config(&cfg);
     cfg.sessions[0].udp_port = 1023;
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 /* S-2: BDF with too few digits in domain part must fail */
@@ -1058,8 +1138,9 @@ static void test_validate_short_bdf_format_fails(void **state)
     struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     /* Missing leading "00" in domain — DDD:DD:DD.D instead of DDDD:DD:DD.D */
-    strncpy(cfg.interface_name, "000:06:00.0", sizeof(cfg.interface_name) - 1);
+    strncpy(cfg.interface_name[0], "000:06:00.0", sizeof(cfg.interface_name[0]) - 1);
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 /* S-2: BDF with non-hex chars must fail */
@@ -1068,8 +1149,9 @@ static void test_validate_nonhex_bdf_format_fails(void **state)
     (void)state;
     struct dvledtx_config cfg;
     fill_valid_config(&cfg);
-    strncpy(cfg.interface_name, "ZZZZ:06:00.0", sizeof(cfg.interface_name) - 1);
+    strncpy(cfg.interface_name[0], "ZZZZ:06:00.0", sizeof(cfg.interface_name[0]) - 1);
     assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
 }
 
 /* ==========================================================================
@@ -1168,7 +1250,7 @@ static void test_load_and_apply_config_populates_app_context(void **state)
     int ret = load_and_apply_config(&app, path);
     unlink(path); free(path);
     assert_int_equal(ret, 0);
-    assert_string_equal(app.port, "0000:06:00.0");
+    assert_string_equal(app.nics[0].port, "0000:06:00.0");
     assert_int_equal((int)app.width,  1920);
     assert_int_equal((int)app.height, 1080);
     assert_int_equal(app.fps, 30);
@@ -1176,6 +1258,7 @@ static void test_load_and_apply_config_populates_app_context(void **state)
     assert_int_equal(app.st20p_sessions, 1);
     assert_int_equal(app.session_net[0].udp_port, 20000);
     assert_int_equal(app.session_net[0].payload_type, 96);
+    dvledtx_context_free(&app);
 }
 
 static void test_load_and_apply_config_fmt_yuv444p(void **state)
@@ -1189,6 +1272,7 @@ static void test_load_and_apply_config_fmt_yuv444p(void **state)
     unlink(path); free(path);
     assert_int_equal(ret, 0);
     assert_int_equal(app.fmt, AV_PIX_FMT_YUV444P10LE);
+    dvledtx_context_free(&app);
 }
 
 static void test_load_and_apply_config_fmt_gbrp10le(void **state)
@@ -1202,6 +1286,7 @@ static void test_load_and_apply_config_fmt_gbrp10le(void **state)
     unlink(path); free(path);
     assert_int_equal(ret, 0);
     assert_int_equal(app.fmt, AV_PIX_FMT_GBRP10LE);
+    dvledtx_context_free(&app);
 }
 
 static void test_load_and_apply_config_fmt_yuv420(void **state)
@@ -1215,6 +1300,7 @@ static void test_load_and_apply_config_fmt_yuv420(void **state)
     unlink(path); free(path);
     assert_int_equal(ret, 0);
     assert_int_equal(app.fmt, AV_PIX_FMT_YUV420P);
+    dvledtx_context_free(&app);
 }
 
 static void test_load_and_apply_config_unknown_fmt_fails(void **state)
@@ -1248,6 +1334,7 @@ static void test_load_and_apply_config_copies_log_file(void **state)
     unlink(path); free(path);
     assert_int_equal(ret, 0);
     assert_string_equal(app.log_file, "myapp.log");
+    dvledtx_context_free(&app);
 }
 
 /* ==========================================================================

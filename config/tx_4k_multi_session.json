@@ -10,7 +10,7 @@
   "video": {
     "width":  3840,
     "height": 2160,
-    "tx_url": "ball_4k_gbrp10le_60fps_5min.mp4"
+    "tx_url": "ball_4k_yuv422p10_60fps_5min.mp4"
   },
   "tx_video": {
     "scale_width":  1920,
@@ -21,14 +21,17 @@
   "tx_sessions": [
     {
       "udp_port":     20000,
+      "payload_type": 96,
       "crop": { "x": 0,    "y": 0, "w": 640, "h": 1080 }
     },
     {
       "udp_port":     20002,
+      "payload_type": 96,
       "crop": { "x": 640, "y": 0, "w": 640, "h": 1080 }
     },
     {
       "udp_port":     20004,
+      "payload_type": 96,
       "crop": { "x": 1280, "y": 0, "w": 640, "h": 1080 }
     }
   ]

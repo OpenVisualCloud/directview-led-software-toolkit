@@ -281,9 +281,13 @@ static void reset_mock_counters(void)
 static void fill_app(struct dvledtx_context* app, int sessions, const char* url)
 {
     memset(app, 0, sizeof(*app));
-    strncpy(app->port,         "0000:06:00.0",  sizeof(app->port) - 1);
-    strncpy(app->sip_addr_str, "192.168.50.29", sizeof(app->sip_addr_str) - 1);
-    strncpy(app->dip_addr_str, "239.168.85.20", sizeof(app->dip_addr_str) - 1);
+
+    /* Allocate dynamic arrays */
+    dvledtx_context_alloc(app, 1, sessions);
+
+    strncpy(app->nics[0].port,         "0000:06:00.0",  sizeof(app->nics[0].port) - 1);
+    strncpy(app->nics[0].sip_addr_str, "192.168.50.29", sizeof(app->nics[0].sip_addr_str) - 1);
+    strncpy(app->nics[0].dip_addr_str, "239.168.85.20", sizeof(app->nics[0].dip_addr_str) - 1);
     strncpy(app->tx_url, url, sizeof(app->tx_url) - 1);
     app->width          = 1920;
     app->height         = 1080;
@@ -291,10 +295,9 @@ static void fill_app(struct dvledtx_context* app, int sessions, const char* url)
     app->fmt            = AV_PIX_FMT_YUV422P10LE;
     app->udp_port       = 20000;
     app->payload_type   = 96;
-    app->st20p_sessions = sessions;
 
     /* Distribute 1920px evenly across sessions — 640px each */
-    for (int i = 0; i < sessions && i < MAX_TX_SESSIONS; i++) {
+    for (int i = 0; i < sessions; i++) {
         app->session_net[i].udp_port     = 20000 + i * 2;
         app->session_net[i].payload_type = 96;
         app->session_net[i].crop_x       = i * 640;
@@ -473,7 +476,7 @@ static void test_create_session_crop_fallback_3sessions(void **state)
     reset_mock_counters();
     struct dvledtx_context app;
     fill_app(&app, 3, "");
-    memset(app.session_net, 0, sizeof(app.session_net));
+    memset(app.session_net, 0, (size_t)app.st20p_sessions * sizeof(*app.session_net));
 
     session_manager_t mgr;
     assert_int_equal(session_manager_init(&mgr, &app), 0);
@@ -498,7 +501,7 @@ static void test_create_session_crop_fallback_last_gets_remainder(void **state)
     struct dvledtx_context app;
     fill_app(&app, 3, "");
     app.width = 1920;
-    memset(app.session_net, 0, sizeof(app.session_net));
+    memset(app.session_net, 0, (size_t)app.st20p_sessions * sizeof(*app.session_net));
 
     session_manager_t mgr;
     assert_int_equal(session_manager_init(&mgr, &app), 0);

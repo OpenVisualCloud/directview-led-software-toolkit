@@ -270,6 +270,8 @@ int session_manager_init(session_manager_t* manager, struct dvledtx_context* app
   memset(manager, 0, sizeof(*manager));
 
 #ifdef ENABLE_MTL_TX
+  /* Direct MTL path: initialise the MTL library instance here so that
+   * st20p_tx_session_create() can call st20p_tx_create() immediately. */
   if (mtl_tx_init(manager, app) < 0)
     return -1;
 #endif /* ENABLE_MTL_TX */
@@ -459,9 +461,7 @@ void session_manager_cleanup(session_manager_t* manager) {
     manager->shared_dec = NULL;
   }
 
-#ifdef ENABLE_MTL_TX
   mtl_tx_uninit(manager);
-#endif
 
   manager->st20p_count = 0;
 }

@@ -25,7 +25,7 @@ all_deps    = [m_dep, pthread_dep,
                libavformat_dep, libavcodec_dep, libavutil_dep, libswscale_dep,
                avdevice_dep]
 fixture_dir = meson.project_source_root() / '../config'
-test_inc    = include_directories('../include')
+test_inc    = include_directories('../include', '/usr/local/include/mtl')
 test_deps   = all_deps + [cmocka_dep]
 test_c_args = ['-DALLOW_EXPERIMENTAL_API']
 
@@ -100,10 +100,11 @@ test_session_manager = executable('test_session_manager',
   sources: [
     'test_session_manager.c',
     '../src/core/session_manager.c',
+    '../src/mtl/mtl_tx.c',
     '../src/util/logger.c',
   ],
   include_directories: test_inc,
-  dependencies: test_deps,
+  dependencies: test_deps + (mtl_dep.found() ? [mtl_dep] : []),
   c_args: test_c_args,
   install: false
 )
