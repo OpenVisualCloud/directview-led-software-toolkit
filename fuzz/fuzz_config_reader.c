@@ -37,6 +37,7 @@ int main(int argc, char *argv[]) {
         memset(&config, 0, sizeof(config));
         parse_tx_config(tmpfile, &config);
         validate_tx_config(&config);
+        dvledtx_config_free(&config);
 
         unlink(tmpfile);
     }
@@ -51,6 +52,7 @@ int main(int argc, char *argv[]) {
     memset(&config, 0, sizeof(config));
     parse_tx_config(argv[1], &config);
     validate_tx_config(&config);
+    dvledtx_config_free(&config);
 #endif
 
     return 0;
