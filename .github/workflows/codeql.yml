@@ -1,0 +1,53 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# CodeQL Advanced workflow for dvledtx (C/C++ project built with meson/ninja).
+#
+# This repository only contains C sources, so the language matrix has been
+# reduced to `c-cpp` and the build mode set to `manual`, reusing the existing
+# environment-check/build-dvledtx composite actions so CodeQL traces the same
+# build the rest of CI performs.
+name: CodeQL Scan
+
+on:
+  schedule:
+    # Weekly on Monday at 07:19 UTC
+    - cron: '19 7 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codeql:
+    name: CodeQL Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write # Required to upload SARIF results to GitHub Security tab
+
+    steps:
+      - name: Clean up previous run
+        env:
+          WORKSPACE: ${{ github.workspace }}
+        run: |
+          find "$WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Environment check
+        uses: ./.github/actions/environment-check
+
+      - name: CodeQL Scan
+        uses: ./.github/actions/analysis/codeql

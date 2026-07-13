@@ -114,6 +114,9 @@ jobs:
       - name: Trivy Scan
         uses: ./.github/actions/analysis/trivy
 
+      - name: CodeQL Scan
+        uses: ./.github/actions/analysis/codeql
+
       - name: Coverity Scan
         uses: ./.github/actions/analysis/coverity
         env:
