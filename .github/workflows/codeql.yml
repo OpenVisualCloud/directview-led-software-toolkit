@@ -49,19 +49,5 @@ jobs:
       - name: Environment check
         uses: ./.github/actions/environment-check
 
-      # Initializes the CodeQL tools for scanning.
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
-        with:
-          languages: c-cpp
-          build-mode: manual
-
-      # `c-cpp` always requires a manual build so CodeQL can trace the
-      # compiler invocations produced by meson/ninja.
-      - name: Build dvledtx
-        uses: ./.github/actions/build-dvledtx
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
-        with:
-          category: "/language:c-cpp"
+      - name: CodeQL Scan
+        uses: ./.github/actions/analysis/codeql
