@@ -103,18 +103,27 @@ jobs:
           cat "$REPORT"
 
       - name: ShellCheck
+        if: always()
         uses: ./.github/actions/analysis/shellcheck
 
       - name: zizmor Scan
+        if: always()
         uses: ./.github/actions/analysis/zizmor
 
       - name: cppcheck
+        if: always()
         uses: ./.github/actions/analysis/cppcheck
 
       - name: Trivy Scan
+        if: always()
         uses: ./.github/actions/analysis/trivy
 
+      - name: CodeQL Scan
+        if: always()
+        uses: ./.github/actions/analysis/codeql
+
       - name: Coverity Scan
+        if: always()
         uses: ./.github/actions/analysis/coverity
         env:
           COVERITY_TOKEN: ${{ secrets.COVERITY_TOKEN }}
@@ -122,17 +131,19 @@ jobs:
 
       - name: Upload SARIF to Security tab
         uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
-        if: always()
+        if: always() && hashFiles('reports/coverity-results.sarif') != ''
         with:
           sarif_file: reports/coverity-results.sarif
           category: coverity
 
       - name: AFL Fuzz
+        if: always()
         uses: ./.github/actions/analysis/afl-fuzz
         with:
           max-seconds: '300'
 
       - name: libFuzzer
+        if: always()
         uses: ./.github/actions/analysis/libfuzzer
         with:
           max-seconds: '300'
