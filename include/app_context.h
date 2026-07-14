@@ -43,6 +43,7 @@ struct dvledtx_context {
   struct nic_config* nics;             /* heap-allocated, nic_count elements */
 
   char tx_url[256];
+  char screen_input[128];
   char config_file[256];
   uint16_t udp_port;
   uint8_t  payload_type;  /* RTP dynamic payload type (default: 96) */
@@ -57,6 +58,7 @@ struct dvledtx_context {
 
   /* Session controls */
   int st20p_sessions;
+  bool use_screen_capture;
   bool exit;
   bool force_dhcp;
   int test_time_s;

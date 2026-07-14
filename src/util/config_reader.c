@@ -231,6 +231,7 @@ int parse_tx_config(const char* config_file, struct dvledtx_config* config) {
 
     const char* buf_end = json + nread;
     memset(config, 0, sizeof(*config));
+    strncpy(config->input_mode, "file", sizeof(config->input_mode) - 1);
 
     /* --- interfaces[] — parse all entries, growing arrays as needed --- */
     const char* ifaces_arr = find_array(json, buf_end, "interfaces");
@@ -310,7 +311,13 @@ int parse_tx_config(const char* config_file, struct dvledtx_config* config) {
         int v;
         v = extract_json_int(video_obj, video_end, "width");  if (v > 0) config->width  = v;
         v = extract_json_int(video_obj, video_end, "height"); if (v > 0) config->height = v;
+        extract_json_string(video_obj, video_end, "input_mode", config->input_mode, sizeof(config->input_mode));
+        extract_json_string(video_obj, video_end, "screen_input", config->screen_input, sizeof(config->screen_input));
         extract_json_string(video_obj, video_end, "tx_url", config->tx_url, sizeof(config->tx_url));
+
+        if (strcmp(config->input_mode, "screen_capture") == 0 && config->screen_input[0] == '\0') {
+            strncpy(config->screen_input, ":0.0+0,0", sizeof(config->screen_input) - 1);
+        }
     }
 
     /* --- tx_video block (transmission parameters) --- */
@@ -528,6 +535,20 @@ int validate_tx_config(const struct dvledtx_config* config) {
         return -1;
     }
 
+    /* Input mode validation */
+    if (config->input_mode[0] == '\0' || strcmp(config->input_mode, "file") == 0) {
+        /* Default/normal mode */
+    } else if (strcmp(config->input_mode, "screen_capture") == 0) {
+        if (config->screen_input[0] == '\0') {
+            LOG_ERROR("video.screen_input must be set when input_mode is 'screen_capture'");
+            return -1;
+        }
+    } else {
+        LOG_ERROR("unsupported input_mode '%s' (supported: file, screen_capture)",
+               config->input_mode);
+        return -1;
+    }
+
     /* Scale dimensions validation (optional — 0 means no scaling) */
     if (config->scale_width != 0 || config->scale_height != 0) {
         if (config->scale_width == 0 || config->scale_height == 0) {
@@ -588,8 +609,10 @@ int validate_tx_config(const struct dvledtx_config* config) {
         return -1;
     }
 
-    /* Video source file validation */
-    if (config->tx_url[0] != '\0') {
+    /* Video source file validation — screen_input was already validated
+     * above in the "Input mode validation" block, so only check the file
+     * path here when not in screen-capture mode. */
+    if (strcmp(config->input_mode, "screen_capture") != 0 && config->tx_url[0] != '\0') {
         FILE* f = fopen(config->tx_url, "rb");
         if (!f) {
             LOG_ERROR("video source file not found: %s", config->tx_url);
@@ -775,6 +798,11 @@ int load_and_apply_config(struct dvledtx_context* app, const char* config_file) 
         strncpy(app->tx_url, config.tx_url, sizeof(app->tx_url) - 1);
         app->tx_url[sizeof(app->tx_url) - 1] = '\0';
     }
+    if (config.screen_input[0] != '\0') {
+        strncpy(app->screen_input, config.screen_input, sizeof(app->screen_input) - 1);
+        app->screen_input[sizeof(app->screen_input) - 1] = '\0';
+    }
+    app->use_screen_capture = (strcmp(config.input_mode, "screen_capture") == 0);
 
     /* Copy per-session network + crop into app->session_net[] */
     for (int i = 0; i < config.session_count; i++) {
@@ -806,15 +834,21 @@ int load_and_apply_config(struct dvledtx_context* app, const char* config_file) 
                  config.interface_sip[ni][0] ? config.interface_sip[ni] : "dhcp",
                  config.interface_dip[ni]);
     if (config.scale_width > 0 && config.scale_height > 0)
-        LOG_INFO("Video: %ux%u -> scale %ux%u %dfps %s  tx_url=%s",
+         LOG_INFO("Video: %ux%u -> scale %ux%u %dfps %s mode=%s source=%s",
                config.width, config.height,
                config.scale_width, config.scale_height,
                config.fps, config.fmt,
-               config.tx_url[0] ? config.tx_url : "<none>");
+             config.input_mode[0] ? config.input_mode : "file",
+             strcmp(config.input_mode, "screen_capture") == 0
+               ? (config.screen_input[0] ? config.screen_input : "<none>")
+               : (config.tx_url[0] ? config.tx_url : "<none>"));
     else
-        LOG_INFO("Video: %ux%u %dfps %s  tx_url=%s",
+         LOG_INFO("Video: %ux%u %dfps %s mode=%s source=%s",
                config.width, config.height, config.fps, config.fmt,
-               config.tx_url[0] ? config.tx_url : "<none>");
+             config.input_mode[0] ? config.input_mode : "file",
+             strcmp(config.input_mode, "screen_capture") == 0
+               ? (config.screen_input[0] ? config.screen_input : "<none>")
+               : (config.tx_url[0] ? config.tx_url : "<none>"));
     for (int i = 0; i < config.session_count; i++)
         LOG_INFO("  Session %d: udp_port=%u pt=%u nic=%d crop=[%d,%d %dx%d]", i,
                config.sessions[i].udp_port, config.sessions[i].payload_type,

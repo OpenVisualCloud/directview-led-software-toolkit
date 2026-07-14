@@ -43,6 +43,7 @@
 
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
+#include <libavdevice/avdevice.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
 #include <libavutil/pixfmt.h>
@@ -286,6 +287,91 @@ static void test_load_video_source_nonexistent_mp4_returns_minus1(void **state)
 }
 
 /* =========================================================================
+ * Test: screen capture (x11grab) input path
+ *
+ * Regression coverage for the bug fixed in commit f74a727: the x11grab
+ * demuxer is only discoverable via av_find_input_format("x11grab") after
+ * avdevice_register_all() has run. This test binary never calls that
+ * function on its own (only src/main.c does, which is not linked here),
+ * so ordering matters: the "before registration" test below MUST run
+ * before the "after registration" test registers it process-wide.
+ * ========================================================================= */
+
+static void test_screen_capture_before_avdevice_register_fails(void **state)
+{
+    (void)state;
+    /* Sanity guard: at this point nothing in this test binary has called
+     * avdevice_register_all() yet, so x11grab must not be resolvable —
+     * mirrors the exact symptom of the original bug
+     * ("x11grab input format not found"). */
+    assert_null(av_find_input_format("x11grab"));
+
+    struct dvledtx_context app;
+    fill_app_16x16(&app, 1);
+    app.use_screen_capture = true;
+    strncpy(app.screen_input, ":0.0+0,0", sizeof(app.screen_input) - 1);
+
+    struct shared_decode_ctx dec;
+    memset(&dec, 0, sizeof(dec));
+    dec.app          = &app;
+    dec.num_sessions = 1;
+
+    int ret = open_shared_ffmpeg(&dec, "unused_filename.mp4");
+    assert_int_equal(ret, -1);
+    assert_null(dec.fmt_ctx);
+}
+
+static void test_screen_capture_after_avdevice_register_finds_x11grab(void **state)
+{
+    (void)state;
+    avdevice_register_all();
+    assert_non_null(av_find_input_format("x11grab"));
+}
+
+static void test_screen_capture_shared_invalid_display_fails_gracefully(void **state)
+{
+    (void)state;
+    /* x11grab is registered (previous test), but the configured display
+     * does not exist in this headless CI environment (or anywhere,
+     * given the absurd display number) — avformat_open_input() must fail
+     * and open_shared_ffmpeg() must propagate -1 without crashing. */
+    struct dvledtx_context app;
+    fill_app_16x16(&app, 1);
+    app.use_screen_capture = true;
+    strncpy(app.screen_input, ":424242.0+0,0", sizeof(app.screen_input) - 1);
+
+    struct shared_decode_ctx dec;
+    memset(&dec, 0, sizeof(dec));
+    dec.app          = &app;
+    dec.num_sessions = 1;
+
+    int ret = open_shared_ffmpeg(&dec, "unused_filename.mp4");
+    assert_int_equal(ret, -1);
+    assert_null(dec.fmt_ctx);
+}
+
+static void test_screen_capture_per_session_invalid_display_fails_gracefully(void **state)
+{
+    (void)state;
+    /* Same as above but through the single-session load_video_source() ->
+     * open_ffmpeg_source() path used when st20p_sessions == 1. */
+    struct dvledtx_context app;
+    fill_app_16x16(&app, 1);
+    app.use_screen_capture = true;
+    strncpy(app.screen_input, ":424242.0+0,0", sizeof(app.screen_input) - 1);
+
+    struct st20p_tx_ctx ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.idx = 0;
+    ctx.app = &app;
+
+    int ret = load_video_source(&ctx, app.screen_input);
+    assert_int_equal(ret, -1);
+    assert_false(ctx.use_ffmpeg);
+    assert_null(ctx.fmt_ctx);
+}
+
+/* =========================================================================
  * Test: shared_decode_thread — runs with generated video + barriers
  * ========================================================================= */
 
@@ -420,6 +506,13 @@ int main(void)
         /* load_video_source → open_ffmpeg_source (static) */
         cmocka_unit_test(test_load_video_source_mp4_calls_open_ffmpeg_source),
         cmocka_unit_test(test_load_video_source_nonexistent_mp4_returns_minus1),
+
+        /* screen capture (x11grab) — order matters: avdevice_register_all()
+         * must not have run yet for the first test below. */
+        cmocka_unit_test(test_screen_capture_before_avdevice_register_fails),
+        cmocka_unit_test(test_screen_capture_after_avdevice_register_finds_x11grab),
+        cmocka_unit_test(test_screen_capture_shared_invalid_display_fails_gracefully),
+        cmocka_unit_test(test_screen_capture_per_session_invalid_display_fails_gracefully),
 
         /* shared_decode_thread */
         cmocka_unit_test(test_shared_decode_thread_decodes_frames),

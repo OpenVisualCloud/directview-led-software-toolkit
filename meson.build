@@ -16,24 +16,17 @@ libswscale_dep  = dependency('libswscale',  required: true)
 # TX path selection — see meson_options.txt for details.
 enable_mtl_tx = get_option('enable_mtl_tx')
 
-# mtl_tx.c always calls mtl_init()/mtl_uninit() (unconditionally, not just
-# under ENABLE_MTL_TX) so that the FFmpeg avdevice path can pre-register all
-# NIC ports with DPDK EAL before the mtl_st20p muxer opens its own session —
-# see the comment above mtl_tx_init() in src/mtl/mtl_tx.c. MTL is therefore a
-# required dependency for both TX paths, not just the direct-MTL one.
-#
-# Its include path comes entirely from `dependency('mtl')`'s own pkg-config
-# Cflags (which already resolves to wherever MTL headers are installed, e.g.
-# `-I/usr/local/include -I/usr/local/include/mtl`) — no hardcoded include
-# path is added here, so this works regardless of MTL's install location.
+# MTL is a required dependency for both TX paths — see src/mtl/mtl_tx.c.
 mtl_dep      = dependency('mtl', required: true)
-avdevice_dep = []
 c_args       = ['-DALLOW_EXPERIMENTAL_API', '-D_FORTIFY_SOURCE=2', '-O2']
+
+# libavdevice is needed regardless of the TX path: the mtl_st20p muxer TX
+# path uses it directly, and the MTL-native TX path still needs it for the
+# x11grab screen-capture input decoder (avdevice_register_all()).
+avdevice_dep = dependency('libavdevice', required: true)
 
 if enable_mtl_tx
   c_args      += ['-DENABLE_MTL_TX']
-else
-  avdevice_dep = dependency('libavdevice', required: true)
 endif
 
 all_deps = [m_dep, pthread_dep,

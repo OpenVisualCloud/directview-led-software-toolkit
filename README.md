@@ -18,6 +18,8 @@
 - [Usage](#usage)
   - [Binding Ethernet Controller to DPDK PMD and Hugepage Setup](#binding-ethernet-controller-to-dpdk-pmd-and-hugepage-setup)
   - [JSON Configuration](#json-configuration)
+    - [Ensuring an X11 session (required for screen capture)](#ensuring-an-x11-session-required-for-screen-capture)
+    - [Screen capture on a headless machine (no physical monitor)](#screen-capture-on-a-headless-machine-no-physical-monitor)
 - [Logging](#logging)
 - [Command-Line Options](#command-line-options)
 - [Supported Formats](#supported-formats)
@@ -93,6 +95,20 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
     - [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md#2-dpdk-build-and-install)
     - [Build and install MTL](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md#3-build-media-transport-library-and-app)
 - [FFmpeg 7.0 with MTL Plugin](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/ecosystem/ffmpeg_plugin/README.md#1-build)
+  - **Screen capture support (`input_mode: screen_capture`) requires FFmpeg's `x11grab` device.** It is auto-detected and compiled in by FFmpeg's `./configure` script, but only if these packages are installed *before* building FFmpeg:
+    ```bash
+    sudo apt-get install -y libx11-dev libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev
+    ```
+    After building, verify support with:
+    ```bash
+    ffmpeg -devices | grep x11grab
+    ```
+    If this prints nothing, FFmpeg needs to be reconfigured/rebuilt after installing the packages above — screen capture will otherwise fail at runtime with `x11grab input format not found`.
+  - **`x11grab` only works against an X11 (Xorg) display, not Wayland** — see [Ensuring an X11 session](#ensuring-an-x11-session-required-for-screen-capture) below if you're capturing from a machine's own physical desktop session.
+  - **Headless machines (no physical monitor)** additionally need a virtual display to capture from — see [Screen capture on a headless machine](#screen-capture-on-a-headless-machine-no-physical-monitor) below, which requires:
+    ```bash
+    sudo apt-get install -y xserver-xorg-video-dummy ubuntu-desktop
+    ```
 
 ### Build Steps
 
@@ -132,7 +148,9 @@ dvledtx uses a JSON config file with three sections:
 | | `dip` | Destination multicast IP address |
 | **video** | `width` | Source frame width in pixels |
 | | `height` | Source frame height in pixels |
-| | `tx_url` | Path to the source video file |
+| | `input_mode` | (Optional) Video input mode: `file` (default) or `screen_capture` |
+| | `tx_url` | Path to the source video file (used when `input_mode=file`) |
+| | `screen_input` | (Optional) x11grab source string for screen capture (used when `input_mode=screen_capture`, default `:0.0+0,0`) |
 | **tx_video** | `scale_width` | (Optional) Output width after scaling |
 | | `scale_height` | (Optional) Output height after scaling |
 | | `fps` | Frames per second (25, 30, 50, 60) |
@@ -142,7 +160,7 @@ dvledtx uses a JSON config file with three sections:
 | | `payload_type` | (Optional) RTP payload type — defaults to `96` if not present |
 | | `crop` | Region to transmit: `x`, `y`, `w`, `h` in pixels |
 
-Example (`config/tx_fullhd_multi_nic.json`):
+#### Example: MP4 file input (`config/tx_fullhd_single_session.json`)
 ```json
 {
   "log_file": "dvledtx.log",
@@ -167,6 +185,168 @@ Example (`config/tx_fullhd_multi_nic.json`):
 ```
 
 Multiple sessions can be defined in `tx_sessions` to transmit different crop regions of the same video simultaneously (see `config/tx_fullhd_multi_session.json`).
+
+#### Ensuring an X11 session (required for screen capture)
+
+`x11grab` can only capture from a native X11 (Xorg) display — it does not work against a Wayland compositor. This mainly affects **machines with a physical monitor** logging into their own desktop session: current Ubuntu releases (22.04 and later) default new GDM logins to a **Wayland** session, which causes `screen_capture` to fail (or silently capture a blank/incorrect frame) even though FFmpeg was built correctly with `x11grab` support.
+
+> The [headless setup below](#screen-capture-on-a-headless-machine-no-physical-monitor) is unaffected by this — it starts a real Xorg server directly (`Xorg :99 ...`) and forces the desktop session running on top of it with `XDG_SESSION_TYPE=x11`, so no GDM/Wayland session is ever involved.
+
+To capture from a machine's own physical display, make sure that desktop session is running X11, not Wayland:
+
+- **Per-login (manual)**: at the GDM login screen, click the gear icon next to the password field and choose **"Ubuntu on Xorg"** instead of the default **"Ubuntu"** (Wayland) before signing in.
+- **System-wide (automatic)**: disable Wayland in GDM so every login defaults to X11 — edit `/etc/gdm3/custom.conf` and uncomment/set `WaylandEnable=false` under the `[daemon]` section, or apply it directly:
+  ```bash
+  sudo cp /etc/gdm3/custom.conf /etc/gdm3/custom.conf.bak
+  sudo sed -i 's/^#\?WaylandEnable=.*/WaylandEnable=false/' /etc/gdm3/custom.conf
+  grep -q '^WaylandEnable=false' /etc/gdm3/custom.conf || \
+    sudo sed -i '/^\[daemon\]/a WaylandEnable=false' /etc/gdm3/custom.conf
+  sudo systemctl restart gdm3   # or: sudo reboot
+  ```
+  Restarting `gdm3` logs out the current session — save your work first. After logging back in, verify the session type:
+  ```bash
+  echo $XDG_SESSION_TYPE   # should print: x11
+  ```
+
+#### Screen capture on a headless machine (no physical monitor)
+
+`x11grab` needs a real X11 display to attach to — it does not work against a raw framebuffer or DRM device. On a machine with no monitor connected, create a virtual display using Xorg with the `dummy` video driver and run a desktop session on it so there's actual content to capture. Unlike Xvfb, a real Xorg server claims physical input devices — your keyboard and mouse work directly on the virtual display.
+
+1. **Install prerequisites** (once): see [Software Requirements](#software-requirements) for the `xserver-xorg-video-dummy`/`ubuntu-desktop` packages and the `x11grab`-enabled FFmpeg build.
+
+2. **Create an Xorg config** for the dummy driver:
+   ```bash
+   sudo tee /tmp/xorg-dummy.conf > /dev/null << 'EOF'
+   Section "Device"
+       Identifier "dummy"
+       Driver "dummy"
+       VideoRam 256000
+   EndSection
+
+   Section "Monitor"
+       Identifier "monitor"
+       HorizSync 28.0-80.0
+       VertRefresh 48.0-75.0
+       Modeline "1920x1080" 148.50 1920 2008 2052 2200 1080 1084 1089 1125 +hsync +vsync
+   EndSection
+
+   Section "Screen"
+       Identifier "screen"
+       Device "dummy"
+       Monitor "monitor"
+       DefaultDepth 24
+       SubSection "Display"
+           Depth 24
+           Modes "1920x1080"
+       EndSubSection
+   EndSection
+
+   Section "ServerLayout"
+       Identifier "layout"
+       Screen "screen"
+       Option "AllowEmptyInput" "false"
+   EndSection
+   EOF
+   ```
+
+3. **Start Xorg** on display `:99`:
+   ```bash
+   sudo Xorg :99 -config /tmp/xorg-dummy.conf -noreset &
+   ```
+
+4. **Allow root access** and **start a GNOME desktop session** (software GL rendering is required since there is no GPU; `PULSE_SERVER` routes audio to the physical audio device):
+   ```bash
+   DISPLAY=:99 xhost +local:root
+   mkdir -p /tmp/gnome99-runtime && chmod 700 /tmp/gnome99-runtime
+   DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 XDG_SESSION_TYPE=x11 \
+     XDG_RUNTIME_DIR=/tmp/gnome99-runtime \
+     PULSE_SERVER=unix:/run/user/$(id -u)/pulse/native \
+     dbus-run-session -- gnome-session --session=ubuntu &
+   ```
+
+5. **Verify** the display is working (give GNOME a few seconds to start):
+   ```bash
+   DISPLAY=:99 ffmpeg -f x11grab -video_size 1920x1080 -i :99.0+0,0 -frames:v 1 -update 1 /tmp/check.png
+   ```
+
+Your physical keyboard and mouse now control the virtual display directly.
+
+> **Audio:** If audio is not working (e.g. PulseAudio only has a `null` sink), load your physical audio device manually:
+> ```bash
+> # List available ALSA devices
+> aplay -l
+> # Load the desired device (e.g. USB headset on card 1)
+> pactl load-module module-alsa-sink device=hw:1,0 sink_name=plantronics sink_properties=device.description="Plantronics_Headset"
+> pactl set-default-sink plantronics
+> ```
+>
+> Applications launched on the virtual display (e.g. Chrome) must also have `PULSE_SERVER` set:
+> ```bash
+> DISPLAY=:99 PULSE_SERVER=unix:/run/user/$(id -u)/pulse/native google-chrome &
+> ```
+
+#### Example: screen-capture input (`config/tx_fullhd_screen_capture.json`)
+
+```json
+{
+  "interfaces": [
+    { "name": "0000:06:00.0", "sip": "192.168.50.29", "dip": "239.168.85.20" }
+  ],
+  "video": {
+    "width": 1920,
+    "height": 1080,
+    "input_mode": "screen_capture",
+    "screen_input": ":99.0+0,0"
+  },
+  "tx_video": {
+    "fps": 30,
+    "fmt": "yuv422p10le"
+  },
+  "tx_sessions": [
+    { "udp_port": 20000, "crop": { "x": 0, "y": 0, "w": 1920, "h": 1080 } }
+  ]
+}
+```
+
+#### Example: multi-session screen capture (`config/tx_fullhd_screen_capture_multi_session.json`)
+
+Splits a 1920×1080 screen capture into 3 vertical strips, each transmitted as a separate ST2110 session:
+
+```json
+{
+  "interfaces": [
+    { "name": "0000:06:00.0", "sip": "192.168.50.29", "dip": "239.168.85.20" }
+  ],
+  "video": {
+    "width": 1920,
+    "height": 1080,
+    "input_mode": "screen_capture",
+    "screen_input": ":99.0+0,0"
+  },
+  "tx_video": {
+    "fps": 30,
+    "fmt": "yuv422p10le"
+  },
+  "tx_sessions": [
+    { "udp_port": 20000, "payload_type": 96, "crop": { "x": 0,    "y": 0, "w": 640, "h": 1080 } },
+    { "udp_port": 20002, "payload_type": 96, "crop": { "x": 640,  "y": 0, "w": 640, "h": 1080 } },
+    { "udp_port": 20004, "payload_type": 96, "crop": { "x": 1280, "y": 0, "w": 640, "h": 1080 } }
+  ]
+}
+```
+
+`screen_input` follows FFmpeg's `x11grab` URL syntax: `<display>[+<x>,<y>]` (e.g. `:99.0+0,0` captures display `:99`, matching the virtual display created above, starting at offset `0,0`). The capture resolution/framerate are taken from the `width`/`height`/`fps` fields above.
+
+Run dvledtx as usual — `x11grab` will capture whatever is rendered on the display (desktop, windows, applications) and transmit it, exactly as it would for a physical display:
+```bash
+./build/dvledtx --config config/tx_fullhd_screen_capture.json
+```
+
+**Tear down** the virtual display when done:
+```bash
+pkill -f "gnome-session --session=ubuntu"
+sudo pkill -f "Xorg :99"
+```
 
 ## Logging
 

@@ -20,6 +20,7 @@
 #include <libavutil/imgutils.h>
 #include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
+#include <libavdevice/avdevice.h>
 
 /* =========================================================================
  * Helpers
@@ -199,6 +200,7 @@ void* shared_decode_thread(void* arg) {
  * ========================================================================= */
 static int open_ffmpeg_decoder(
     const char* filename, const char* log_prefix,
+    bool use_screen_capture, const char* screen_input, int capture_w, int capture_h, int capture_fps,
     enum AVPixelFormat target_fmt, int target_w, int target_h,
     AVFormatContext** out_fmt_ctx, AVCodecContext** out_codec_ctx,
     struct SwsContext** out_sws_ctx, AVFrame** out_av_frame,
@@ -207,10 +209,37 @@ static int open_ffmpeg_decoder(
   char errbuf[256];
   int ret;
 
-  ret = avformat_open_input(out_fmt_ctx, filename, NULL, NULL);
+  if (use_screen_capture == true) {
+    const char* input_url = (screen_input && screen_input[0] != '\0') ? screen_input : ":0.0+0,0";
+    char video_size[32];
+    char framerate[16];
+    snprintf(video_size, sizeof(video_size), "%dx%d", capture_w, capture_h);
+    snprintf(framerate, sizeof(framerate), "%d", capture_fps > 0 ? capture_fps : 30);
+
+    const AVInputFormat* in_fmt = av_find_input_format("x11grab");
+    if (in_fmt == NULL) {
+      LOG_ERROR("%s: x11grab input format not found", log_prefix);
+      return -1;
+    }
+
+    AVDictionary* options = NULL;
+    av_dict_set(&options, "video_size", video_size, 0);
+    av_dict_set(&options, "framerate", framerate, 0);
+
+    ret = avformat_open_input(out_fmt_ctx, input_url, in_fmt, &options);
+    av_dict_free(&options);
+    if (ret < 0) {
+      av_strerror(ret, errbuf, sizeof(errbuf));
+      LOG_ERROR("%s: cannot open x11grab source %s: %s", log_prefix, input_url, errbuf);
+      return -1;
+    }
+  } else {
+    ret = avformat_open_input(out_fmt_ctx, filename, NULL, NULL);
+  }
   if (ret < 0) {
     av_strerror(ret, errbuf, sizeof(errbuf));
-    LOG_ERROR("%s: cannot open %s: %s", log_prefix, filename, errbuf);
+    LOG_ERROR("%s: cannot open %s: %s", log_prefix,
+              use_screen_capture ? "x11grab input" : filename, errbuf);
     return -1;
   }
   ret = avformat_find_stream_info(*out_fmt_ctx, NULL);
@@ -323,8 +352,13 @@ int open_shared_ffmpeg(struct shared_decode_ctx* dec, const char* filename) {
   const struct dvledtx_context* app = dec->app;
   int target_w = (int)(app->scale_width  > 0 ? app->scale_width  : app->width);
   int target_h = (int)(app->scale_height > 0 ? app->scale_height : app->height);
+  /* filename may be empty when screen capture is enabled (app->tx_url is
+   * not required in that mode); use the screen_input descriptor instead so
+   * log messages stay meaningful. */
+  const char* effective_source = app->use_screen_capture ? app->screen_input : filename;
   return open_ffmpeg_decoder(
-    filename, "Shared decode",
+    effective_source, "Shared decode",
+    app->use_screen_capture, app->screen_input, (int)app->width, (int)app->height, app->fps,
     app->fmt, target_w, target_h,
     &dec->fmt_ctx, &dec->codec_ctx, &dec->sws_ctx,
     &dec->av_frame, &dec->yuv_frame, &dec->av_packet,
@@ -347,6 +381,7 @@ static int open_ffmpeg_source(struct st20p_tx_ctx* ctx, const char* filename) {
   int target_h = (int)(ctx->app->scale_height > 0 ? ctx->app->scale_height : ctx->app->height);
   int ret = open_ffmpeg_decoder(
     filename, log_prefix,
+    ctx->app->use_screen_capture, ctx->app->screen_input, (int)ctx->app->width, (int)ctx->app->height, ctx->app->fps,
     ctx->app->fmt, target_w, target_h,
     &ctx->fmt_ctx, &ctx->codec_ctx, &ctx->sws_ctx,
     &ctx->av_frame, &ctx->yuv_frame, &ctx->av_packet,
@@ -366,6 +401,10 @@ void close_ffmpeg_source(struct st20p_tx_ctx* ctx) {
  * Video source loading
  * ========================================================================= */
 int load_video_source(struct st20p_tx_ctx* ctx, const char* filename) {
+  if (ctx->app->use_screen_capture == true) {
+    return open_ffmpeg_source(ctx, ctx->app->screen_input);
+  }
+
   if (!filename || strlen(filename) == 0) {
     LOG_WARN("ST20P TX(%d): no source file configured", ctx->idx);
     return 0;
