@@ -99,6 +99,18 @@ int open_ffmpeg_tx(struct st20p_tx_ctx* ctx) {
   ret = av_opt_set_int(ctx->out_fmt_ctx->priv_data, "payload_type", (int64_t)payload_type,  0);
   if (ret < 0) LOG_WARN("ST20P TX(%d): av_opt_set_int payload_type failed (ret=%d)", ctx->idx, ret);
 
+  /* PTP hardware timing (built-in MTL PTP client). Only takes effect on the
+   * session that actually calls mtl_init() (mtl_dev_get()'s singleton shared
+   * handle) — harmless to set on every session. */
+  if (ctx->app->ptp_enable) {
+    ret = av_opt_set_int(ctx->out_fmt_ctx->priv_data, "ptp_enable", 1, 0);
+    if (ret < 0) LOG_WARN("ST20P TX(%d): av_opt_set_int ptp_enable failed (ret=%d)", ctx->idx, ret);
+    ret = av_opt_set_int(ctx->out_fmt_ctx->priv_data, "ptp_pi", ctx->app->ptp_pi ? 1 : 0, 0);
+    if (ret < 0) LOG_WARN("ST20P TX(%d): av_opt_set_int ptp_pi failed (ret=%d)", ctx->idx, ret);
+    ret = av_opt_set_int(ctx->out_fmt_ctx->priv_data, "ptp_unicast", ctx->app->ptp_unicast ? 1 : 0, 0);
+    if (ret < 0) LOG_WARN("ST20P TX(%d): av_opt_set_int ptp_unicast failed (ret=%d)", ctx->idx, ret);
+  }
+
   /* Multi-NIC: The FFmpeg mtl_st20p plugin's mtl_dev_get() uses a singleton
    * shared MTL handle — the FIRST avformat_write_header() call creates the
    * MTL instance via mtl_init(), which initialises DPDK EAL.  EAL cannot be

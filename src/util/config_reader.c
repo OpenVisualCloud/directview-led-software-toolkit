@@ -328,6 +328,11 @@ int parse_tx_config(const char* config_file, struct dvledtx_config* config) {
     /* --- optional top-level log_file --- */
     extract_json_string(json, buf_end, "log_file", config->log_file, sizeof(config->log_file));
 
+    /* PTP hardware timing (built-in MTL PTP client) — hardcoded, not configurable via JSON. */
+    config->ptp_enable  = true;
+    config->ptp_pi      = true;
+    config->ptp_unicast = false;
+
     /* --- tx_sessions array --- */
     const char* sessions_arr = find_array(json, buf_end, "tx_sessions");
     if (sessions_arr == NULL) {
@@ -797,6 +802,14 @@ int load_and_apply_config(struct dvledtx_context* app, const char* config_file) 
         strncpy(app->log_file, config.log_file, sizeof(app->log_file) - 1);
         app->log_file[sizeof(app->log_file) - 1] = '\0';
     }
+
+    /* PTP hardware timing (built-in MTL PTP client) */
+    app->ptp_enable  = config.ptp_enable;
+    app->ptp_pi      = config.ptp_pi;
+    app->ptp_unicast = config.ptp_unicast;
+    if (app->ptp_enable)
+        LOG_INFO("PTP enabled: pi_controller=%d unicast_delay_req=%d",
+                 app->ptp_pi, app->ptp_unicast);
 
     LOG_INFO("Config loaded: %s (%d NIC(s), %d session(s))",
              config_file, config.nic_count, config.session_count);
