@@ -42,12 +42,6 @@ struct dvledtx_config {
   /* optional log file path (empty = console only) */
   char log_file[256];
 
-  /* PTP hardware timing (built-in MTL PTP client) — hardcoded in config_reader.c,
-   * not configurable via JSON. */
-  int ptp_enable;
-  int ptp_pi;
-  int ptp_unicast;
-
   /* tx_sessions array — dynamically allocated */
   int session_count;
   int session_cap;                             /* allocated capacity */

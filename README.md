@@ -93,6 +93,7 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
     - [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md#2-dpdk-build-and-install)
     - [Build and install MTL](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md#3-build-media-transport-library-and-app)
 - [FFmpeg 7.0 with MTL Plugin](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/ecosystem/ffmpeg_plugin/README.md#1-build)
+  - The stock `mtl_st20p` muxer only exposes `p_port`/`r_port` (2 physical NIC ports). To use more than 2 NICs with the default (non-`ENABLE_MTL_TX`) build, the plugin's `libavdevice/mtl_common.h` must be patched to add `p2_port`..`p7_port` (and matching `p2_sip`..`p7_sip`) AVOptions mapped to `devArgs.port[MTL_PORT_2..MTL_PORT_7]` / `devArgs.sip[...]`, then FFmpeg rebuilt and reinstalled. Without this patch, `nic_count` is effectively capped at 2 for the FFmpeg TX path (the `ENABLE_MTL_TX` direct-pipeline build already supports up to 8 NICs without any patch).
 
 ### Build Steps
 
@@ -167,6 +168,8 @@ Example (`config/tx_fullhd_multi_nic.json`):
 ```
 
 Multiple sessions can be defined in `tx_sessions` to transmit different crop regions of the same video simultaneously (see `config/tx_fullhd_multi_session.json`).
+
+`interfaces[]` supports up to 8 NICs (MTL's port limit); each `tx_sessions[]` entry picks its NIC via `nic_index` (see `config/tx_fullhd_multi_nic.json` for a 6-NIC example). Using more than 2 NICs with the default FFmpeg TX path requires the patched `mtl_st20p` muxer described above.
 
 ## Logging
 

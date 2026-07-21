@@ -2,7 +2,7 @@
   "log_file": "dvledtx.log",
   "interfaces": [
     {
-      "name": "0000:06:00.0",
+      "name": "0000:01:11.3",
       "sip":  "192.168.50.29",
       "dip":  "239.168.85.20"
     }
@@ -10,11 +10,11 @@
   "video": {
     "width":  3840,
     "height": 2160,
-    "tx_url": "ball_fullhd_yuv422p10_30fps_5min.mp4"
+    "tx_url": "/home/intel/workspace/bbb_sunflower_1080p_30fps_normal.mp4"
   },
   "tx_video": {
-    "scale_width":  3840,
-    "scale_height": 2160,
+    "scale_width":  1920,
+    "scale_height": 1080,
     "fps":    30,
     "fmt":    "yuv422p10le"
   },

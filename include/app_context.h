@@ -61,13 +61,6 @@ struct dvledtx_context {
   bool force_dhcp;
   int test_time_s;
 
-  /* PTP hardware timing (built-in MTL PTP client, FFmpeg mtl_st20p muxer path).
-   * See MTL_FLAG_PTP_* in mtl_api.h. Only used when ENABLE_MTL_TX is NOT set
-   * (the FFmpeg avdevice TX path); passed through as AVOptions in ffmpeg_tx.c. */
-  bool ptp_enable;   /* enable built-in PTP client + PTP-paced TX */
-  bool ptp_pi;        /* use PI controller for built-in PTP (PF only) */
-  bool ptp_unicast;   /* use unicast address for PTP_DELAY_REQ message */
-
   /* Per-session network + crop config — dynamically allocated, st20p_sessions elements */
   struct tx_session_net* session_net;
 

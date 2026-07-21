@@ -199,30 +199,12 @@ void mtl_copy_crop_to_frame(struct st_frame* dst, const AVFrame* src,
  *
  * mtl_tx_uninit() — release the MTL library instance.
  */
-/* PTP hardware timing (built-in MTL PTP client, direct MTL TX path).
- * See MTL_FLAG_PTP_* in mtl_api.h. Mirrors the AVOption-driven callback
- * wired for the FFmpeg muxer path in the external ffmpeg_plugin repo. */
-static void mtl_tx_ptp_sync_notify_cb(void* priv, struct mtl_ptp_sync_notify_meta* meta) {
-  (void)priv;
-  LOG_INFO("PTP sync: master_utc_offset=%d delta=%" PRId64 "ns",
-            meta->master_utc_offset, meta->delta);
-}
-
 int mtl_tx_init(session_manager_t* manager, struct dvledtx_context* app) {
   struct mtl_init_params mtl_params;
   memset(&mtl_params, 0, sizeof(mtl_params));
 
   mtl_params.flags     = MTL_FLAG_BIND_NUMA | MTL_FLAG_DEV_AUTO_START_STOP;
   mtl_params.num_ports = app->nic_count;
-
-  if (app->ptp_enable) {
-    mtl_params.flags |= MTL_FLAG_PTP_ENABLE;
-    mtl_params.pacing = ST21_TX_PACING_WAY_PTP;
-    if (app->ptp_pi) mtl_params.flags |= MTL_FLAG_PTP_PI;
-    if (app->ptp_unicast) mtl_params.flags |= MTL_FLAG_PTP_UNICAST_ADDR;
-    mtl_params.ptp_sync_notify = mtl_tx_ptp_sync_notify_cb;
-    LOG_INFO("MTL init: PTP enabled (pi=%d unicast=%d)", app->ptp_pi, app->ptp_unicast);
-  }
 
   /* Count sessions assigned to each NIC for queue allocation */
   int* sessions_per_nic = calloc((size_t)app->nic_count, sizeof(int));
