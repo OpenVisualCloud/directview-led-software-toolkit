@@ -95,14 +95,27 @@ int open_ffmpeg_tx(struct st20p_tx_ctx* ctx) {
   }
 
   /* Resolve per-session network params from JSON config; fall back to
-   * app-level defaults for CLI-only runs (session_net[] is zero-initialised). */
-  int udp_port = ctx->app->session_net[ctx->idx].udp_port;
-  if (udp_port == 0) udp_port = (int)ctx->app->udp_port + (ctx->idx * 2);
+   * app-level defaults for CLI-only runs (session_net[] is zero-initialised)
+   * or when idx is out of range for the allocated session_net[] array. */
+  int udp_port, payload_type, nic;
+  if (ctx->idx >= 0 && ctx->idx < ctx->app->st20p_sessions) {
+    udp_port = ctx->app->session_net[ctx->idx].udp_port;
+    if (udp_port == 0) udp_port = (int)ctx->app->udp_port + (ctx->idx * 2);
 
-  int payload_type = ctx->app->session_net[ctx->idx].payload_type;
-  if (payload_type == 0) payload_type = ctx->app->payload_type;
+    payload_type = ctx->app->session_net[ctx->idx].payload_type;
+    if (payload_type == 0) payload_type = ctx->app->payload_type;
 
-  int nic = ctx->app->session_net[ctx->idx].nic_index;
+    nic = ctx->app->session_net[ctx->idx].nic_index;
+  } else {
+    udp_port     = (int)ctx->app->udp_port + (ctx->idx * 2);
+    payload_type = ctx->app->payload_type;
+    nic          = 0;
+  }
+  if (nic < 0 || nic >= ctx->app->nic_count) {
+    LOG_WARN("ST20P TX(%d): nic_index=%d out of range (nic_count=%d); using NIC 0",
+             ctx->idx, nic, ctx->app->nic_count);
+    nic = 0;
+  }
 
   ret = av_opt_set    (ctx->out_fmt_ctx->priv_data, "p_port",       ctx->app->nics[nic].port,         0);
   if (ret < 0) LOG_WARN("ST20P TX(%d): av_opt_set p_port failed (ret=%d)", ctx->idx, ret);
