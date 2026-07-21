@@ -38,6 +38,14 @@
  *   Also pre-allocates enc_frame (crop-width scratch) and enc_pkt
  *   (contiguous packed frame buffer) whose size must equal MTL's frame_size.
  *
+ *   Multi-NIC: on the session that opens first (idx 0), also registers
+ *   every other configured NIC (up to DVLEDTX_MAX_NICS = 8, MTL's port
+ *   limit) with the mtl_st20p plugin's singleton MTL device via the
+ *   p_port/r_port/p2_port..p7_port AVOptions, since mtl_init()/DPDK EAL is
+ *   only ever invoked once per process. Requires a patched mtl_st20p muxer
+ *   exposing p2_port..p7_port (see README's FFmpeg prerequisite section);
+ *   without it, only 2 NICs (p_port/r_port) can be registered.
+ *
  * close_ffmpeg_tx():
  *   Writes the AVFormat trailer (mtl_st20p: no-op), frees the AVFormatContext
  *   (this destroys the MTL TX session internally), and releases enc_frame/pkt.
