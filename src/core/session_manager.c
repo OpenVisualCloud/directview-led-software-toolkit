@@ -253,7 +253,7 @@ int create_st20p_tx_session(session_manager_t* manager, struct dvledtx_context* 
   if (manager->shared_dec) {
     ctx->shared_dec = manager->shared_dec;
     LOG_INFO("ST20P TX session %d: using shared decoder", session_idx);
-  } else if (strlen(app->tx_url) > 0) {
+  } else if (app->use_screen_capture == true || strlen(app->tx_url) > 0) {
     if (load_video_source(ctx, app->tx_url) < 0) {
       LOG_ERROR("ST20P TX session %d: load_video_source failed", session_idx);
       return -1;
@@ -278,8 +278,8 @@ int session_manager_init(session_manager_t* manager, struct dvledtx_context* app
 
   /* Use shared decoder only when > 1 session and source needs decoding */
   bool use_shared = (app->st20p_sessions > 1 &&
-                     strlen(app->tx_url) > 0 &&
-                     is_raw_yuv(app->tx_url) == false);
+                     (app->use_screen_capture == true ||
+                      (strlen(app->tx_url) > 0 && is_raw_yuv(app->tx_url) == false)));
 
   if (use_shared) {
     manager->shared_dec = calloc(1, sizeof(struct shared_decode_ctx));

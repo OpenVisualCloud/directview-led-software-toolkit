@@ -37,6 +37,8 @@ struct dvledtx_config {
   uint32_t scale_height;  /* 0 = no scaling (use source height) */
   int      fps;
   char     fmt[32];         /* e.g. "yuv422p10le" */
+  char     input_mode[32];  /* "file" (default) or "screen_capture" */
+  char     screen_input[128]; /* x11grab source, e.g. ":0.0+0,0" */
   char     tx_url[256];
 
   /* optional log file path (empty = console only) */

@@ -386,6 +386,51 @@ static void test_init_3sessions_raw_yuv_no_shared_decoder(void **state)
 }
 
 /* ==========================================================================
+ * session_manager_init — 3 sessions with screen capture -> shared decoder
+ * ========================================================================== */
+
+static void test_init_3sessions_screen_capture_uses_shared_decoder(void **state)
+{
+    (void)state;
+    reset_mock_counters();
+    struct dvledtx_context app;
+    fill_app(&app, 3, "");
+    app.use_screen_capture = true;
+    strncpy(app.screen_input, ":0.0+0,0", sizeof(app.screen_input) - 1);
+
+    session_manager_t mgr;
+    assert_int_equal(session_manager_init(&mgr, &app), 0);
+
+    assert_non_null(mgr.shared_dec);
+    assert_int_equal(mock_open_shared_ffmpeg_calls, 1);
+    assert_int_equal(mock_load_video_source_calls, 0);
+
+    session_manager_cleanup(&mgr);
+}
+
+/* ==========================================================================
+ * session_manager_init — single session screen capture -> per-session source
+ * ========================================================================== */
+
+static void test_init_single_session_screen_capture_loads_source(void **state)
+{
+    (void)state;
+    reset_mock_counters();
+    struct dvledtx_context app;
+    fill_app(&app, 1, "");
+    app.use_screen_capture = true;
+    strncpy(app.screen_input, ":0.0+0,0", sizeof(app.screen_input) - 1);
+
+    session_manager_t mgr;
+    assert_int_equal(session_manager_init(&mgr, &app), 0);
+
+    assert_null(mgr.shared_dec);
+    assert_int_equal(mock_load_video_source_calls, 1);
+
+    session_manager_cleanup(&mgr);
+}
+
+/* ==========================================================================
  * session_manager_init — open_ffmpeg_tx failure
  * ========================================================================== */
 
@@ -937,6 +982,8 @@ int main(void)
         cmocka_unit_test(test_init_single_session_no_url),
         cmocka_unit_test(test_init_3sessions_with_url_uses_shared_decoder),
         cmocka_unit_test(test_init_3sessions_raw_yuv_no_shared_decoder),
+        cmocka_unit_test(test_init_3sessions_screen_capture_uses_shared_decoder),
+        cmocka_unit_test(test_init_single_session_screen_capture_loads_source),
         cmocka_unit_test(test_init_fails_when_open_output_fails),
         cmocka_unit_test(test_init_fails_when_open_shared_ffmpeg_fails),
         cmocka_unit_test(test_init_zero_sessions),

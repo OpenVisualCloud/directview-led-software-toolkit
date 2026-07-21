@@ -19,6 +19,13 @@ inputs:
     description: 'FFmpeg release branch to build'
     required: false
     default: '7.0'
+  env-cache-version:
+    description: >-
+      Bump this whenever a change alters what gets built/installed into the
+      cached environment (e.g. new APT packages needed by the FFmpeg build)
+      so runners rebuild instead of restoring a stale cache.
+    required: false
+    default: '2'
 
 runs:
   using: composite
@@ -30,7 +37,7 @@ runs:
         path: |
           ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
-        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-version }}-ffmpeg-${{ inputs.ffmpeg-version }}-${{ runner.os }}
+        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-version }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}
 
     - name: Deploy cache to system
       if: steps.env-cache.outputs.cache-hit == 'true'
@@ -104,7 +111,7 @@ runs:
       shell: bash
       run: |
         echo "===== APT Package Setup ====="
-        PKGS="git gcc meson python3 python3-pip pkg-config libnuma-dev libjson-c-dev libpcap-dev libgtest-dev libssl-dev systemtap-sdt-dev llvm clang flex byacc libcmocka-dev nasm wget patch unzip shellcheck cppcheck"
+        PKGS="git gcc meson python3 python3-pip pkg-config libnuma-dev libjson-c-dev libpcap-dev libgtest-dev libssl-dev systemtap-sdt-dev llvm clang flex byacc libcmocka-dev nasm wget patch unzip shellcheck cppcheck libx11-dev libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev"
         MISSING=""
         for pkg in $PKGS; do
           if dpkg -s "$pkg" &>/dev/null; then
@@ -318,6 +325,14 @@ runs:
           exit 1
         fi
 
+        # Check x11grab device is registered (required for screen-capture input_mode)
+        if echo "$DEVICES" | grep -qi "x11grab"; then
+          echo "  [OK] x11grab device registered in FFmpeg avdevices"
+        else
+          echo "ERROR: FFmpeg x11grab device not found after build."
+          exit 1
+        fi
+
     - name: Report cache size
       if: steps.env-cache.outputs.cache-hit != 'true'
       shell: bash
@@ -332,4 +347,4 @@ runs:
         path: |
           ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
-        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-version }}-ffmpeg-${{ inputs.ffmpeg-version }}-${{ runner.os }}
+        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-version }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}

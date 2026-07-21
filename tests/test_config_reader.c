@@ -75,6 +75,7 @@ static void fill_valid_config(struct dvledtx_config *cfg)
     cfg->height = 1080;
     cfg->fps    = 30;
     strncpy(cfg->fmt, "yuv422p10le", sizeof(cfg->fmt) - 1);
+    strncpy(cfg->input_mode, "file", sizeof(cfg->input_mode) - 1);
     /* tx_url intentionally left empty — skips file-open check in validate */
     cfg->session_cap = 1;
     cfg->sessions = calloc(1, sizeof(*cfg->sessions));
@@ -114,6 +115,7 @@ static void test_parse_3sessions_session_count(void **state)
     struct dvledtx_config cfg;
     assert_int_equal(parse_tx_config(FIXTURE_3SESSIONS, &cfg), 0);
     assert_int_equal(cfg.session_count, 3);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_parse_1session_session_count(void **state)
@@ -122,6 +124,7 @@ static void test_parse_1session_session_count(void **state)
     struct dvledtx_config cfg;
     assert_int_equal(parse_tx_config(FIXTURE_1SESSION, &cfg), 0);
     assert_int_equal(cfg.session_count, 1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_parse_3sessions_interface_fields(void **state)
@@ -132,6 +135,7 @@ static void test_parse_3sessions_interface_fields(void **state)
     assert_string_equal(cfg.interface_name[0], "0000:03:10.1");
     assert_string_equal(cfg.interface_sip[0],  "192.168.50.29");
     assert_string_equal(cfg.interface_dip[0],  "239.168.85.21");
+    dvledtx_config_free(&cfg);
 }
 
 static void test_parse_3sessions_video_params(void **state)
@@ -143,6 +147,7 @@ static void test_parse_3sessions_video_params(void **state)
     assert_int_equal((int)cfg.height, 1080);
     assert_int_equal(cfg.fps,         30);
     assert_string_equal(cfg.fmt, "yuv422p10le");
+    dvledtx_config_free(&cfg);
 }
 
 static void test_parse_3sessions_log_file(void **state)
@@ -151,6 +156,7 @@ static void test_parse_3sessions_log_file(void **state)
     struct dvledtx_config cfg;
     assert_int_equal(parse_tx_config(FIXTURE_3SESSIONS, &cfg), 0);
     assert_string_equal(cfg.log_file, "dvledtx.log");
+    dvledtx_config_free(&cfg);
 }
 
 static void test_parse_3sessions_session0_crop(void **state)
@@ -166,6 +172,7 @@ static void test_parse_3sessions_session0_crop(void **state)
     assert_int_equal(s->crop_y, 0);
     assert_int_equal(s->crop_w, 640);
     assert_int_equal(s->crop_h, 1080);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_parse_3sessions_session1_crop(void **state)
@@ -181,6 +188,7 @@ static void test_parse_3sessions_session1_crop(void **state)
     assert_int_equal(s->crop_y, 0);
     assert_int_equal(s->crop_w, 640);
     assert_int_equal(s->crop_h, 1080);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_parse_3sessions_session2_crop(void **state)
@@ -196,6 +204,7 @@ static void test_parse_3sessions_session2_crop(void **state)
     assert_int_equal(s->crop_y, 0);
     assert_int_equal(s->crop_w, 640);
     assert_int_equal(s->crop_h, 1080);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_parse_returns_minus1_when_sessions_key_absent(void **state)
@@ -213,6 +222,7 @@ static void test_parse_returns_minus1_when_sessions_key_absent(void **state)
     unlink(path);
     free(path);
     assert_int_equal(ret, -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_parse_returns_minus1_when_sessions_array_empty(void **state)
@@ -231,6 +241,7 @@ static void test_parse_returns_minus1_when_sessions_array_empty(void **state)
     unlink(path);
     free(path);
     assert_int_equal(ret, -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_parse_returns_zero_fields_when_video_missing(void **state)
@@ -253,6 +264,75 @@ static void test_parse_returns_zero_fields_when_video_missing(void **state)
     assert_int_equal((int)cfg.width,  0);
     assert_int_equal((int)cfg.height, 0);
     assert_int_equal(cfg.fps, 0);
+    assert_string_equal(cfg.input_mode, "file");
+    dvledtx_config_free(&cfg);
+}
+
+static void test_parse_input_mode_defaults_to_file_when_omitted(void **state)
+{
+    (void)state;
+    char *path = write_tmpfile(
+        "{"
+        "  \"interfaces\": [{\"name\":\"eth0\",\"sip\":\"1.2.3.4\",\"dip\":\"239.1.1.1\"}],"
+        "  \"video\": {\"width\":1920,\"height\":1080,\"tx_url\":\"/tmp/f.mp4\"},"
+        "  \"tx_video\": {\"fps\":25,\"fmt\":\"yuv422p10le\"},"
+        "  \"tx_sessions\": [{\"udp_port\":20000,\"payload_type\":96,"
+        "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]"
+        "}");
+    assert_non_null(path);
+
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_string_equal(cfg.input_mode, "file");
+    assert_int_equal(cfg.screen_input[0], '\0');
+    dvledtx_config_free(&cfg);
+}
+
+static void test_parse_screen_capture_defaults_screen_input(void **state)
+{
+    (void)state;
+    char *path = write_tmpfile(
+        "{"
+        "  \"interfaces\": [{\"name\":\"eth0\",\"sip\":\"1.2.3.4\",\"dip\":\"239.1.1.1\"}],"
+        "  \"video\": {\"width\":1920,\"height\":1080,\"input_mode\":\"screen_capture\"},"
+        "  \"tx_video\": {\"fps\":25,\"fmt\":\"yuv422p10le\"},"
+        "  \"tx_sessions\": [{\"udp_port\":20000,\"payload_type\":96,"
+        "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]"
+        "}");
+    assert_non_null(path);
+
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_string_equal(cfg.input_mode, "screen_capture");
+    assert_string_equal(cfg.screen_input, ":0.0+0,0");
+    dvledtx_config_free(&cfg);
+}
+
+static void test_parse_screen_capture_keeps_explicit_screen_input(void **state)
+{
+    (void)state;
+    char *path = write_tmpfile(
+        "{"
+        "  \"interfaces\": [{\"name\":\"eth0\",\"sip\":\"1.2.3.4\",\"dip\":\"239.1.1.1\"}],"
+        "  \"video\": {\"width\":1920,\"height\":1080,"
+        "    \"input_mode\":\"screen_capture\",\"screen_input\":\":1.0+100,200\"},"
+        "  \"tx_video\": {\"fps\":25,\"fmt\":\"yuv422p10le\"},"
+        "  \"tx_sessions\": [{\"udp_port\":20000,\"payload_type\":96,"
+        "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]"
+        "}");
+    assert_non_null(path);
+
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_string_equal(cfg.input_mode, "screen_capture");
+    assert_string_equal(cfg.screen_input, ":1.0+100,200");
+    dvledtx_config_free(&cfg);
 }
 
 /* ==========================================================================
@@ -583,6 +663,7 @@ static void test_parse_session_missing_udp_port_fails(void **state)
     int ret = parse_tx_config(path, &cfg);
     unlink(path); free(path);
     assert_int_equal(ret, -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_parse_session_udp_port_exceeds_65535_fails(void **state)
@@ -600,6 +681,7 @@ static void test_parse_session_udp_port_exceeds_65535_fails(void **state)
     int ret = parse_tx_config(path, &cfg);
     unlink(path); free(path);
     assert_int_equal(ret, -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_parse_session_missing_payload_type_defaults_to_96(void **state)
@@ -618,6 +700,7 @@ static void test_parse_session_missing_payload_type_defaults_to_96(void **state)
     unlink(path); free(path);
     assert_int_equal(ret, 0);
     assert_int_equal(cfg.sessions[0].payload_type, 96);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_parse_session_no_crop_object_fails(void **state)
@@ -634,6 +717,7 @@ static void test_parse_session_no_crop_object_fails(void **state)
     int ret = parse_tx_config(path, &cfg);
     unlink(path); free(path);
     assert_int_equal(ret, -1);
+    dvledtx_config_free(&cfg);
 }
 
 /* ==========================================================================
@@ -819,6 +903,35 @@ static void test_validate_no_scale_passes(void **state)
     cfg.scale_height = 0;
     assert_int_equal(validate_tx_config(&cfg), 0);
     dvledtx_config_free(&cfg);
+}
+
+static void test_validate_unknown_input_mode_fails(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    strncpy(cfg.input_mode, "camera", sizeof(cfg.input_mode) - 1);
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+static void test_validate_screen_capture_without_screen_input_fails(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    strncpy(cfg.input_mode, "screen_capture", sizeof(cfg.input_mode) - 1);
+    cfg.screen_input[0] = '\0';
+    assert_int_equal(validate_tx_config(&cfg), -1);
+}
+
+static void test_validate_screen_capture_with_screen_input_passes(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    strncpy(cfg.input_mode, "screen_capture", sizeof(cfg.input_mode) - 1);
+    strncpy(cfg.screen_input, ":0.0+0,0", sizeof(cfg.screen_input) - 1);
+    assert_int_equal(validate_tx_config(&cfg), 0);
 }
 
 static void test_validate_duplicate_udp_ports_fails(void **state)
@@ -1175,6 +1288,7 @@ static void test_parse_session_negative_crop_x_fails(void **state)
     unlink(path); free(path);
     /* Missing crop "x" — extract_json_int returns -1, parse must fail */
     assert_int_equal(ret, -1);
+    dvledtx_config_free(&cfg);
 }
 
 static void test_parse_session_zero_crop_w_fails(void **state)
@@ -1192,6 +1306,7 @@ static void test_parse_session_zero_crop_w_fails(void **state)
     int ret = parse_tx_config(path, &cfg);
     unlink(path); free(path);
     assert_int_equal(ret, -1);
+    dvledtx_config_free(&cfg);
 }
 
 /* ==========================================================================
@@ -1337,6 +1452,28 @@ static void test_load_and_apply_config_copies_log_file(void **state)
     dvledtx_context_free(&app);
 }
 
+static void test_load_and_apply_config_maps_screen_capture_fields(void **state)
+{
+    (void)state;
+    char *path = write_tmpfile(
+        "{"
+        "  \"interfaces\": [{\"name\":\"0000:06:00.0\",\"sip\":\"192.168.50.29\",\"dip\":\"239.168.85.20\"}],"
+        "  \"video\": {\"width\":1920,\"height\":1080,\"input_mode\":\"screen_capture\",\"screen_input\":\":1.0+100,200\"},"
+        "  \"tx_video\": {\"fps\":25,\"fmt\":\"yuv422p10le\"},"
+        "  \"tx_sessions\": [{\"udp_port\":20000,\"payload_type\":96,"
+        "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]"
+        "}");
+    assert_non_null(path);
+
+    struct dvledtx_context app;
+    memset(&app, 0, sizeof(app));
+    int ret = load_and_apply_config(&app, path);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_true(app.use_screen_capture);
+    assert_string_equal(app.screen_input, ":1.0+100,200");
+}
+
 /* ==========================================================================
  * main
  * ========================================================================== */
@@ -1358,6 +1495,9 @@ int main(void)
         cmocka_unit_test(test_parse_returns_minus1_when_sessions_key_absent),
         cmocka_unit_test(test_parse_returns_minus1_when_sessions_array_empty),
         cmocka_unit_test(test_parse_returns_zero_fields_when_video_missing),
+        cmocka_unit_test(test_parse_input_mode_defaults_to_file_when_omitted),
+        cmocka_unit_test(test_parse_screen_capture_defaults_screen_input),
+        cmocka_unit_test(test_parse_screen_capture_keeps_explicit_screen_input),
         cmocka_unit_test(test_parse_session_missing_udp_port_fails),
         cmocka_unit_test(test_parse_session_udp_port_exceeds_65535_fails),
         cmocka_unit_test(test_parse_session_missing_payload_type_defaults_to_96),
@@ -1402,6 +1542,9 @@ int main(void)
         cmocka_unit_test(test_validate_scale_crop_exceeds_scaled_dims_fails),
         cmocka_unit_test(test_validate_scale_crop_within_scaled_dims_passes),
         cmocka_unit_test(test_validate_no_scale_passes),
+        cmocka_unit_test(test_validate_unknown_input_mode_fails),
+        cmocka_unit_test(test_validate_screen_capture_without_screen_input_fails),
+        cmocka_unit_test(test_validate_screen_capture_with_screen_input_passes),
         cmocka_unit_test(test_validate_duplicate_udp_ports_fails),
         cmocka_unit_test(test_validate_crop_x_misaligned_for_yuv422_fails),
         cmocka_unit_test(test_validate_tx_url_nonexistent_file_fails),
@@ -1447,6 +1590,7 @@ int main(void)
         cmocka_unit_test(test_load_and_apply_config_fmt_yuv420),
         cmocka_unit_test(test_load_and_apply_config_unknown_fmt_fails),
         cmocka_unit_test(test_load_and_apply_config_copies_log_file),
+        cmocka_unit_test(test_load_and_apply_config_maps_screen_capture_fields),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

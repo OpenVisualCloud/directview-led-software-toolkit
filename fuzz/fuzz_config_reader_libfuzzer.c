@@ -40,6 +40,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     memset(&config, 0, sizeof(config));
     parse_tx_config(tmpfile, &config);
     validate_tx_config(&config);
+    dvledtx_config_free(&config);
 
     unlink(tmpfile);
     return 0;

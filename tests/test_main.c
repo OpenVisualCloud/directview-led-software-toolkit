@@ -383,6 +383,27 @@ static void test_main_happy_path_exits_immediately(void **state)
     assert_int_equal(ret, 0);
 }
 
+/* Regression test for commit f74a727: avdevice_register_all() must be
+ * called unconditionally in tx_app_real_main(), NOT gated behind an
+ * ENABLE_MTL_TX ifdef. Previously the MTL-native TX build path skipped
+ * avdevice registration entirely, so av_find_input_format("x11grab")
+ * always returned NULL and screen-capture input silently failed with
+ * "x11grab input format not found" — even though libavdevice itself was
+ * linked. Running the full main() body here and then checking that the
+ * x11grab demuxer becomes discoverable catches any future regression of
+ * that ifdef. */
+static void test_main_registers_avdevice_for_x11grab(void **state)
+{
+    (void)state;
+    reset_stubs();
+    stub_load_config_set_exit = true; /* exit loop immediately */
+    optind = 1;
+    char *argv[] = {"dvledtx", "--config", "test.json", NULL};
+    int ret = tx_app_real_main(3, argv);
+    assert_int_equal(ret, 0);
+    assert_non_null(av_find_input_format("x11grab"));
+}
+
 /* Happy path with test_time_s = 1: exercises the for-loop branch.
  * app.exit is set true so the for loop exits after checking !app.exit. */
 static void test_main_test_time_path(void **state)
@@ -691,6 +712,7 @@ int main(void)
         /* tx_app_real_main (full main() body) */
         cmocka_unit_test(test_main_no_config_returns_minus1),
         cmocka_unit_test(test_main_happy_path_exits_immediately),
+        cmocka_unit_test(test_main_registers_avdevice_for_x11grab),
         cmocka_unit_test(test_main_test_time_path),
         cmocka_unit_test(test_main_config_load_fails),
         cmocka_unit_test(test_main_session_init_fails),
