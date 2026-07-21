@@ -14,10 +14,10 @@
 #include <unistd.h>
 #include <limits.h>
 
-/* libavdevice is only needed for the FFmpeg mtl_st20p muxer TX path */
-#ifndef ENABLE_MTL_TX
+/* libavdevice is needed for both TX paths: the FFmpeg mtl_st20p muxer TX
+ * path, and the x11grab screen-capture input decoder used by the MTL-native
+ * TX path (ENABLE_MTL_TX). */
 #include <libavdevice/avdevice.h>
-#endif
 #include <libavutil/log.h>
 #include "app_context.h"
 #include "util/config_reader.h"
@@ -285,11 +285,10 @@ int main(int argc, char** argv) {
   if (signal(SIGTERM, dvledtx_sig_handler) == SIG_ERR)
     LOG_WARN("Failed to install SIGTERM handler");
 
-  /* Register all FFmpeg devices (required for the MTL mtl_st20p muxer
-   * which lives in libavdevice, not libavformat) */
-#ifndef ENABLE_MTL_TX
+  /* Register all FFmpeg devices (required for the MTL mtl_st20p muxer,
+   * which lives in libavdevice, and for the x11grab screen-capture input
+   * decoder used by both TX paths) */
   avdevice_register_all();
-#endif
 
   /* I-3: Suppress verbose FFmpeg internal logging in production to avoid
    * leaking internal paths or memory addresses via av_strerror output. */
