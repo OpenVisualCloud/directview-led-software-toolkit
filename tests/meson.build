@@ -186,4 +186,27 @@ if mtl_dep.found()
     install: false
   )
   test('mtl_tx', test_mtl_tx)
+
+  # Stub-based tests: MTL library entry points are wrapped so the session
+  # lifecycle and frame-send paths run with no real MTL/DPDK hardware.
+  test_mtl_tx_stub = executable('test_mtl_tx_stub',
+    sources: [
+      'test_mtl_tx_stub.c',
+      '../src/mtl/mtl_tx.c',
+      '../src/util/logger.c',
+    ],
+    include_directories: [test_inc, include_directories('/usr/local/include/mtl')],
+    dependencies: test_deps + [mtl_dep],
+    c_args: test_c_args + ['-DENABLE_MTL_TX'],
+    link_args: ['-Wl,--wrap=mtl_init',
+                '-Wl,--wrap=mtl_uninit',
+                '-Wl,--wrap=mtl_pmd_by_port_name',
+                '-Wl,--wrap=st20p_tx_create',
+                '-Wl,--wrap=st20p_tx_free',
+                '-Wl,--wrap=st20p_tx_frame_size',
+                '-Wl,--wrap=st20p_tx_get_frame',
+                '-Wl,--wrap=st20p_tx_put_frame'],
+    install: false
+  )
+  test('mtl_tx_stub', test_mtl_tx_stub)
 endif
