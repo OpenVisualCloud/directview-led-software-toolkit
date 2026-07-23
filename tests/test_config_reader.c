@@ -721,6 +721,96 @@ static void test_parse_session_no_crop_object_fails(void **state)
 }
 
 /* ==========================================================================
+ * parse_tx_config — interfaces[].nic_index validation
+ * ========================================================================== */
+
+static void test_parse_interfaces_nic_index_omitted_passes(void **state)
+{
+    (void)state;
+    /* No "nic_index" field at all — backward compatible, no validation. */
+    char *path = write_tmpfile(
+        "{"
+        "  \"interfaces\": [{\"name\":\"eth0\",\"sip\":\"1.2.3.4\",\"dip\":\"5.6.7.8\"}],"
+        "  \"video\": {\"width\":1920,\"height\":1080,\"fps\":25,\"fmt\":\"yuv422p10le\"},"
+        "  \"tx_sessions\": [{\"udp_port\":20000,\"payload_type\":96,"
+        "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]"
+        "}");
+    assert_non_null(path);
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_int_equal(cfg.nic_count, 1);
+    dvledtx_config_free(&cfg);
+}
+
+static void test_parse_interfaces_nic_index_matches_position_passes(void **state)
+{
+    (void)state;
+    /* nic_index values match each entry's actual array position (0, 1). */
+    char *path = write_tmpfile(
+        "{"
+        "  \"interfaces\": ["
+        "    {\"nic_index\":0,\"name\":\"0000:01:10.1\",\"sip\":\"1.2.3.4\",\"dip\":\"239.1.1.1\"},"
+        "    {\"nic_index\":1,\"name\":\"0000:01:10.3\",\"sip\":\"1.2.3.5\",\"dip\":\"239.1.1.2\"}"
+        "  ],"
+        "  \"video\": {\"width\":1920,\"height\":1080,\"fps\":25,\"fmt\":\"yuv422p10le\"},"
+        "  \"tx_sessions\": [{\"udp_port\":20000,\"payload_type\":96,\"nic_index\":1,"
+        "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]"
+        "}");
+    assert_non_null(path);
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_int_equal(cfg.nic_count, 2);
+    assert_string_equal(cfg.interface_name[0], "0000:01:10.1");
+    assert_string_equal(cfg.interface_name[1], "0000:01:10.3");
+    dvledtx_config_free(&cfg);
+}
+
+static void test_parse_interfaces_nic_index_mismatch_fails(void **state)
+{
+    (void)state;
+    /* Second entry claims nic_index 5, but its actual array position is 1. */
+    char *path = write_tmpfile(
+        "{"
+        "  \"interfaces\": ["
+        "    {\"nic_index\":0,\"name\":\"0000:01:10.1\",\"sip\":\"1.2.3.4\",\"dip\":\"239.1.1.1\"},"
+        "    {\"nic_index\":5,\"name\":\"0000:01:10.3\",\"sip\":\"1.2.3.5\",\"dip\":\"239.1.1.2\"}"
+        "  ],"
+        "  \"video\": {\"width\":1920,\"height\":1080,\"fps\":25,\"fmt\":\"yuv422p10le\"},"
+        "  \"tx_sessions\": [{\"udp_port\":20000,\"payload_type\":96,"
+        "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]"
+        "}");
+    assert_non_null(path);
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, -1);
+    dvledtx_config_free(&cfg);
+}
+
+static void test_parse_interfaces_nic_index_first_entry_mismatch_fails(void **state)
+{
+    (void)state;
+    /* Single interface but nic_index declared as 1 instead of its position 0. */
+    char *path = write_tmpfile(
+        "{"
+        "  \"interfaces\": [{\"nic_index\":1,\"name\":\"eth0\",\"sip\":\"1.2.3.4\",\"dip\":\"5.6.7.8\"}],"
+        "  \"video\": {\"width\":1920,\"height\":1080,\"fps\":25,\"fmt\":\"yuv422p10le\"},"
+        "  \"tx_sessions\": [{\"udp_port\":20000,\"payload_type\":96,"
+        "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]"
+        "}");
+    assert_non_null(path);
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, -1);
+    dvledtx_config_free(&cfg);
+}
+
+/* ==========================================================================
  * validate_tx_config — additional failure / edge-case paths
  * ========================================================================== */
 
@@ -1504,6 +1594,10 @@ int main(void)
         cmocka_unit_test(test_parse_session_no_crop_object_fails),
         cmocka_unit_test(test_parse_session_negative_crop_x_fails),
         cmocka_unit_test(test_parse_session_zero_crop_w_fails),
+        cmocka_unit_test(test_parse_interfaces_nic_index_omitted_passes),
+        cmocka_unit_test(test_parse_interfaces_nic_index_matches_position_passes),
+        cmocka_unit_test(test_parse_interfaces_nic_index_mismatch_fails),
+        cmocka_unit_test(test_parse_interfaces_nic_index_first_entry_mismatch_fails),
 
         /* --- validate_tx_config --- */
         cmocka_unit_test(test_validate_valid_config_passes),
