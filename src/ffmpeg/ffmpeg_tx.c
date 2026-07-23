@@ -128,41 +128,14 @@ int open_ffmpeg_tx(struct st20p_tx_ctx* ctx) {
   ret = av_opt_set_int(ctx->out_fmt_ctx->priv_data, "payload_type", (int64_t)payload_type,  0);
   if (ret < 0) LOG_WARN("ST20P TX(%d): av_opt_set_int payload_type failed (ret=%d)", ctx->idx, ret);
 
-  /* Multi-NIC (up to DVLEDTX_MAX_NICS physical ports, matching MTL's
-   * MTL_PORT_MAX): The FFmpeg mtl_st20p plugin's mtl_dev_get() uses a
-   * singleton shared MTL handle — the FIRST avformat_write_header() call
-   * creates the MTL instance via mtl_init(), which initialises DPDK EAL.
-   * EAL cannot be re-initialised, so ALL NIC ports referenced by ANY
-   * session must be registered with mtl_init() at that first call.
-   *
-   * The mtl_st20p muxer exposes one AVOption pair per device-level port
-   * slot: p_port/p_sip (slot 0), r_port/r_sip (slot 1), and
-   * p2_port/p2_sip .. p7_port/p7_sip (slots 2-7) — see DVLEDTX_NIC_SLOTS.
-   * These feed StDevArgs.port[]/sip[] in the plugin, which mtl_dev_get()
-   * scans up to MTL_PORT_MAX to build mtl_init_params for mtl_init().
-   *
-   * This is primarily a *device*-level registration: it does not affect
-   * which physical port an individual session transmits on (that is
-   * still chosen per-session via this session's own p_port, set above
-   * from ctx->app->nics[nic].port). Slots 2-7 (p2_port..p7_port) are
-   * pure device-level additions — mtl_parse_tx_port() in the plugin only
-   * ever reads devArgs.port[0]/[1] (MTL_SESSION_PORT_MAX == 2) as a
-   * fallback for THIS session's own transport port(s).
-   *
-   * Slot 1 (r_port) is the exception: because it aliases
-   * MTL_SESSION_PORT_R, populating it here also makes session 0's own
-   * st20p stream a genuine ST 2022-7 dual-port (primary+redundant)
-   * transmission — i.e. session 0 additionally duplicates its own crop
-   * onto NIC[1]. r_tx_ip must therefore be set to a valid destination IP
-   * (that NIC's own configured dip) or st20_tx_create() fails with
-   * "invalid ip 0.0.0.0". This is unavoidable: mtl_dev_get()'s device
-   * port scan stops at the first unset slot, so slot 1 must be populated
-   * contiguously for slots 2-7 to be registered at all.
-   *
-   * ctx->idx == 0 identifies the first session deterministically. A
-   * function-static flag would never reset across multiple start/stop
-   * cycles or repeated init calls within the same process (e.g. unit
-   * tests), so later runs could silently skip this registration. */
+  /* Multi-NIC: mtl_init()/DPDK EAL is only ever initialised once per
+   * process (on the FIRST avformat_write_header()), so session 0
+   * registers every configured NIC (up to DVLEDTX_MAX_NICS) as a
+   * device-level port via the p_port/r_port/p2_port..p7_port AVOptions
+   * (see dvledtx_nic_*_opt[] above). Slot 1 (r_port) aliases this
+   * session's own MTL_SESSION_PORT_R, so it also needs a valid r_tx_ip
+   * or st20_tx_create() rejects it with "invalid ip 0.0.0.0". Requires a
+   * patched mtl_st20p muxer exposing p2_port..p7_port (see README). */
   if (ctx->idx == 0) {
     int nic_total = ctx->app->nic_count;
     if (nic_total > DVLEDTX_MAX_NICS) {
@@ -170,6 +143,19 @@ int open_ffmpeg_tx(struct st20p_tx_ctx* ctx) {
                "only the first %d NICs will be registered",
                ctx->idx, nic_total, DVLEDTX_MAX_NICS, DVLEDTX_MAX_NICS);
       nic_total = DVLEDTX_MAX_NICS;
+    }
+
+    /* Fail fast if the muxer lacks p2_port: without it, sessions beyond
+     * the first 2 NICs would silently only get a WARN from av_opt_set()
+     * below, then fail later in a much harder-to-debug way once MTL/EAL
+     * is already initialised. */
+    if (nic_total > 2 &&
+        av_opt_find(ctx->out_fmt_ctx->priv_data, "p2_port", NULL, 0, 0) == NULL) {
+      LOG_ERROR("ST20P TX(%d): mtl_st20p muxer lacks p2_port AVOption; "
+                "rebuild FFmpeg with the patched mtl_common.h (see README) "
+                "to support more than 2 NICs", ctx->idx);
+      avformat_free_context(ctx->out_fmt_ctx); ctx->out_fmt_ctx = NULL;
+      return -1;
     }
 
     int slot = 1; /* slot 0 (p_port/p_sip) already carries this session's own NIC */

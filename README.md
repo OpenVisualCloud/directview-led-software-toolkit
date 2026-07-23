@@ -349,7 +349,7 @@ pkill -f "gnome-session --session=ubuntu"
 sudo pkill -f "Xorg :99"
 ```
 
-`interfaces[]` supports up to 8 NICs (MTL's port limit); each `tx_sessions[]` entry picks its NIC via `nic_index` (see `config/tx_fullhd_multi_nic.json` for a 6-NIC example). Using more than 2 NICs with the default FFmpeg TX path requires the patched `mtl_st20p` muxer described above.
+`interfaces[]` supports up to 8 NICs (MTL's port limit); each `tx_sessions[]` entry picks its NIC via `nic_index` (see `config/tx_fullhd_multi_nic.json` for an 8-NIC/8-session example). Using more than 2 NICs with the default FFmpeg TX path requires the patched `mtl_st20p` muxer described above.
 
 ## Logging
 

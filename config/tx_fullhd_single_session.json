@@ -10,7 +10,7 @@
   "video": {
     "width":  3840,
     "height": 2160,
-    "tx_url": "/home/intel/workspace/bbb_sunflower_1080p_30fps_normal.mp4"
+    "tx_url": "bbb_sunflower_1080p_30fps_normal.mp4"
   },
   "tx_video": {
     "scale_width":  1920,
