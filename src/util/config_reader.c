@@ -198,7 +198,9 @@ int peek_config_log_file(const char* config_file, char* out_buf, size_t out_size
  *
  * Expected JSON structure:
  *   {
- *     "interfaces": [ { "name": "...", "sip": "...", "dip": "..." } ],
+ *     "interfaces": [ { "nic_index": N, "name": "...", "sip": "...", "dip": "..." } ],
+ *       -- "nic_index" is optional but, if present, must equal the entry's
+ *          position in the array (0, 1, 2, ...); parsing fails otherwise.
  *     "video": { "width": N, "height": N, "tx_url": "..." },
  *     "tx_video": { "scale_width": N, "scale_height": N, "fps": N, "fmt": "..." },
  *     "log_file": "/path/to/dvledtx.log",  (optional — omit for console-only logging)
@@ -297,6 +299,25 @@ int parse_tx_config(const char* config_file, struct dvledtx_config* config) {
                                     config->interface_sip[n],  sizeof(config->interface_sip[n]));
                 extract_json_string(iface_obj, iface_end, "dip",
                                     config->interface_dip[n],  sizeof(config->interface_dip[n]));
+
+                /* "nic_index" (if present) is informational only — interfaces
+                 * are always stored at their position in the array (n).  It
+                 * must match that position so the JSON stays self-consistent
+                 * with how tx_sessions[].nic_index actually resolves to this
+                 * interface; catch authoring mistakes (e.g. reordered or
+                 * duplicated entries) early instead of silently misrouting
+                 * sessions to the wrong NIC. */
+                int declared_idx = extract_json_int(iface_obj, iface_end, "nic_index");
+                if (declared_idx >= 0 && declared_idx != n) {
+                    LOG_ERROR("interfaces[%d]: nic_index %d does not match its array "
+                              "position %d; nic_index must equal the interface's "
+                              "position within the interfaces array",
+                              n, declared_idx, n);
+                    free(json);
+                    dvledtx_config_free(config);
+                    return -1;
+                }
+
                 config->nic_count++;
                 icursor = iface_end + 1;
             }
