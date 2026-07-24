@@ -372,6 +372,84 @@ static void test_screen_capture_per_session_invalid_display_fails_gracefully(voi
 }
 
 /* =========================================================================
+ * Test: screen capture (x11grab) SUCCESS path against a live X display
+ *
+ * The failure-path tests above only exercise the error branches. These
+ * tests open a real x11grab source and (for the per-session variant)
+ * decode a real frame, covering the success branch of open_ffmpeg_decoder()
+ * that is otherwise only reached by the file-based decoder tests.
+ *
+ * They require a live X server. To keep headless CI green, they are opt-in:
+ * they run only when DVLED_TEST_DISPLAY is set (e.g. ":99.0+0,0"), and are
+ * reported as skipped otherwise. scripts/test.sh sets this automatically
+ * when it detects a working display.
+ * ========================================================================= */
+
+static void test_screen_capture_shared_success_opens_source(void **state)
+{
+    (void)state;
+    const char* disp = getenv("DVLED_TEST_DISPLAY");
+    if (disp == NULL || disp[0] == '\0') {
+        skip();  /* no live X display in this environment */
+    }
+
+    avdevice_register_all();  /* ensure x11grab is resolvable */
+
+    struct dvledtx_context app;
+    fill_app_16x16(&app, 1);
+    app.use_screen_capture = true;
+    snprintf(app.screen_input, sizeof(app.screen_input), "%s", disp);
+
+    struct shared_decode_ctx dec;
+    memset(&dec, 0, sizeof(dec));
+    dec.app          = &app;
+    dec.num_sessions = 1;
+
+    int ret = open_shared_ffmpeg(&dec, "");
+    assert_int_equal(ret, 0);
+    assert_non_null(dec.fmt_ctx);
+    assert_non_null(dec.codec_ctx);
+    assert_non_null(dec.sws_ctx);
+
+    close_shared_ffmpeg(&dec);
+    dvledtx_context_free(&app);
+}
+
+static void test_screen_capture_per_session_success_captures_frame(void **state)
+{
+    (void)state;
+    const char* disp = getenv("DVLED_TEST_DISPLAY");
+    if (disp == NULL || disp[0] == '\0') {
+        skip();  /* no live X display in this environment */
+    }
+
+    avdevice_register_all();  /* ensure x11grab is resolvable */
+
+    struct dvledtx_context app;
+    fill_app_16x16(&app, 1);
+    app.use_screen_capture = true;
+    snprintf(app.screen_input, sizeof(app.screen_input), "%s", disp);
+
+    struct st20p_tx_ctx ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.idx = 0;
+    ctx.app = &app;
+
+    int ret = load_video_source(&ctx, app.screen_input);
+    assert_int_equal(ret, 0);
+    assert_true(ctx.use_ffmpeg);
+    assert_non_null(ctx.fmt_ctx);
+
+    /* Capture and colour-convert one real frame from the X display. */
+    bool got = ffmpeg_decode_next_frame(&ctx);
+    assert_true(got);
+    assert_non_null(ctx.yuv_frame);
+
+    close_ffmpeg_source(&ctx);
+    dvledtx_context_free(&app);
+}
+
+/* =========================================================================
  * Test: shared_decode_thread — runs with generated video + barriers
  * ========================================================================= */
 
@@ -513,6 +591,8 @@ int main(void)
         cmocka_unit_test(test_screen_capture_after_avdevice_register_finds_x11grab),
         cmocka_unit_test(test_screen_capture_shared_invalid_display_fails_gracefully),
         cmocka_unit_test(test_screen_capture_per_session_invalid_display_fails_gracefully),
+        cmocka_unit_test(test_screen_capture_shared_success_opens_source),
+        cmocka_unit_test(test_screen_capture_per_session_success_captures_frame),
 
         /* shared_decode_thread */
         cmocka_unit_test(test_shared_decode_thread_decodes_frames),

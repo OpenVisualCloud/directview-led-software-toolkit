@@ -216,13 +216,13 @@ static void test_open_ffmpeg_tx_uses_app_defaults(void **state)
 
     struct dvledtx_context app;
     fill_app_16x16(&app, 1);
-    /* Clear per-session network config — open_ffmpeg_tx must fall back to
-     * app-level width/height. */
+    /* Clear per-session network config — with udp_port/payload_type zeroed,
+     * open_ffmpeg_tx must fall back to the app-level defaults. */
     memset(app.session_net, 0, (size_t)app.st20p_sessions * sizeof(*app.session_net));
 
     struct st20p_tx_ctx ctx;
     memset(&ctx, 0, sizeof(ctx));
-    ctx.idx         = 1; /* out of range → uses app defaults */
+    ctx.idx         = 0; /* zeroed session_net → falls back to app defaults */
     ctx.app         = &app;
     ctx.crop_width  = 16;
     ctx.crop_height = 16;
@@ -382,6 +382,133 @@ static void test_ffmpeg_tx_send_yuv_frame_pipeline(void **state)
     close_ffmpeg_tx(&ctx);
 }
 
+/* ffmpeg_tx_send_yuv_frame — crop rectangle exceeds source → crop_yuv_frame
+ * fails and the send returns -1 (covers the crop-failure error branch). */
+static void test_ffmpeg_tx_send_yuv_frame_bad_crop_fails(void **state)
+{
+    (void)state;
+    avdevice_register_all();
+
+    struct dvledtx_context app;
+    fill_app_16x16(&app, 1);
+    app.exit      = false;
+    g_test_exit = false;
+
+    struct st20p_tx_ctx ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.idx         = 0;
+    ctx.app         = &app;
+    ctx.crop_width  = 16;
+    ctx.crop_height = 16;
+
+    assert_int_equal(open_ffmpeg_tx(&ctx), 0);
+    assert_int_equal(load_video_source(&ctx, TEST_VIDEO_PATH), 0);
+
+    assert_true(ffmpeg_decode_next_frame(&ctx));
+    assert_non_null(ctx.yuv_frame);
+
+    /* crop_x + crop_w = 8 + 16 = 24 > source width 16 → crop_yuv_frame fails */
+    int ret = ffmpeg_tx_send_yuv_frame(&ctx, ctx.yuv_frame, 8, 0, 16, 16);
+    assert_int_equal(ret, -1);
+
+    close_ffmpeg_source(&ctx);
+    close_ffmpeg_tx(&ctx);
+}
+
+/* =========================================================================
+ * open_ffmpeg_tx — multi-NIC redundant-port registration (idx 0, nic_count 2)
+ * ========================================================================= */
+
+static void test_open_ffmpeg_tx_multi_nic(void **state)
+{
+    (void)state;
+    avdevice_register_all();
+
+    struct dvledtx_context app;
+    memset(&app, 0, sizeof(app));
+    assert_int_equal(dvledtx_context_alloc(&app, 2, 1), 0);
+
+    strncpy(app.nics[0].port,         "0000:06:00.0",  sizeof(app.nics[0].port) - 1);
+    strncpy(app.nics[0].sip_addr_str, "192.168.50.29", sizeof(app.nics[0].sip_addr_str) - 1);
+    strncpy(app.nics[0].dip_addr_str, "239.168.85.20", sizeof(app.nics[0].dip_addr_str) - 1);
+    strncpy(app.nics[1].port,         "0000:06:00.2",  sizeof(app.nics[1].port) - 1);
+    strncpy(app.nics[1].sip_addr_str, "192.168.50.30", sizeof(app.nics[1].sip_addr_str) - 1);
+    strncpy(app.nics[1].dip_addr_str, "239.168.85.21", sizeof(app.nics[1].dip_addr_str) - 1);
+    app.width        = 16;
+    app.height       = 16;
+    app.fps          = 25;
+    app.fmt          = AV_PIX_FMT_YUV422P10LE;
+    app.udp_port     = 20000;
+    app.payload_type = 96;
+    app.session_net[0].udp_port     = 20000;
+    app.session_net[0].payload_type = 96;
+    app.session_net[0].crop_w       = 16;
+    app.session_net[0].crop_h       = 16;
+    app.session_net[0].nic_index    = 0;
+
+    struct st20p_tx_ctx ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.idx         = 0; /* first session → registers second NIC as redundant */
+    ctx.app         = &app;
+    ctx.crop_width  = 16;
+    ctx.crop_height = 16;
+
+    assert_int_equal(open_ffmpeg_tx(&ctx), 0);
+    assert_non_null(ctx.out_fmt_ctx);
+
+    close_ffmpeg_tx(&ctx);
+    dvledtx_context_free(&app);
+}
+
+/* =========================================================================
+ * ffmpeg_tx_send_raw_yuv — guard + full raw playback path (with wrap)
+ * ========================================================================= */
+
+static void test_ffmpeg_tx_send_raw_yuv_guard(void **state)
+{
+    (void)state;
+    /* enc_frame/enc_pkt NULL → early -1 without touching MTL */
+    struct st20p_tx_ctx ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    assert_int_equal(ffmpeg_tx_send_raw_yuv(&ctx), -1);
+}
+
+static void test_ffmpeg_tx_send_raw_yuv_pipeline(void **state)
+{
+    (void)state;
+    avdevice_register_all();
+
+    struct dvledtx_context app;
+    fill_app_16x16(&app, 1);
+
+    struct st20p_tx_ctx ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.idx         = 0;
+    ctx.app         = &app;
+    ctx.crop_width  = 16;
+    ctx.crop_height = 16;
+
+    assert_int_equal(open_ffmpeg_tx(&ctx), 0);
+
+    int frame_sz = av_image_get_buffer_size(app.fmt, 16, 16, 1);
+    assert_true(frame_sz > 0);
+    ctx.frame_size   = (size_t)frame_sz;
+    ctx.source_size  = (size_t)frame_sz * 2; /* room for two frames */
+    ctx.source_buffer = calloc(1, ctx.source_size);
+    assert_non_null(ctx.source_buffer);
+
+    /* First send from offset 0 */
+    (void)ffmpeg_tx_send_raw_yuv(&ctx);
+
+    /* Force the loop-playback wrap branch (current_pos + frame > source_size) */
+    ctx.current_pos = ctx.source_size;
+    (void)ffmpeg_tx_send_raw_yuv(&ctx);
+
+    free(ctx.source_buffer);
+    close_ffmpeg_tx(&ctx);
+    dvledtx_context_free(&app);
+}
+
 /* =========================================================================
  * main
  * ========================================================================= */
@@ -400,6 +527,7 @@ int main(void)
         cmocka_unit_test(test_open_ffmpeg_tx_success),
         cmocka_unit_test(test_open_ffmpeg_tx_uses_app_defaults),
         cmocka_unit_test(test_open_ffmpeg_tx_crop_fallback),
+        cmocka_unit_test(test_open_ffmpeg_tx_multi_nic),
 
         /* close_ffmpeg_tx */
         cmocka_unit_test(test_close_ffmpeg_tx_full),
@@ -410,6 +538,11 @@ int main(void)
 
         /* pipeline: decode + tx_send_yuv_frame */
         cmocka_unit_test(test_ffmpeg_tx_send_yuv_frame_pipeline),
+        cmocka_unit_test(test_ffmpeg_tx_send_yuv_frame_bad_crop_fails),
+
+        /* raw YUV send path */
+        cmocka_unit_test(test_ffmpeg_tx_send_raw_yuv_guard),
+        cmocka_unit_test(test_ffmpeg_tx_send_raw_yuv_pipeline),
     };
 
     int result = cmocka_run_group_tests(tests, NULL, NULL);
