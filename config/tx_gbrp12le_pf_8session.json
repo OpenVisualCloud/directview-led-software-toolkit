@@ -1,0 +1,32 @@
+{
+  "log_file": "dvledtx.log",
+  "interfaces": [
+    {
+      "nic_index": 0,
+      "name": "0000:01:00.1",
+      "sip":  "192.168.50.40",
+      "dip":  "239.168.85.20"
+    }
+  ],
+  "video": {
+    "width":  1920,
+    "height": 1080,
+    "tx_url": "bbb_sunflower_1080p_30fps_normal.mp4"
+  },
+  "tx_video": {
+    "scale_width":  1920,
+    "scale_height": 1080,
+    "fps":    30,
+    "fmt":    "yuv422p12le"
+  },
+  "tx_sessions": [
+    { "nic_index": 0, "udp_port": 20000, "payload_type": 96, "crop": { "x": 0,    "y": 0,   "w": 384, "h": 540 } },
+    { "nic_index": 0, "udp_port": 20002, "payload_type": 96, "crop": { "x": 0,    "y": 540, "w": 384, "h": 540 } },
+    { "nic_index": 0, "udp_port": 20004, "payload_type": 96, "crop": { "x": 384,  "y": 0,   "w": 384, "h": 540 } },
+    { "nic_index": 0, "udp_port": 20006, "payload_type": 96, "crop": { "x": 384,  "y": 540, "w": 384, "h": 540 } },
+    { "nic_index": 0, "udp_port": 20008, "payload_type": 96, "crop": { "x": 768,  "y": 0,   "w": 384, "h": 540 } },
+    { "nic_index": 0, "udp_port": 20010, "payload_type": 96, "crop": { "x": 768,  "y": 540, "w": 384, "h": 540 } },
+    { "nic_index": 0, "udp_port": 20012, "payload_type": 96, "crop": { "x": 1152, "y": 0,   "w": 384, "h": 1080 } },
+    { "nic_index": 0, "udp_port": 20014, "payload_type": 96, "crop": { "x": 1536, "y": 0,   "w": 384, "h": 1080 } }
+  ]
+}

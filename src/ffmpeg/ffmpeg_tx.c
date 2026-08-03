@@ -130,14 +130,24 @@ int open_ffmpeg_tx(struct st20p_tx_ctx* ctx) {
 
   /* PTP hardware timing (built-in MTL PTP client). Only takes effect on the
    * session that actually calls mtl_init() (mtl_dev_get()'s singleton shared
-   * handle) — harmless to set on every session. */
+   * handle) — harmless to set on every session. These AVOptions only exist
+   * when the installed MTL FFmpeg plugin carries the PTP patch; if it doesn't,
+   * av_opt_set_int() returns AVERROR_OPTION_NOT_FOUND, which we treat as a
+   * benign "PTP not supported by this build" case so the app works whether or
+   * not the MTL plugin has the PTP patch applied. */
   if (ctx->app->ptp_enable) {
-    ret = av_opt_set_int(ctx->out_fmt_ctx->priv_data, "ptp_enable", 1, 0);
-    if (ret < 0) LOG_WARN("ST20P TX(%d): av_opt_set_int ptp_enable failed (ret=%d)", ctx->idx, ret);
-    ret = av_opt_set_int(ctx->out_fmt_ctx->priv_data, "ptp_pi", ctx->app->ptp_pi ? 1 : 0, 0);
-    if (ret < 0) LOG_WARN("ST20P TX(%d): av_opt_set_int ptp_pi failed (ret=%d)", ctx->idx, ret);
-    ret = av_opt_set_int(ctx->out_fmt_ctx->priv_data, "ptp_unicast", ctx->app->ptp_unicast ? 1 : 0, 0);
-    if (ret < 0) LOG_WARN("ST20P TX(%d): av_opt_set_int ptp_unicast failed (ret=%d)", ctx->idx, ret);
+    static const char* const ptp_opts[] = {"ptp_enable", "ptp_pi", "ptp_unicast"};
+    const int ptp_vals[] = {1, ctx->app->ptp_pi ? 1 : 0, ctx->app->ptp_unicast ? 1 : 0};
+    for (size_t i = 0; i < FF_ARRAY_ELEMS(ptp_opts); i++) {
+      ret = av_opt_set_int(ctx->out_fmt_ctx->priv_data, ptp_opts[i], ptp_vals[i], 0);
+      if (ret == AVERROR_OPTION_NOT_FOUND) {
+        LOG_INFO("ST20P TX(%d): PTP AVOptions unsupported by installed MTL plugin "
+                 "(no PTP patch); continuing without built-in PTP", ctx->idx);
+        break;
+      }
+      if (ret < 0)
+        LOG_WARN("ST20P TX(%d): av_opt_set_int %s failed (ret=%d)", ctx->idx, ptp_opts[i], ret);
+    }
   }
 
   /* Multi-NIC: mtl_init()/DPDK EAL is only ever initialised once per

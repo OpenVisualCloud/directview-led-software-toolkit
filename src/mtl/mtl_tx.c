@@ -199,9 +199,8 @@ void mtl_copy_crop_to_frame(struct st_frame* dst, const AVFrame* src,
  *
  * mtl_tx_uninit() — release the MTL library instance.
  */
-/* PTP hardware timing (built-in MTL PTP client, direct MTL TX path).
- * See MTL_FLAG_PTP_* in mtl_api.h. Mirrors the AVOption-driven callback
- * wired for the FFmpeg muxer path in the external ffmpeg_plugin repo. */
+/* PTP hardware timing (built-in MTL PTP client) — used by both the direct MTL TX
+ * pipeline and the FFmpeg avdevice TX path via mtl_tx_init(). See MTL_FLAG_PTP_* in mtl_api.h. */
 static void mtl_tx_ptp_sync_notify_cb(void* priv, struct mtl_ptp_sync_notify_meta* meta) {
   (void)priv;
   LOG_INFO("PTP sync: master_utc_offset=%d delta=%" PRId64 "ns",
