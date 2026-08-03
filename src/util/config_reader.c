@@ -106,6 +106,30 @@ static int extract_json_int(const char* start, const char* end, const char* key)
     return -1;
 }
 
+/* Extract a JSON boolean value for key within [start, end). Accepts the
+ * literals true/false. Returns -1 if not found (callers must treat -1 as
+ * "use default"), otherwise 0 or 1. */
+static int extract_json_bool(const char* start, const char* end, const char* key) {
+    char search_key[128];
+    snprintf(search_key, sizeof(search_key), "\"%s\"", key);
+    size_t klen = strlen(search_key);
+
+    const char* pos = start;
+    while (pos < end) {
+        pos = (const char*)memmem(pos, end - pos, search_key, klen);
+        if (pos == NULL) return -1;
+        pos += klen;
+        while (pos < end && (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r')) pos++;
+        if (pos >= end || *pos != ':') continue;
+        pos++;
+        while (pos < end && (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r')) pos++;
+        if ((size_t)(end - pos) >= 4 && strncmp(pos, "true", 4) == 0) return 1;
+        if ((size_t)(end - pos) >= 5 && strncmp(pos, "false", 5) == 0) return 0;
+        return -1;
+    }
+    return -1;
+}
+
 /* Find the opening '{' of the object that follows key within [start, end).
  * Returns pointer to '{', or NULL. */
 static const char* find_object(const char* start, const char* end, const char* key) {
@@ -203,6 +227,8 @@ int peek_config_log_file(const char* config_file, char* out_buf, size_t out_size
  *          position in the array (0, 1, 2, ...); parsing fails otherwise.
  *     "video": { "width": N, "height": N, "tx_url": "..." },
  *     "tx_video": { "scale_width": N, "scale_height": N, "fps": N, "fmt": "..." },
+ *     "ptp": { "enable": true, "pi": true, "unicast": false },  (optional — PTP is
+ *          disabled by default; enabling it requires a PTP grandmaster on the network)
  *     "log_file": "/path/to/dvledtx.log",  (optional — omit for console-only logging)
  *     "tx_sessions": [
  *       { "udp_port": N, "payload_type": N, "crop": { "x":N, "y":N, "w":N, "h":N } },
@@ -356,10 +382,22 @@ int parse_tx_config(const char* config_file, struct dvledtx_config* config) {
     /* --- optional top-level log_file --- */
     extract_json_string(json, buf_end, "log_file", config->log_file, sizeof(config->log_file));
 
-    /* PTP hardware timing (built-in MTL PTP client) — hardcoded, not configurable via JSON. */
-    config->ptp_enable  = true;
-    config->ptp_pi      = true;
+    /* PTP hardware timing (built-in MTL PTP client).
+     * Disabled by default: PTP-paced TX requires a PTP grandmaster on the
+     * network, and without one the TX pacing clock never locks. Enable via the
+     * optional top-level "ptp" block. */
+    config->ptp_enable  = false;
+    config->ptp_pi      = false;
     config->ptp_unicast = false;
+    const char* ptp_obj = find_object(json, buf_end, "ptp");
+    if (ptp_obj != NULL) {
+        const char* ptp_end = find_object_end(ptp_obj, buf_end);
+        if (ptp_end == NULL) ptp_end = buf_end;
+        int b;
+        b = extract_json_bool(ptp_obj, ptp_end, "enable");  if (b >= 0) config->ptp_enable  = (b != 0);
+        b = extract_json_bool(ptp_obj, ptp_end, "pi");      if (b >= 0) config->ptp_pi      = (b != 0);
+        b = extract_json_bool(ptp_obj, ptp_end, "unicast"); if (b >= 0) config->ptp_unicast = (b != 0);
+    }
 
     /* --- tx_sessions array --- */
     const char* sessions_arr = find_array(json, buf_end, "tx_sessions");
@@ -859,6 +897,8 @@ int load_and_apply_config(struct dvledtx_context* app, const char* config_file) 
     if (app->ptp_enable)
         LOG_INFO("PTP enabled: pi_controller=%d unicast_delay_req=%d",
                  app->ptp_pi, app->ptp_unicast);
+    else
+        LOG_INFO("PTP disabled (default TSC-based TX pacing)");
 
     LOG_INFO("Config loaded: %s (%d NIC(s), %d session(s))",
              config_file, config.nic_count, config.session_count);
