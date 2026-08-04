@@ -31,15 +31,19 @@ static inline const char* ffmpeg_fmt_name(enum AVPixelFormat fmt) {
  * ---------------------------------------------------------------------- */
 
 /*
- * convert_frame_format() — colour-convert src into dst using sws_scale.
+ * convert_frame_format() — colour-convert / rescale src into dst.
  *
  *   sws_ctx    = SwsContext pre-created for the src→dst format/size mapping.
  *   src        = decoded raw frame (e.g. yuv420p from H.264 decoder).
  *   src_height = source frame height in luma lines.
  *   dst        = pre-allocated output frame (e.g. yuv422p10le).
  *
- * Returns the number of output rows written (>= 0), or a negative value on
- * error (mirrors sws_scale return convention).
+ * When dst is reference-counted (allocated via av_frame_get_buffer) and
+ * src_height covers the whole source frame, the multi-threaded
+ * sws_scale_frame() path is used; otherwise it falls back to sws_scale().
+ *
+ * Returns the number of output rows written (> 0), or a negative value on
+ * error.
  */
 int convert_frame_format(struct SwsContext* sws_ctx,
                          const AVFrame* src, int src_height,

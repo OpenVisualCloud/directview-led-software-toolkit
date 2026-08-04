@@ -56,6 +56,12 @@ struct dvledtx_context {
   int fps;                    /* frames per second: 25, 30, 50, 60 */
   enum AVPixelFormat fmt;     /* e.g. AV_PIX_FMT_YUV422P10LE */
 
+  /* libswscale slice-thread count for the decode→transport colour conversion.
+   * 0 = auto (derived from the online CPU count in ffmpeg_decoder.c). The
+   * conversion is the dominant per-frame cost whenever the source resolution
+   * or pixel format differs from the transport one, so it is threaded. */
+  int sws_threads;
+
   /* Session controls */
   int st20p_sessions;
   bool use_screen_capture;
