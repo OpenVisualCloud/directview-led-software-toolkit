@@ -1737,6 +1737,115 @@ static void test_load_and_apply_config_maps_screen_capture_fields(void **state)
 }
 
 /* ==========================================================================
+ * sws_threads (tx_video.sws_threads)
+ * ========================================================================== */
+
+static void test_parse_sws_threads_from_tx_video(void **state)
+{
+    (void)state;
+    char *path = write_tmpfile(
+        "{"
+        "  \"interfaces\": [{\"name\":\"0000:06:00.0\",\"sip\":\"192.168.50.29\",\"dip\":\"239.168.85.20\"}],"
+        "  \"video\": {\"width\":1920,\"height\":1080},"
+        "  \"tx_video\": {\"fps\":30,\"fmt\":\"yuv422p10le\",\"sws_threads\":6},"
+        "  \"tx_sessions\": [{\"udp_port\":20000,\"payload_type\":96,"
+        "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]"
+        "}");
+    assert_non_null(path);
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_int_equal(cfg.sws_threads, 6);
+    dvledtx_config_free(&cfg);
+}
+
+/* Omitting the key must leave 0 = auto, so existing configs keep working. */
+static void test_parse_sws_threads_defaults_to_auto_when_omitted(void **state)
+{
+    (void)state;
+    char *path = write_tmpfile(
+        "{"
+        "  \"interfaces\": [{\"name\":\"0000:06:00.0\",\"sip\":\"192.168.50.29\",\"dip\":\"239.168.85.20\"}],"
+        "  \"video\": {\"width\":1920,\"height\":1080},"
+        "  \"tx_video\": {\"fps\":30,\"fmt\":\"yuv422p10le\"},"
+        "  \"tx_sessions\": [{\"udp_port\":20000,\"payload_type\":96,"
+        "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]"
+        "}");
+    assert_non_null(path);
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_int_equal(cfg.sws_threads, 0);
+    dvledtx_config_free(&cfg);
+}
+
+static void test_validate_sws_threads_auto_passes(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.sws_threads = 0;
+    assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
+}
+
+static void test_validate_sws_threads_boundaries_pass(void **state)
+{
+    (void)state;
+    const int values[] = {1, 8, 64};
+    for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
+        struct dvledtx_config cfg;
+        fill_valid_config(&cfg);
+        cfg.sws_threads = values[i];
+        assert_int_equal(validate_tx_config(&cfg), 0);
+        dvledtx_config_free(&cfg);
+    }
+}
+
+static void test_validate_sws_threads_above_64_fails(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.sws_threads = 65;
+    assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
+}
+
+static void test_validate_sws_threads_negative_fails(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.sws_threads = -1;
+    assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
+}
+
+static void test_load_and_apply_config_copies_sws_threads(void **state)
+{
+    (void)state;
+    char *path = write_tmpfile(
+        "{"
+        "  \"interfaces\": [{\"name\":\"0000:06:00.0\",\"sip\":\"192.168.50.29\",\"dip\":\"239.168.85.20\"}],"
+        "  \"video\": {\"width\":1920,\"height\":1080},"
+        "  \"tx_video\": {\"fps\":30,\"fmt\":\"yuv422p10le\",\"sws_threads\":12},"
+        "  \"tx_sessions\": [{\"udp_port\":20000,\"payload_type\":96,"
+        "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]"
+        "}");
+    assert_non_null(path);
+    struct dvledtx_context app;
+    memset(&app, 0, sizeof(app));
+    int ret = load_and_apply_config(&app, path);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_int_equal(app.sws_threads, 12);
+    dvledtx_context_free(&app);
+}
+
+/* ==========================================================================
  * main
  * ========================================================================== */
 
@@ -1770,6 +1879,15 @@ int main(void)
         cmocka_unit_test(test_parse_interfaces_nic_index_matches_position_passes),
         cmocka_unit_test(test_parse_interfaces_nic_index_mismatch_fails),
         cmocka_unit_test(test_parse_interfaces_nic_index_first_entry_mismatch_fails),
+
+        /* --- tx_video.sws_threads --- */
+        cmocka_unit_test(test_parse_sws_threads_from_tx_video),
+        cmocka_unit_test(test_parse_sws_threads_defaults_to_auto_when_omitted),
+        cmocka_unit_test(test_validate_sws_threads_auto_passes),
+        cmocka_unit_test(test_validate_sws_threads_boundaries_pass),
+        cmocka_unit_test(test_validate_sws_threads_above_64_fails),
+        cmocka_unit_test(test_validate_sws_threads_negative_fails),
+        cmocka_unit_test(test_load_and_apply_config_copies_sws_threads),
 
         /* --- validate_tx_config --- */
         cmocka_unit_test(test_validate_valid_config_passes),

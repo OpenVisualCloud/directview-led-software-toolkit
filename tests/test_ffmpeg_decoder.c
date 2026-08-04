@@ -8,7 +8,9 @@
  *   is_raw_yuv()          — pure extension check
  *   load_video_source()   — branch logic (empty url, raw YUV, missing files, video)
  *   close_ffmpeg_source() — null-guard + use_ffmpeg==false path
- *   close_shared_ffmpeg() — null-guard safety
+ *   close_shared_ffmpeg() — null-guard safety, av_image_alloc and
+ *                           reference-counted yuv_frame cleanup
+ *   ffmpeg_resolve_sws_threads() — configured override, clamping, auto range
  *
  * send_video_frame(), open_ffmpeg_output(), close_ffmpeg_output(), and
  * ffmpeg_decode_and_send() were removed (legacy dead code).
@@ -21,6 +23,7 @@
 
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,6 +32,7 @@
 /* Pull in FFmpeg types before dvledtx_context.h which uses AVPixelFormat */
 #include <libavutil/pixfmt.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/opt.h>
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 
@@ -342,9 +346,96 @@ static void test_close_shared_ffmpeg_with_allocated_resources(void **state)
 }
 
 /* ==========================================================================
- * close_ffmpeg_source — use_ffmpeg=true with allocated resources
+ * ffmpeg_resolve_sws_threads
  * ========================================================================== */
 
+static void test_resolve_sws_threads_honours_configured_value(void **state)
+{
+    (void)state;
+    assert_int_equal(ffmpeg_resolve_sws_threads(1),  1);
+    assert_int_equal(ffmpeg_resolve_sws_threads(3),  3);
+    assert_int_equal(ffmpeg_resolve_sws_threads(16), 16);
+    /* Above the auto cap but still explicitly requested — must be honoured. */
+    assert_int_equal(ffmpeg_resolve_sws_threads(32), 32);
+    assert_int_equal(ffmpeg_resolve_sws_threads(64), 64);
+}
+
+static void test_resolve_sws_threads_clamps_configured_to_64(void **state)
+{
+    (void)state;
+    assert_int_equal(ffmpeg_resolve_sws_threads(65),     64);
+    assert_int_equal(ffmpeg_resolve_sws_threads(100000), 64);
+    assert_int_equal(ffmpeg_resolve_sws_threads(INT_MAX), 64);
+}
+
+static void test_resolve_sws_threads_auto_within_bounds(void **state)
+{
+    (void)state;
+    /* 0 and negatives both mean "auto"; the result must be usable as a
+     * libswscale thread count regardless of the host CPU count. */
+    const int inputs[] = {0, -1, -8};
+    for (size_t i = 0; i < sizeof(inputs) / sizeof(inputs[0]); i++) {
+        int t = ffmpeg_resolve_sws_threads(inputs[i]);
+        assert_true(t >= 1);
+        assert_true(t <= 8);
+    }
+}
+
+static void test_resolve_sws_threads_auto_is_deterministic(void **state)
+{
+    (void)state;
+    assert_int_equal(ffmpeg_resolve_sws_threads(0),
+                     ffmpeg_resolve_sws_threads(0));
+}
+
+/* ==========================================================================
+ * close_shared_ffmpeg — reference-counted yuv_frame (av_frame_get_buffer)
+ * ========================================================================== */
+
+/* The threaded conversion path requires yuv_frame to own an AVBuffer.
+ * close_ffmpeg_decoder must then let av_frame_free() release the storage
+ * instead of calling av_freep(&data[0]) on it, which would double-free. */
+static void test_close_shared_ffmpeg_with_refcounted_yuv_frame(void **state)
+{
+    (void)state;
+    struct shared_decode_ctx dec;
+    memset(&dec, 0, sizeof(dec));
+
+    dec.av_frame  = av_frame_alloc();
+    dec.av_packet = av_packet_alloc();
+
+    dec.yuv_frame = av_frame_alloc();
+    dec.yuv_frame->format = AV_PIX_FMT_YUV444P12LE;
+    dec.yuv_frame->width  = 64;
+    dec.yuv_frame->height = 32;
+    assert_int_equal(av_frame_get_buffer(dec.yuv_frame, 32), 0);
+    assert_non_null(dec.yuv_frame->buf[0]);
+
+    /* Built the same way ffmpeg_decoder.c builds it, so the threaded
+     * sub-contexts are exercised by the free path too. */
+    dec.sws_ctx = sws_alloc_context();
+    assert_non_null(dec.sws_ctx);
+    av_opt_set_int(dec.sws_ctx, "srcw",       64,                     0);
+    av_opt_set_int(dec.sws_ctx, "srch",       32,                     0);
+    av_opt_set_int(dec.sws_ctx, "src_format", AV_PIX_FMT_YUV420P,     0);
+    av_opt_set_int(dec.sws_ctx, "dstw",       64,                     0);
+    av_opt_set_int(dec.sws_ctx, "dsth",       32,                     0);
+    av_opt_set_int(dec.sws_ctx, "dst_format", AV_PIX_FMT_YUV444P12LE, 0);
+    av_opt_set_int(dec.sws_ctx, "sws_flags",  SWS_FAST_BILINEAR,      0);
+    av_opt_set_int(dec.sws_ctx, "threads",    4,                      0);
+    assert_true(sws_init_context(dec.sws_ctx, NULL, NULL) >= 0);
+
+    close_shared_ffmpeg(&dec);
+
+    assert_null(dec.av_frame);
+    assert_null(dec.yuv_frame);
+    assert_null(dec.av_packet);
+    assert_null(dec.sws_ctx);
+}
+
+/* ==========================================================================
+ * close_ffmpeg_source — use_ffmpeg=true with allocated resources
+ * ========================================================================== */
 static void test_close_ffmpeg_source_with_allocated_resources(void **state)
 {
     (void)state;
@@ -441,6 +532,11 @@ int main(void)
         /* --- close_shared_ffmpeg --- */
         cmocka_unit_test(test_close_shared_ffmpeg_all_null_no_crash),
         cmocka_unit_test(test_close_shared_ffmpeg_with_allocated_resources),
+        cmocka_unit_test(test_close_shared_ffmpeg_with_refcounted_yuv_frame),
+        cmocka_unit_test(test_resolve_sws_threads_honours_configured_value),
+        cmocka_unit_test(test_resolve_sws_threads_clamps_configured_to_64),
+        cmocka_unit_test(test_resolve_sws_threads_auto_within_bounds),
+        cmocka_unit_test(test_resolve_sws_threads_auto_is_deterministic),
 
         /* --- ffmpeg_decode_next_frame --- */
         cmocka_unit_test(test_ffmpeg_decode_next_frame_null_ctx_returns_false),

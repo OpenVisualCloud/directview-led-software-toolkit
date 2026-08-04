@@ -29,7 +29,7 @@
  * ========================================================================= */
 
 /*
- * resolve_sws_threads() — pick the libswscale slice-thread count.
+ * ffmpeg_resolve_sws_threads() — pick the libswscale slice-thread count.
  *
  * A non-zero value from the config wins. Otherwise auto-select half of the
  * online CPUs, capped at 8: measured on a 20-core host, the conversion scales
@@ -37,7 +37,7 @@
  * 8 due to slice-granularity and SMT contention). The cap also leaves cores
  * for the H.264 decoder threads and the MTL lcores.
  */
-static int resolve_sws_threads(int configured) {
+int ffmpeg_resolve_sws_threads(int configured) {
   if (configured > 0)
     return configured > 64 ? 64 : configured;
 
@@ -320,7 +320,7 @@ static int open_ffmpeg_decoder(
    * sws_getContext() does both in one call. Slice threading is what keeps the
    * conversion off the critical path when the source resolution or pixel
    * format differs from the transport one. */
-  int sws_threads = resolve_sws_threads(sws_threads_cfg);
+  int sws_threads = ffmpeg_resolve_sws_threads(sws_threads_cfg);
   *out_sws_ctx = sws_alloc_context();
   if (*out_sws_ctx == NULL) {
     LOG_ERROR("%s: sws_alloc_context failed", log_prefix);

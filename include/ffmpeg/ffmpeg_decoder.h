@@ -38,6 +38,19 @@ void close_shared_ffmpeg(struct shared_decode_ctx* dec);
 void* shared_decode_thread(void* arg);
 
 /* -------------------------------------------------------------------------
+ * Scaler threading
+ * ---------------------------------------------------------------------- */
+
+/* Resolve the libswscale slice-thread count used for the decode→transport
+ * colour conversion.
+ *
+ *   configured >  0 : taken as-is, clamped to 64.
+ *   configured <= 0 : auto — half the online CPUs, clamped to [1, 8].
+ *
+ * Always returns a value >= 1. */
+int ffmpeg_resolve_sws_threads(int configured);
+
+/* -------------------------------------------------------------------------
  * Per-session source — single-session or raw-YUV path
  * ---------------------------------------------------------------------- */
 
