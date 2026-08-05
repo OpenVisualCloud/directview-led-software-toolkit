@@ -3,21 +3,21 @@
   "interfaces": [
     {
       "nic_index": 0,
-      "name": "0000:01:11.3",
+      "name": "0000:01:00.1",
       "sip":  "192.168.50.29",
       "dip":  "239.168.85.20"
     }
   ],
   "video": {
-    "width":  3840,
-    "height": 2160,
+    "width":  1920,
+    "height": 1080,
     "tx_url": "bbb_sunflower_1080p_30fps_normal.mp4"
   },
   "tx_video": {
     "scale_width":  1920,
     "scale_height": 1080,
     "fps":    30,
-    "fmt":    "yuv422p10le"
+    "fmt":    "gbrp12le"
   },
   "tx_sessions": [
     {

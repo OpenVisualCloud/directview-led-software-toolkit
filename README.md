@@ -18,6 +18,7 @@
 - [Usage](#usage)
   - [Binding Ethernet Controller to DPDK PMD and Hugepage Setup](#binding-ethernet-controller-to-dpdk-pmd-and-hugepage-setup)
   - [JSON Configuration](#json-configuration)
+    - [PTP Timing](#ptp-timing)
     - [Ensuring an X11 session (required for screen capture)](#ensuring-an-x11-session-required-for-screen-capture)
     - [Screen capture on a headless machine (no physical monitor)](#screen-capture-on-a-headless-machine-no-physical-monitor)
 - [Logging](#logging)
@@ -157,6 +158,9 @@ dvledtx uses a JSON config file with three sections:
 | | `scale_height` | (Optional) Output height after scaling |
 | | `fps` | Frames per second (25, 30, 50, 60) |
 | | `fmt` | Pixel format (see [Supported Formats](#supported-formats)) |
+| **ptp** | `enable` | (Optional) Enable MTL's built-in PTP client and PTP-paced TX. Default `false` (TSC-based pacing). See [PTP Timing](#ptp-timing) |
+| | `pi` | (Optional) Use the PI controller for the built-in PTP client (physical function NICs only). Default `false` |
+| | `unicast` | (Optional) Send `PTP_DELAY_REQ` messages to a unicast address instead of multicast. Default `false` |
 | **tx_sessions[]** | `nic_index` | (Optional) Index into `interfaces[]` selecting which NIC this session uses (default: `0`) |
 | | `udp_port` | UDP port for the session |
 | | `payload_type` | (Optional) RTP payload type — defaults to `96` if not present |
@@ -187,6 +191,38 @@ dvledtx uses a JSON config file with three sections:
 ```
 
 Multiple sessions can be defined in `tx_sessions` to transmit different crop regions of the same video simultaneously (see `config/tx_fullhd_multi_session.json`).
+
+#### PTP Timing
+
+ST 2110 senders normally derive their TX pacing from a PTP (IEEE 1588) clock. dvledtx exposes MTL's built-in PTP client through an optional top-level `ptp` block:
+
+```json
+"ptp": {
+  "enable":  true,
+  "pi":      true,
+  "unicast": false
+}
+```
+
+**PTP is disabled by default.** When the block is absent — or `enable` is `false` — MTL falls back to TSC-based pacing, which derives timing from the CPU's invariant timestamp counter and requires no external clock. This is the recommended setting for lab and standalone use.
+
+Enable PTP only when a **PTP grandmaster is present on the network** (a dedicated appliance or a boundary-clock switch). MTL's built-in PTP client is *slave-only* — it cannot elect itself grandmaster — so with `enable: true` and no grandmaster on the link the TX pacing clock never locks and transmission stalls.
+
+When enabled, the startup log reports the active settings and the pacing mode chosen by MTL:
+
+```
+[INFO ] PTP enabled: pi_controller=1 unicast_delay_req=0
+MTL: ... tv_attach(0), pacing way: ptp
+```
+
+With PTP disabled the log instead shows:
+
+```
+[INFO ] PTP disabled (default TSC-based TX pacing)
+MTL: ... tv_attach(0), pacing way: tsc
+```
+
+> Requires an MTL/FFmpeg build that exposes the `ptp_enable`, `ptp_pi` and `ptp_unicast` AVOptions on the `mtl_st20p` muxer. If they are missing, dvledtx logs a warning and continues without built-in PTP rather than failing.
 
 #### Ensuring an X11 session (required for screen capture)
 

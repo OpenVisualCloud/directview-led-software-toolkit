@@ -44,6 +44,13 @@ struct dvledtx_config {
   /* optional log file path (empty = console only) */
   char log_file[256];
 
+  /* PTP hardware timing (built-in MTL PTP client), from the optional top-level
+   * "ptp" JSON object. All default to false when the object or a key is absent,
+   * in which case MTL falls back to TSC-based TX pacing. */
+  bool ptp_enable;
+  bool ptp_pi;
+  bool ptp_unicast;
+
   /* tx_sessions array — dynamically allocated */
   int session_count;
   int session_cap;                             /* allocated capacity */
