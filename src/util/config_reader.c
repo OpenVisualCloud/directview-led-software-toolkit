@@ -226,10 +226,7 @@ int peek_config_log_file(const char* config_file, char* out_buf, size_t out_size
  *       -- "nic_index" is optional but, if present, must equal the entry's
  *          position in the array (0, 1, 2, ...); parsing fails otherwise.
  *     "video": { "width": N, "height": N, "tx_url": "..." },
- *     "tx_video": { "scale_width": N, "scale_height": N, "fps": N, "fmt": "...",
- *                   "sws_threads": N },
- *       -- "sws_threads" is optional (default 0 = auto): number of libswscale
- *          slice threads used for the decode→transport colour conversion.
+ *     "tx_video": { "scale_width": N, "scale_height": N, "fps": N, "fmt": "..." },
  *     "ptp": { "enable": true, "pi": true, "unicast": false },  (optional — PTP is
  *          disabled by default; enabling it requires a PTP grandmaster on the network)
  *     "log_file": "/path/to/dvledtx.log",  (optional — omit for console-only logging)
@@ -379,7 +376,6 @@ int parse_tx_config(const char* config_file, struct dvledtx_config* config) {
         v = extract_json_int(tx_video_obj, tx_video_end, "scale_width");  if (v > 0) config->scale_width  = v;
         v = extract_json_int(tx_video_obj, tx_video_end, "scale_height"); if (v > 0) config->scale_height = v;
         v = extract_json_int(tx_video_obj, tx_video_end, "fps");    if (v > 0) config->fps    = v;
-        v = extract_json_int(tx_video_obj, tx_video_end, "sws_threads"); if (v > 0) config->sws_threads = v;
         extract_json_string(tx_video_obj, tx_video_end, "fmt",    config->fmt,    sizeof(config->fmt));
     }
 
@@ -617,12 +613,6 @@ int validate_tx_config(const struct dvledtx_config* config) {
         return -1;
     }
 
-    /* libswscale slice threads (optional — 0 means auto) */
-    if (config->sws_threads < 0 || config->sws_threads > 64) {
-        LOG_ERROR("sws_threads %d out of range (0 = auto, max 64)", config->sws_threads);
-        return -1;
-    }
-
     /* Scale dimensions validation (optional — 0 means no scaling) */
     if (config->scale_width != 0 || config->scale_height != 0) {
         if (config->scale_width == 0 || config->scale_height == 0) {
@@ -854,7 +844,6 @@ int load_and_apply_config(struct dvledtx_context* app, const char* config_file) 
     app->scale_width  = config.scale_width;
     app->scale_height = config.scale_height;
     app->fps    = config.fps;
-    app->sws_threads = config.sws_threads;
 
     if (strcmp(config.fmt, "yuv422p10le") == 0)       app->fmt = AV_PIX_FMT_YUV422P10LE;
     else if (strcmp(config.fmt, "yuv420") == 0)        app->fmt = AV_PIX_FMT_YUV420P;

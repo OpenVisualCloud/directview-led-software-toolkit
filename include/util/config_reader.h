@@ -36,7 +36,6 @@ struct dvledtx_config {
   uint32_t scale_width;   /* 0 = no scaling (use source width) */
   uint32_t scale_height;  /* 0 = no scaling (use source height) */
   int      fps;
-  int      sws_threads;   /* libswscale slice threads; 0 = auto */
   char     fmt[32];         /* e.g. "yuv422p10le" */
   char     input_mode[32];  /* "file" (default) or "screen_capture" */
   char     screen_input[128]; /* x11grab source, e.g. ":0.0+0,0" */
