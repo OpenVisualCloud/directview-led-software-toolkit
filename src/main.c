@@ -24,7 +24,7 @@
 #include "core/session_manager.h"
 #include "util/logger.h"
 
-#define DVLEDTX_VERSION "0.1.0"
+#define DVLEDTX_VERSION "1.0.0"
 
 /* File-level application context pointer set before signals are installed. */
 static struct dvledtx_context* g_app_ptr = NULL;
