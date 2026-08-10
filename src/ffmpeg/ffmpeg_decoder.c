@@ -13,11 +13,13 @@
 #include <string.h>
 #include <strings.h>
 #include <time.h>
+#include <unistd.h>
 #include <sys/stat.h>
 
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
 #include <libavdevice/avdevice.h>
@@ -25,6 +27,25 @@
 /* =========================================================================
  * Helpers
  * ========================================================================= */
+
+/*
+ * ffmpeg_resolve_sws_threads() — pick the libswscale slice-thread count.
+ *
+ * Auto-select half of the online CPUs, capped at 8: measured on a 20-core
+ * host, the conversion scales ~6x up to 8 threads and then plateaus (12
+ * threads is measurably worse than 8 due to slice-granularity and SMT
+ * contention). The cap also leaves cores for the H.264 decoder threads and
+ * the MTL lcores.
+ */
+int ffmpeg_resolve_sws_threads(void) {
+  long online = sysconf(_SC_NPROCESSORS_ONLN);
+  if (online < 1) online = 1;
+
+  int threads = (int)(online / 2);
+  if (threads < 1) threads = 1;
+  if (threads > 8) threads = 8;
+  return threads;
+}
 
 
 bool is_raw_yuv(const char* filename) {
@@ -193,7 +214,7 @@ void* shared_decode_thread(void* arg) {
  * Both the shared decode path (open_shared_ffmpeg) and the per-session
  * decode path (open_ffmpeg_source) need the same sequence:
  *   avformat_open_input -> find_stream -> find_decoder -> alloc_context ->
- *   open2 -> sws_getContext -> alloc frames/packet -> alloc yuv_frame buffer.
+ *   open2 -> sws context -> alloc frames/packet -> alloc yuv_frame buffer.
  *
  * open_ffmpeg_decoder() extracts this common logic.  The caller passes in
  * pointers to the target struct's fields.
@@ -291,27 +312,45 @@ static int open_ffmpeg_decoder(
     return -1;
   }
 
-  *out_sws_ctx = sws_getContext(
-    (*out_codec_ctx)->width, (*out_codec_ctx)->height, (*out_codec_ctx)->pix_fmt,
-    target_w, target_h, target_fmt,
-    SWS_FAST_BILINEAR, NULL, NULL, NULL);
+  /* Build the scaler explicitly rather than with sws_getContext(): the
+   * "threads" option must be set between allocation and initialisation, and
+   * sws_getContext() does both in one call. Slice threading is what keeps the
+   * conversion off the critical path when the source resolution or pixel
+   * format differs from the transport one. */
+  int sws_threads = ffmpeg_resolve_sws_threads();
+  *out_sws_ctx = sws_alloc_context();
   if (*out_sws_ctx == NULL) {
-    LOG_ERROR("%s: sws_getContext failed", log_prefix);
+    LOG_ERROR("%s: sws_alloc_context failed", log_prefix);
     avcodec_free_context(out_codec_ctx);
     avformat_close_input(out_fmt_ctx);
     return -1;
   }
+  av_opt_set_int(*out_sws_ctx, "srcw",       (*out_codec_ctx)->width,   0);
+  av_opt_set_int(*out_sws_ctx, "srch",       (*out_codec_ctx)->height,  0);
+  av_opt_set_int(*out_sws_ctx, "src_format", (*out_codec_ctx)->pix_fmt, 0);
+  av_opt_set_int(*out_sws_ctx, "dstw",       target_w,                  0);
+  av_opt_set_int(*out_sws_ctx, "dsth",       target_h,                  0);
+  av_opt_set_int(*out_sws_ctx, "dst_format", target_fmt,                0);
+  av_opt_set_int(*out_sws_ctx, "sws_flags",  SWS_FAST_BILINEAR,         0);
+  av_opt_set_int(*out_sws_ctx, "threads",    sws_threads,               0);
+  ret = sws_init_context(*out_sws_ctx, NULL, NULL);
+  if (ret < 0) {
+    av_strerror(ret, errbuf, sizeof(errbuf));
+    LOG_ERROR("%s: sws_init_context failed: %s", log_prefix, errbuf);
+    sws_freeContext(*out_sws_ctx); *out_sws_ctx = NULL;
+    avcodec_free_context(out_codec_ctx);
+    avformat_close_input(out_fmt_ctx);
+    return -1;
+  }
+  /* libswscale clamps the request (e.g. to 1 when built without threading). */
+  int64_t sws_threads_actual = sws_threads;
+  av_opt_get_int(*out_sws_ctx, "threads", 0, &sws_threads_actual);
 
   *out_av_frame  = av_frame_alloc();
   *out_yuv_frame = av_frame_alloc();
   *out_av_packet = av_packet_alloc();
-
-  (*out_yuv_frame)->format = target_fmt;
-  (*out_yuv_frame)->width  = target_w;
-  (*out_yuv_frame)->height = target_h;
-  ret = av_image_alloc((*out_yuv_frame)->data, (*out_yuv_frame)->linesize,
-                       target_w, target_h, target_fmt, 32);
-  if (ret < 0) {
+  if (*out_av_frame == NULL || *out_yuv_frame == NULL || *out_av_packet == NULL) {
+    LOG_ERROR("%s: frame/packet allocation failed", log_prefix);
     av_frame_free(out_av_frame);
     av_frame_free(out_yuv_frame);
     av_packet_free(out_av_packet);
@@ -321,11 +360,32 @@ static int open_ffmpeg_decoder(
     return -1;
   }
 
-  LOG_INFO("%s: opened '%s' Codec=%s %dx%d %s -> %dx%d %s",
+  /* yuv_frame must be reference-counted (av_frame_get_buffer, not
+   * av_image_alloc): sws_scale_frame() reallocates any destination whose
+   * buf[0] is NULL, which would leak the original buffer and leave the
+   * caller writing to storage libswscale no longer targets. */
+  (*out_yuv_frame)->format = target_fmt;
+  (*out_yuv_frame)->width  = target_w;
+  (*out_yuv_frame)->height = target_h;
+  ret = av_frame_get_buffer(*out_yuv_frame, 32);
+  if (ret < 0) {
+    av_strerror(ret, errbuf, sizeof(errbuf));
+    LOG_ERROR("%s: av_frame_get_buffer failed: %s", log_prefix, errbuf);
+    av_frame_free(out_av_frame);
+    av_frame_free(out_yuv_frame);
+    av_packet_free(out_av_packet);
+    sws_freeContext(*out_sws_ctx); *out_sws_ctx = NULL;
+    avcodec_free_context(out_codec_ctx);
+    avformat_close_input(out_fmt_ctx);
+    return -1;
+  }
+
+  LOG_INFO("%s: opened '%s' Codec=%s %dx%d %s -> %dx%d %s (sws_threads=%d)",
            log_prefix, filename, codec->name,
            (*out_codec_ctx)->width, (*out_codec_ctx)->height,
            av_get_pix_fmt_name((*out_codec_ctx)->pix_fmt),
-           target_w, target_h, ffmpeg_fmt_name(target_fmt));
+           target_w, target_h, ffmpeg_fmt_name(target_fmt),
+           (int)sws_threads_actual);
   return 0;
 }
 
@@ -336,7 +396,11 @@ static void close_ffmpeg_decoder(
     AVFrame** yuv_frame, AVPacket** av_packet) {
   if (*av_frame != NULL)  av_frame_free(av_frame);
   if (*yuv_frame != NULL) {
-    av_freep(&(*yuv_frame)->data[0]);
+    /* Reference-counted frames (av_frame_get_buffer) release their storage in
+     * av_frame_free(). Only a frame whose data[] came from av_image_alloc
+     * — buf[0] == NULL — needs the explicit free. */
+    if ((*yuv_frame)->buf[0] == NULL)
+      av_freep(&(*yuv_frame)->data[0]);
     av_frame_free(yuv_frame);
   }
   if (*av_packet != NULL) av_packet_free(av_packet);

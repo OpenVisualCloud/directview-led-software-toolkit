@@ -8,7 +8,10 @@
  * Provides pixel-buffer operations shared by the FFmpeg TX path and the MTL
  * TX path:
  *
- *   convert_frame_format() — wraps sws_scale for src→dst colour conversion.
+ *   convert_frame_format() — converts src→dst via sws_scale_frame when the
+ *                            destination is reference-counted and the whole
+ *                            source frame is available, otherwise falls back
+ *                            to single-threaded sws_scale.
  *   crop_yuv_frame()       — copies a rectangular strip from a full-width
  *                            AVFrame into a smaller crop-sized AVFrame.
  *
@@ -35,6 +38,28 @@ int convert_frame_format(struct SwsContext* sws_ctx,
     return -1;
   }
 
+  /* Threaded path.
+   *
+   * sws_scale() can never run multi-threaded: it unconditionally redirects to
+   * the context's first single-threaded slice sub-context
+   * (libswscale/swscale.c: `if (c->nb_slice_ctx) c = c->slice_ctx[0];`).
+   * Slice threading is only reachable through the frame API, which requires a
+   * reference-counted destination and the complete source frame.
+   *
+   * sws_scale_frame() returns 0 (not a row count) when the threaded path is
+   * taken, so a successful conversion is reported as dst->height to preserve
+   * this function's "rows written" contract. */
+  if (dst->buf[0] != NULL && src_height == src->height) {
+    int ret = sws_scale_frame(sws_ctx, dst, src);
+    if (ret < 0) {
+      LOG_ERROR("convert_frame_format: sws_scale_frame failed (ret=%d)", ret);
+      return ret;
+    }
+    return dst->height;
+  }
+
+  /* Fallback: partial source slice, or a destination without an AVBuffer
+   * (e.g. data[] filled by av_image_fill_arrays). Always single-threaded. */
   int rows = sws_scale(sws_ctx,
                        (const uint8_t* const*)src->data,
                        src->linesize,
