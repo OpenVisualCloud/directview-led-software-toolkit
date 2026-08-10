@@ -123,8 +123,10 @@ static int extract_json_bool(const char* start, const char* end, const char* key
         if (pos >= end || *pos != ':') continue;
         pos++;
         while (pos < end && (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r')) pos++;
-        if ((size_t)(end - pos) >= 4 && strncmp(pos, "true", 4) == 0) return 1;
-        if ((size_t)(end - pos) >= 5 && strncmp(pos, "false", 5) == 0) return 0;
+        if (pos >= end) return -1;
+        size_t remaining = (size_t)(end - pos);
+        if (remaining >= 4 && strncmp(pos, "true", 4) == 0) return 1;
+        if (remaining >= 5 && strncmp(pos, "false", 5) == 0) return 0;
         return -1;
     }
     return -1;
