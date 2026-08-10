@@ -10,7 +10,7 @@
  *   close_ffmpeg_source() — null-guard + use_ffmpeg==false path
  *   close_shared_ffmpeg() — null-guard safety, av_image_alloc and
  *                           reference-counted yuv_frame cleanup
- *   ffmpeg_resolve_sws_threads() — configured override, clamping, auto range
+ *   ffmpeg_resolve_sws_threads() — auto-selected range and determinism
  *
  * send_video_frame(), open_ffmpeg_output(), close_ffmpeg_output(), and
  * ffmpeg_decode_and_send() were removed (legacy dead code).
@@ -349,43 +349,21 @@ static void test_close_shared_ffmpeg_with_allocated_resources(void **state)
  * ffmpeg_resolve_sws_threads
  * ========================================================================== */
 
-static void test_resolve_sws_threads_honours_configured_value(void **state)
-{
-    (void)state;
-    assert_int_equal(ffmpeg_resolve_sws_threads(1),  1);
-    assert_int_equal(ffmpeg_resolve_sws_threads(3),  3);
-    assert_int_equal(ffmpeg_resolve_sws_threads(16), 16);
-    /* Above the auto cap but still explicitly requested — must be honoured. */
-    assert_int_equal(ffmpeg_resolve_sws_threads(32), 32);
-    assert_int_equal(ffmpeg_resolve_sws_threads(64), 64);
-}
-
-static void test_resolve_sws_threads_clamps_configured_to_64(void **state)
-{
-    (void)state;
-    assert_int_equal(ffmpeg_resolve_sws_threads(65),     64);
-    assert_int_equal(ffmpeg_resolve_sws_threads(100000), 64);
-    assert_int_equal(ffmpeg_resolve_sws_threads(INT_MAX), 64);
-}
-
 static void test_resolve_sws_threads_auto_within_bounds(void **state)
 {
     (void)state;
-    /* 0 and negatives both mean "auto"; the result must be usable as a
-     * libswscale thread count regardless of the host CPU count. */
-    const int inputs[] = {0, -1, -8};
-    for (size_t i = 0; i < sizeof(inputs) / sizeof(inputs[0]); i++) {
-        int t = ffmpeg_resolve_sws_threads(inputs[i]);
-        assert_true(t >= 1);
-        assert_true(t <= 8);
-    }
+    /* The result must be usable as a libswscale thread count regardless of
+     * the host CPU count. */
+    int t = ffmpeg_resolve_sws_threads();
+    assert_true(t >= 1);
+    assert_true(t <= 8);
 }
 
 static void test_resolve_sws_threads_auto_is_deterministic(void **state)
 {
     (void)state;
-    assert_int_equal(ffmpeg_resolve_sws_threads(0),
-                     ffmpeg_resolve_sws_threads(0));
+    assert_int_equal(ffmpeg_resolve_sws_threads(),
+                     ffmpeg_resolve_sws_threads());
 }
 
 /* ==========================================================================
@@ -533,8 +511,6 @@ int main(void)
         cmocka_unit_test(test_close_shared_ffmpeg_all_null_no_crash),
         cmocka_unit_test(test_close_shared_ffmpeg_with_allocated_resources),
         cmocka_unit_test(test_close_shared_ffmpeg_with_refcounted_yuv_frame),
-        cmocka_unit_test(test_resolve_sws_threads_honours_configured_value),
-        cmocka_unit_test(test_resolve_sws_threads_clamps_configured_to_64),
         cmocka_unit_test(test_resolve_sws_threads_auto_within_bounds),
         cmocka_unit_test(test_resolve_sws_threads_auto_is_deterministic),
 

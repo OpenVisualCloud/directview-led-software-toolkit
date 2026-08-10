@@ -31,16 +31,13 @@
 /*
  * ffmpeg_resolve_sws_threads() — pick the libswscale slice-thread count.
  *
- * A non-zero value from the config wins. Otherwise auto-select half of the
- * online CPUs, capped at 8: measured on a 20-core host, the conversion scales
- * ~6x up to 8 threads and then plateaus (12 threads is measurably worse than
- * 8 due to slice-granularity and SMT contention). The cap also leaves cores
- * for the H.264 decoder threads and the MTL lcores.
+ * Auto-select half of the online CPUs, capped at 8: measured on a 20-core
+ * host, the conversion scales ~6x up to 8 threads and then plateaus (12
+ * threads is measurably worse than 8 due to slice-granularity and SMT
+ * contention). The cap also leaves cores for the H.264 decoder threads and
+ * the MTL lcores.
  */
-int ffmpeg_resolve_sws_threads(int configured) {
-  if (configured > 0)
-    return configured > 64 ? 64 : configured;
-
+int ffmpeg_resolve_sws_threads(void) {
   long online = sysconf(_SC_NPROCESSORS_ONLN);
   if (online < 1) online = 1;
 
@@ -225,7 +222,7 @@ void* shared_decode_thread(void* arg) {
 static int open_ffmpeg_decoder(
     const char* filename, const char* log_prefix,
     bool use_screen_capture, const char* screen_input, int capture_w, int capture_h, int capture_fps,
-    enum AVPixelFormat target_fmt, int target_w, int target_h, int sws_threads_cfg,
+    enum AVPixelFormat target_fmt, int target_w, int target_h,
     AVFormatContext** out_fmt_ctx, AVCodecContext** out_codec_ctx,
     struct SwsContext** out_sws_ctx, AVFrame** out_av_frame,
     AVFrame** out_yuv_frame, AVPacket** out_av_packet,
@@ -320,7 +317,7 @@ static int open_ffmpeg_decoder(
    * sws_getContext() does both in one call. Slice threading is what keeps the
    * conversion off the critical path when the source resolution or pixel
    * format differs from the transport one. */
-  int sws_threads = ffmpeg_resolve_sws_threads(sws_threads_cfg);
+  int sws_threads = ffmpeg_resolve_sws_threads();
   *out_sws_ctx = sws_alloc_context();
   if (*out_sws_ctx == NULL) {
     LOG_ERROR("%s: sws_alloc_context failed", log_prefix);
@@ -426,7 +423,7 @@ int open_shared_ffmpeg(struct shared_decode_ctx* dec, const char* filename) {
   return open_ffmpeg_decoder(
     effective_source, "Shared decode",
     app->use_screen_capture, app->screen_input, (int)app->width, (int)app->height, app->fps,
-    app->fmt, target_w, target_h, app->sws_threads,
+    app->fmt, target_w, target_h,
     &dec->fmt_ctx, &dec->codec_ctx, &dec->sws_ctx,
     &dec->av_frame, &dec->yuv_frame, &dec->av_packet,
     &dec->video_stream_idx);
@@ -449,7 +446,7 @@ static int open_ffmpeg_source(struct st20p_tx_ctx* ctx, const char* filename) {
   int ret = open_ffmpeg_decoder(
     filename, log_prefix,
     ctx->app->use_screen_capture, ctx->app->screen_input, (int)ctx->app->width, (int)ctx->app->height, ctx->app->fps,
-    ctx->app->fmt, target_w, target_h, ctx->app->sws_threads,
+    ctx->app->fmt, target_w, target_h,
     &ctx->fmt_ctx, &ctx->codec_ctx, &ctx->sws_ctx,
     &ctx->av_frame, &ctx->yuv_frame, &ctx->av_packet,
     &ctx->video_stream_idx);

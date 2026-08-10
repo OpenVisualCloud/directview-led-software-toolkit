@@ -8,7 +8,10 @@
  * Provides pixel-buffer operations shared by the FFmpeg TX path and the MTL
  * TX path:
  *
- *   convert_frame_format() — wraps sws_scale_frame for src→dst conversion.
+ *   convert_frame_format() — converts src→dst via sws_scale_frame when the
+ *                            destination is reference-counted and the whole
+ *                            source frame is available, otherwise falls back
+ *                            to single-threaded sws_scale.
  *   crop_yuv_frame()       — copies a rectangular strip from a full-width
  *                            AVFrame into a smaller crop-sized AVFrame.
  *
