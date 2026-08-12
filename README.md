@@ -680,6 +680,19 @@ sudo pkill -9 -f dvledtx
      # Group should be 'vfio' with rw permissions
      ```
 
+6. **`pip install` fails with `externally-managed-environment`**
+   - On newer systems (Ubuntu 24.04+, PEP 668) `pip` refuses to install packages system-wide, which breaks installing the Python build tools (`meson`, `ninja`, `pyelftools`) required by DPDK/MTL. Re-run the install with `--break-system-packages`:
+     ```bash
+     pip install --break-system-packages meson ninja pyelftools
+     ```
+
+7. **FFmpeg `./configure` fails with `nasm/yasm not found or too old`**
+   - Building FFmpeg (and DPDK) requires the NASM assembler. If configuring FFmpeg errors out looking for `nasm`, install it:
+     ```bash
+     sudo apt install -y nasm
+     ```
+   - Then re-run FFmpeg's `./configure`.
+
 ## Contributing
 
 Contributions are welcome. Please open an issue or submit a pull request on [GitHub](https://github.com/OpenVisualCloud/directview-led-software-toolkit).
