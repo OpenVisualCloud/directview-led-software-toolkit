@@ -106,10 +106,7 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
     ```
     If this prints nothing, FFmpeg needs to be reconfigured/rebuilt after installing the packages above — screen capture will otherwise fail at runtime with `x11grab input format not found`.
   - **`x11grab` only works against an X11 (Xorg) display, not Wayland** — see [Ensuring an X11 session](#ensuring-an-x11-session-required-for-screen-capture) below if you're capturing from a machine's own physical desktop session.
-  - **Headless machines (no physical monitor)** additionally need a virtual display to capture from — see [Screen capture on a headless machine](#screen-capture-on-a-headless-machine-no-physical-monitor) below, which requires:
-    ```bash
-    sudo apt-get install -y xserver-xorg-video-dummy ubuntu-desktop
-    ```
+  - **Headless machines (no physical monitor)** additionally need a virtual display to capture from. This is an optional, environment-specific setup — not a dependency of dvledtx — so it is documented as an example in [Screen capture on a headless machine](#screen-capture-on-a-headless-machine-no-physical-monitor) below.
   - The stock `mtl_st20p` muxer only exposes `p_port`/`r_port` (2 physical NIC ports). To use more than 2 NICs with the default (non-`ENABLE_MTL_TX`) build, the plugin's `libavdevice/mtl_common.h` must be patched to add `p2_port`..`p7_port` (and matching `p2_sip`..`p7_sip`) AVOptions mapped to `devArgs.port[MTL_PORT_2..MTL_PORT_7]` / `devArgs.sip[...]`, then FFmpeg rebuilt and reinstalled. Without this patch, `nic_count` is effectively capped at 2 for the FFmpeg TX path (the `ENABLE_MTL_TX` direct-pipeline build already supports up to 8 NICs without any patch).
 
 ### Build Steps
@@ -250,7 +247,12 @@ To capture from a machine's own physical display, make sure that desktop session
 
 `x11grab` needs a real X11 display to attach to — it does not work against a raw framebuffer or DRM device. On a machine with no monitor connected, create a virtual display using Xorg with the `dummy` video driver and run a desktop session on it so there's actual content to capture. Unlike Xvfb, a real Xorg server claims physical input devices — your keyboard and mouse work directly on the virtual display.
 
-1. **Install prerequisites** (once): see [Software Requirements](#software-requirements) for the `xserver-xorg-video-dummy`/`ubuntu-desktop` packages and the `x11grab`-enabled FFmpeg build.
+> The packages below are **not dvledtx dependencies** — they are only needed to construct a virtual display on a headless host. The following is an example of one way to set this up on Ubuntu; adapt it to your environment as needed.
+
+1. **Install the virtual-display packages** (once), along with the `x11grab`-enabled FFmpeg build. As an example, on Ubuntu:
+   ```bash
+   sudo apt-get install -y xserver-xorg-video-dummy ubuntu-desktop
+   ```
 
 2. **Create an Xorg config** for the dummy driver:
    ```bash
