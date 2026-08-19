@@ -10,6 +10,7 @@
 ## Table of Contents
 
 - [Overview](#overview)
+  - [Deployment Security Model](#deployment-security-model)
 - [Notices](#notices)
 - [Features](#features)
 - [Building](#building)
@@ -55,6 +56,21 @@ dvledtx reads a video source file (e.g., MP4), decodes it using FFmpeg, and tran
 | **NIC** | Intel Ethernet Controller I225 or above |
 | **Memory** | Hugepages configured (typically 2GB+) |
 | **Kernel** | IOMMU and VFIO support enabled |
+
+### Deployment Security Model
+
+dvledtx is intended for deployment on a physically secured, network-isolated media segment: the
+TX host, a dedicated L2 switch and the receivers all sit inside a locked cabinet, with all NICs
+on the TX host used for transmission onto that switch.
+
+The transport (SMPTE ST 2110-20) and its PTP timing provide no authentication, encryption or
+integrity protection — security is delegated to MTL/ST 2110 and to physical and Layer 2
+isolation. Integrators must therefore verify the deployment assumptions before relying on this
+model.
+
+See **[Deployment Assumptions and Security Model](docs/assumptions.md)** for the trust boundary,
+the required deployment assumptions, the security properties the toolkit does not provide, and
+the residual risk and mitigations.
 
 ## Notices
 
