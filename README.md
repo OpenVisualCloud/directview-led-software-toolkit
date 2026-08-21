@@ -10,6 +10,7 @@
 ## Table of Contents
 
 - [Overview](#overview)
+  - [Deployment Security Model](#deployment-security-model)
 - [Notices](#notices)
 - [Features](#features)
 - [Building](#building)
@@ -56,6 +57,21 @@ dvledtx reads a video source file (e.g., MP4), decodes it using FFmpeg, and tran
 | **Memory** | Hugepages configured (typically 2GB+) |
 | **Kernel** | IOMMU and VFIO support enabled |
 
+### Deployment Security Model
+
+dvledtx is intended for deployment on a physically secured, network-isolated media segment: the
+TX host, a dedicated L2 switch and the receivers all sit inside a locked cabinet, with all NICs
+on the TX host used for transmission onto that switch.
+
+The transport (SMPTE ST 2110-20) and its PTP timing provide no authentication, encryption or
+integrity protection — security is delegated to MTL/ST 2110 and to physical and Layer 2
+isolation. Integrators must therefore verify the deployment assumptions before relying on this
+model.
+
+See **[Deployment Assumptions and Security Model](docs/assumptions.md)** for the trust boundary,
+the required deployment assumptions, the security properties the toolkit does not provide, and
+the residual risk and mitigations.
+
 ## Notices
 
 ### FFmpeg
@@ -82,20 +98,20 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
 > **Note:** This toolkit has been validated against **Ubuntu 22.04 LTS** but should work on Ubuntu 24.04 LTS and higher versions.
 
 - Ubuntu [22.04](https://releases.ubuntu.com/jammy/) or [24.04](https://releases.ubuntu.com/noble/) LTS
-- [Media Transport Library (MTL) v26.01+](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md)
+- [Media Transport Library (MTL) v26.01+](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md)
   - Follow these steps
-    - [Install APT packages](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md#111-ubuntudebian)
+    - [Install APT packages](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md#111-ubuntudebian)
     - Clone Media-Transport-Library
       ```
       git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git
       cd Media-Transport-Library
-      git checkout ffmpeg-plugin-extra-pixel-format
+      git checkout 7bee24231c864d12da6db2c2ffbfd3986717af5a
       cd ..
       export mtl_source_code=${PWD}/Media-Transport-Library
       ```
-    - [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md#2-dpdk-build-and-install)
-    - [Build and install MTL](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/build.md#3-build-media-transport-library-and-app)
-- [FFmpeg 7.0 with MTL Plugin](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/ecosystem/ffmpeg_plugin/README.md#1-build)
+    - [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md#2-dpdk-build-and-install)
+    - [Build and install MTL](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md#3-build-media-transport-library-and-app)
+- [FFmpeg 7.0 with MTL Plugin](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/ecosystem/ffmpeg_plugin/README.md#1-build)
   - **Screen capture support (`input_mode: screen_capture`) requires FFmpeg's `x11grab` device.** It is auto-detected and compiled in by FFmpeg's `./configure` script, but only if these packages are installed *before* building FFmpeg:
     ```bash
     sudo apt-get install -y libx11-dev libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev
@@ -106,11 +122,9 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
     ```
     If this prints nothing, FFmpeg needs to be reconfigured/rebuilt after installing the packages above — screen capture will otherwise fail at runtime with `x11grab input format not found`.
   - **`x11grab` only works against an X11 (Xorg) display, not Wayland** — see [Ensuring an X11 session](#ensuring-an-x11-session-required-for-screen-capture) below if you're capturing from a machine's own physical desktop session.
-  - **Headless machines (no physical monitor)** additionally need a virtual display to capture from — see [Screen capture on a headless machine](#screen-capture-on-a-headless-machine-no-physical-monitor) below, which requires:
-    ```bash
-    sudo apt-get install -y xserver-xorg-video-dummy ubuntu-desktop
-    ```
-  - The stock `mtl_st20p` muxer only exposes `p_port`/`r_port` (2 physical NIC ports). To use more than 2 NICs with the default (non-`ENABLE_MTL_TX`) build, the plugin's `libavdevice/mtl_common.h` must be patched to add `p2_port`..`p7_port` (and matching `p2_sip`..`p7_sip`) AVOptions mapped to `devArgs.port[MTL_PORT_2..MTL_PORT_7]` / `devArgs.sip[...]`, then FFmpeg rebuilt and reinstalled. Without this patch, `nic_count` is effectively capped at 2 for the FFmpeg TX path (the `ENABLE_MTL_TX` direct-pipeline build already supports up to 8 NICs without any patch).
+  - **Headless machines (no physical monitor)** additionally need a virtual display to capture from. This is an optional, environment-specific setup — not a dependency of dvledtx — so it is documented as an example in [Screen capture on a headless machine](#screen-capture-on-a-headless-machine-no-physical-monitor) below.
+  - **12-bit formats (`yuv422p12le`, `yuv444p12le`, `gbrp12le`) require both MTL and FFmpeg to be built from the pinned commit above.** The plugin sources are copied into FFmpeg's `libavdevice/` and compiled in, so rebuilding MTL alone is not enough — FFmpeg must be rebuilt against the same MTL commit or these formats are rejected at session setup.
+  - At the pinned commit the `mtl_st20p` muxer exposes `p_port`/`r_port` plus `p2_port`..`p7_port` (and matching `p2_sip`..`p7_sip`), so up to 8 NICs work with the default (non-`ENABLE_MTL_TX`) build with no local patching. Older MTL revisions exposed only `p_port`/`r_port`, which capped `nic_count` at 2 for the FFmpeg TX path; the `ENABLE_MTL_TX` direct-pipeline build has always supported up to 8 NICs.
 
 ### Build Steps
 
@@ -135,8 +149,8 @@ The built binary will be available at `build/dvledtx`.
 ### Binding Ethernet Controller to DPDK PMD and Hugepage Setup 
 
 - Ensure VFIO group exists [follow](#vfio-group-setup)
-- [DPDK PMD Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/run.md#3-dpdk-pmd-setup)
-- [Hugepage Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/ffmpeg-plugin-extra-pixel-format/doc/run.md#4-setup-hugepage)
+- [DPDK PMD Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/run.md#3-dpdk-pmd-setup)
+- [Hugepage Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/run.md#4-setup-hugepage)
 
 ### JSON Configuration
 
@@ -250,7 +264,12 @@ To capture from a machine's own physical display, make sure that desktop session
 
 `x11grab` needs a real X11 display to attach to — it does not work against a raw framebuffer or DRM device. On a machine with no monitor connected, create a virtual display using Xorg with the `dummy` video driver and run a desktop session on it so there's actual content to capture. Unlike Xvfb, a real Xorg server claims physical input devices — your keyboard and mouse work directly on the virtual display.
 
-1. **Install prerequisites** (once): see [Software Requirements](#software-requirements) for the `xserver-xorg-video-dummy`/`ubuntu-desktop` packages and the `x11grab`-enabled FFmpeg build.
+> The packages below are **not dvledtx dependencies** — they are only needed to construct a virtual display on a headless host. The following is an example of one way to set this up on Ubuntu; adapt it to your environment as needed.
+
+1. **Install the virtual-display packages** (once), along with the `x11grab`-enabled FFmpeg build. As an example, on Ubuntu:
+   ```bash
+   sudo apt-get install -y xserver-xorg-video-dummy ubuntu-desktop
+   ```
 
 2. **Create an Xorg config** for the dummy driver:
    ```bash
@@ -386,7 +405,7 @@ pkill -f "gnome-session --session=ubuntu"
 sudo pkill -f "Xorg :99"
 ```
 
-`interfaces[]` supports up to 8 NICs (MTL's port limit); each `tx_sessions[]` entry picks its NIC via `nic_index` (see `config/tx_fullhd_multi_nic.json` for an 8-NIC/8-session example). Using more than 2 NICs with the default FFmpeg TX path requires the patched `mtl_st20p` muxer described above.
+`interfaces[]` supports up to 8 NICs (MTL's port limit); each `tx_sessions[]` entry picks its NIC via `nic_index` (see `config/tx_fullhd_multi_nic.json` for an 8-NIC/8-session example). Using more than 2 NICs with the default FFmpeg TX path requires the `p2_port`..`p7_port` AVOptions described above, which are present at the pinned MTL commit.
 
 ## Logging
 
@@ -679,6 +698,19 @@ sudo pkill -9 -f dvledtx
      ls -la /dev/vfio/
      # Group should be 'vfio' with rw permissions
      ```
+
+6. **`pip install` fails with `externally-managed-environment`**
+   - On newer systems (Ubuntu 24.04+, PEP 668) `pip` refuses to install packages system-wide, which breaks installing the Python build tools (`meson`, `ninja`, `pyelftools`) required by DPDK/MTL. Re-run the install with `--break-system-packages`:
+     ```bash
+     pip install --break-system-packages meson ninja pyelftools
+     ```
+
+7. **FFmpeg `./configure` fails with `nasm/yasm not found or too old`**
+   - Building FFmpeg (and DPDK) requires the NASM assembler. If configuring FFmpeg errors out looking for `nasm`, install it:
+     ```bash
+     sudo apt install -y nasm
+     ```
+   - Then re-run FFmpeg's `./configure`.
 
 ## Contributing
 
