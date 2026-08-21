@@ -79,7 +79,8 @@ jobs:
   afl-fuzz:
     name: Daily AFL Fuzz
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 2h of fuzzing plus headroom for dependency install and the harness build.
+    timeout-minutes: 138
     permissions:
       contents: read
 
@@ -94,7 +95,7 @@ jobs:
       - name: AFL Fuzz
         uses: ./.github/actions/analysis/afl-fuzz
         with:
-          max-seconds: '300'
+          max-seconds: '7200'
 
       - name: Upload AFL fuzzing results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
