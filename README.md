@@ -123,7 +123,8 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
     If this prints nothing, FFmpeg needs to be reconfigured/rebuilt after installing the packages above — screen capture will otherwise fail at runtime with `x11grab input format not found`.
   - **`x11grab` only works against an X11 (Xorg) display, not Wayland** — see [Ensuring an X11 session](#ensuring-an-x11-session-required-for-screen-capture) below if you're capturing from a machine's own physical desktop session.
   - **Headless machines (no physical monitor)** additionally need a virtual display to capture from. This is an optional, environment-specific setup — not a dependency of dvledtx — so it is documented as an example in [Screen capture on a headless machine](#screen-capture-on-a-headless-machine-no-physical-monitor) below.
-  - The stock `mtl_st20p` muxer only exposes `p_port`/`r_port` (2 physical NIC ports). To use more than 2 NICs with the default (non-`ENABLE_MTL_TX`) build, the plugin's `libavdevice/mtl_common.h` must be patched to add `p2_port`..`p7_port` (and matching `p2_sip`..`p7_sip`) AVOptions mapped to `devArgs.port[MTL_PORT_2..MTL_PORT_7]` / `devArgs.sip[...]`, then FFmpeg rebuilt and reinstalled. Without this patch, `nic_count` is effectively capped at 2 for the FFmpeg TX path (the `ENABLE_MTL_TX` direct-pipeline build already supports up to 8 NICs without any patch).
+  - **12-bit formats (`yuv422p12le`, `yuv444p12le`, `gbrp12le`) require both MTL and FFmpeg to be built from the pinned commit above.** The plugin sources are copied into FFmpeg's `libavdevice/` and compiled in, so rebuilding MTL alone is not enough — FFmpeg must be rebuilt against the same MTL commit or these formats are rejected at session setup.
+  - At the pinned commit the `mtl_st20p` muxer exposes `p_port`/`r_port` plus `p2_port`..`p7_port` (and matching `p2_sip`..`p7_sip`), so up to 8 NICs work with the default (non-`ENABLE_MTL_TX`) build with no local patching. Older MTL revisions exposed only `p_port`/`r_port`, which capped `nic_count` at 2 for the FFmpeg TX path; the `ENABLE_MTL_TX` direct-pipeline build has always supported up to 8 NICs.
 
 ### Build Steps
 
@@ -404,7 +405,7 @@ pkill -f "gnome-session --session=ubuntu"
 sudo pkill -f "Xorg :99"
 ```
 
-`interfaces[]` supports up to 8 NICs (MTL's port limit); each `tx_sessions[]` entry picks its NIC via `nic_index` (see `config/tx_fullhd_multi_nic.json` for an 8-NIC/8-session example). Using more than 2 NICs with the default FFmpeg TX path requires the patched `mtl_st20p` muxer described above.
+`interfaces[]` supports up to 8 NICs (MTL's port limit); each `tx_sessions[]` entry picks its NIC via `nic_index` (see `config/tx_fullhd_multi_nic.json` for an 8-NIC/8-session example). Using more than 2 NICs with the default FFmpeg TX path requires the `p2_port`..`p7_port` AVOptions described above, which are present at the pinned MTL commit.
 
 ## Logging
 

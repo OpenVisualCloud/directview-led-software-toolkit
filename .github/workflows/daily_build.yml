@@ -108,8 +108,8 @@ jobs:
     name: Daily libFuzzer
     runs-on: ubuntu-latest
     # max-seconds applies per sanitizer mode (ASan + UBSan), so the fuzzing
-    # itself takes ~4h; allow headroom for the builds on top of that.
-    timeout-minutes: 300
+    # itself takes ~2h; the rest covers the two builds.
+    timeout-minutes: 138
     permissions:
       contents: read
 
@@ -124,7 +124,7 @@ jobs:
       - name: libFuzzer
         uses: ./.github/actions/analysis/libfuzzer
         with:
-          max-seconds: '7200'
+          max-seconds: '3600'
 
       - name: Upload libFuzzer corpora
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
