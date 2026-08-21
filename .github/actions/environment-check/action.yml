@@ -11,10 +11,10 @@ inputs:
     description: 'DPDK version to build'
     required: false
     default: '25.11'
-  mtl-version:
-    description: 'MTL release tag to build'
+  mtl-commit:
+    description: 'MTL commit ID to build'
     required: false
-    default: 'ffmpeg-plugin-extra-pixel-format'
+    default: '7bee24231c864d12da6db2c2ffbfd3986717af5a'
   ffmpeg-version:
     description: 'FFmpeg release branch to build'
     required: false
@@ -37,7 +37,7 @@ runs:
         path: |
           ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
-        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-version }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}
+        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}
 
     - name: Deploy cache to system
       if: steps.env-cache.outputs.cache-hit == 'true'
@@ -165,7 +165,7 @@ runs:
       shell: bash
       env:
         DPDK_VERSION: ${{ inputs.dpdk-version }}
-        MTL_VERSION: ${{ inputs.mtl-version }}
+        MTL_COMMIT: ${{ inputs.mtl-commit }}
       run: |
         echo "===== DPDK Setup ====="
         export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
@@ -177,7 +177,7 @@ runs:
         MTL_SOURCE="$RUNNER_TEMP/mtl-source"
         if [ ! -d "$MTL_SOURCE" ]; then
           git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git "$MTL_SOURCE"
-          cd "$MTL_SOURCE" && git checkout "$MTL_VERSION"
+          cd "$MTL_SOURCE" && git checkout "$MTL_COMMIT"
         fi
         cd "$RUNNER_TEMP"
         git clone https://github.com/DPDK/dpdk.git
@@ -195,7 +195,7 @@ runs:
     - name: Build and install MTL
       shell: bash
       env:
-        MTL_VERSION: ${{ inputs.mtl-version }}
+        MTL_COMMIT: ${{ inputs.mtl-commit }}
       run: |
         echo "===== MTL Setup ====="
         export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
@@ -203,11 +203,11 @@ runs:
           echo "  [OK] mtl ($(pkg-config --modversion mtl)) — skipping build (cached)"
           exit 0
         fi
-        echo "  Building MTL $MTL_VERSION from source..."
+        echo "  Building MTL $MTL_COMMIT from source..."
         MTL_SOURCE="$RUNNER_TEMP/mtl-source"
         if [ ! -d "$MTL_SOURCE" ]; then
           git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git "$MTL_SOURCE"
-          cd "$MTL_SOURCE" && git checkout "$MTL_VERSION"
+          cd "$MTL_SOURCE" && git checkout "$MTL_COMMIT"
         fi
         cd "$MTL_SOURCE"
         ./build.sh
@@ -241,7 +241,7 @@ runs:
       shell: bash
       env:
         FFMPEG_VERSION: ${{ inputs.ffmpeg-version }}
-        MTL_VERSION: ${{ inputs.mtl-version }}
+        MTL_COMMIT: ${{ inputs.mtl-commit }}
       run: |
         echo "===== FFmpeg Setup ====="
         export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
@@ -347,4 +347,4 @@ runs:
         path: |
           ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
-        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-version }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}
+        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}
