@@ -1,0 +1,11 @@
+{
+  "interfaces": [
+    { "nic_index": 0, "name": "0000:06:00.0", "sip": "192.168.50.29", "dip": "239.168.85.20" }
+  ],
+  "video": { "width": 3840, "height": 2160, "tx_url": "/dev/null" },
+  "tx_video": { "scale_width": 3840, "scale_height": 2160, "fps": 30, "fmt": "yuv422p12le" },
+  "ptp": { "enable": true, "pi": false, "unicast": true },
+  "tx_sessions": [
+    { "udp_port": 20000, "payload_type": 255, "crop": { "x": 0, "y": 0, "w": 3840, "h": 2160 } }
+  ]
+}

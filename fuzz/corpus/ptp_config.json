@@ -1,0 +1,26 @@
+{
+  "log_file": "dvledtx.log",
+  "interfaces": [
+    { "nic_index": 0, "name": "0000:06:00.0", "sip": "192.168.50.29", "dip": "239.168.85.20" }
+  ],
+  "video": {
+    "width": 1920,
+    "height": 1080,
+    "input_mode": "file",
+    "tx_url": "/dev/null"
+  },
+  "tx_video": {
+    "scale_width": 3840,
+    "scale_height": 2160,
+    "fps": 60,
+    "fmt": "gbrp12le"
+  },
+  "ptp": {
+    "enable": true,
+    "pi": true,
+    "unicast": false
+  },
+  "tx_sessions": [
+    { "nic_index": 0, "udp_port": 20000, "payload_type": 96, "crop": { "x": 0, "y": 0, "w": 1920, "h": 1080 } }
+  ]
+}

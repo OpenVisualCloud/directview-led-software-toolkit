@@ -1,0 +1,25 @@
+{
+  "interfaces": [
+    { "nic_index": 0, "name": "0000:06:00.0", "sip": "192.168.50.29", "dip": "239.168.85.20" },
+    { "nic_index": 1, "name": "0000:06:00.1", "sip": "192.168.50.30", "dip": "239.168.85.21" },
+    { "nic_index": 2, "name": "0000:06:00.2", "sip": "192.168.50.31", "dip": "239.168.85.22" }
+  ],
+  "video": {
+    "width": 3840,
+    "height": 2160,
+    "input_mode": "file",
+    "tx_url": "/dev/null"
+  },
+  "tx_video": {
+    "scale_width": 3840,
+    "scale_height": 2160,
+    "fps": 50,
+    "fmt": "yuv444p12le"
+  },
+  "ptp": { "enable": false },
+  "tx_sessions": [
+    { "nic_index": 0, "udp_port": 20000, "payload_type": 96, "crop": { "x": 0, "y": 0, "w": 1280, "h": 2160 } },
+    { "nic_index": 1, "udp_port": 20002, "payload_type": 112, "crop": { "x": 1280, "y": 0, "w": 1280, "h": 2160 } },
+    { "nic_index": 2, "udp_port": 20004, "crop": { "x": 2560, "y": 0, "w": 1280, "h": 2160 } }
+  ]
+}
