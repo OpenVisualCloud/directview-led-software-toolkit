@@ -1,0 +1,10 @@
+{
+  "interfaces": [
+    { "nic_index": 0, "name": "0000:06:00.0", "sip": "192.168.50.29", "dip": "239.168.85.20" }
+  ],
+  "video": { "width": 1920, "height": 1080, "tx_url": "/dev/null" },
+  "tx_video": { "scale_width": 1920, "scale_height": 1080, "fps": 25, "fmt": "yuv444p10le" },
+  "tx_sessions": [
+    { "udp_port": 20000, "payload_type": 96, "crop": { "x": 0, "y": 0, "w": 1920, "h": 1080 } }
+  ]
+}
