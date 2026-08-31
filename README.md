@@ -59,18 +59,28 @@ dvledtx reads a video source file (e.g., MP4), decodes it using FFmpeg, and tran
 
 ### Deployment Security Model
 
-dvledtx is intended for deployment on a physically secured, network-isolated media segment: the
-TX host, a dedicated L2 switch and the receivers all sit inside a locked cabinet, with all NICs
-on the TX host used for transmission onto that switch.
+> **All hosts in a dvledtx deployment must be air-gapped.** The TX host, a dedicated L2 switch
+> and the receivers sit inside a locked cabinet with **no network path to any other network and
+> no in-band administrative access** — no SSH, no management NIC, no remote console, BMC
+> disabled. Administration is by physical KVM inside the cabinet only. A VLAN, a firewall or a
+> jump host is **not** an air gap.
 
 The transport (SMPTE ST 2110-20) and its PTP timing provide no authentication, encryption or
-integrity protection — security is delegated to MTL/ST 2110 and to physical and Layer 2
-isolation. Integrators must therefore verify the deployment assumptions before relying on this
+integrity protection — security is delegated to MTL/ST 2110 and to the air gap. Threat
+modelling of the current code shows that most identified attacks require in-band access to the
+TX host, and that the air gap is the only control protecting the confidentiality of content on
+the wire. Integrators must therefore verify the deployment assumptions before relying on this
 model.
 
+The dedicated switch *is* the air gap, so its configuration carries the boundary: disable and
+blackhole every unused port, enable port security (802.1X or sticky MAC) with a shutdown
+violation action, disable dynamic trunking, and enable IGMP snooping, storm control, BPDU guard
+and DHCP snooping. The full list is in the assumptions document.
+
 See **[Deployment Assumptions and Security Model](docs/assumptions.md)** for the trust boundary,
-the required deployment assumptions, the security properties the toolkit does not provide, and
-the residual risk and mitigations.
+the required deployment assumptions, switch hardening requirements, controlled ingress of
+configuration and video content, the security properties the toolkit does not provide, the
+residual risk and mitigations, and a commissioning validation checklist.
 
 ## Notices
 
