@@ -1,28 +1,39 @@
 # Deployment Assumptions and Security Model
 
-dvledtx transmits uncompressed video using the SMPTE ST 2110-20 standard. That transport, and
-the PTP timing it depends on, carry no authentication, encryption or integrity protection. The
-security of a deployment therefore rests entirely on the media segment and the TX host being
-**air-gapped**, not on controls inside this application.
+dvledtx is designed for a layered security model. The application implements its own controls
+at every input it owns — configuration parsing is bounds-checked and validated, symlinked
+configuration files are rejected, log file paths are restricted, decoder and resource limits
+bound untrusted media, and dependencies are pinned and tracked for CVEs. Those controls are
+listed in [Security Controls Implemented in dvledtx](#security-controls-implemented-in-dvledtx).
 
-> **Every host in the deployment must be air-gapped.** This is a hard requirement, not a
-> recommendation or a hardening suggestion. Threat modelling of the current code shows that
-> two thirds of the identified attacks become reachable the moment the TX host has any in-band
-> access path, and that the air gap is the *only* control standing between an adversary and the
-> confidentiality of the content on the wire. Read
-> [What "Air-Gapped" Means Here](#what-air-gapped-means-here) before deploying.
+What the application cannot supply is transport-level security. dvledtx transmits uncompressed
+video using SMPTE ST 2110-20, and neither that standard nor the PTP timing it depends on
+defines authentication, encryption or integrity protection on the wire. This is a property of
+the standards, common to all ST 2110 equipment, and it is why the deployment architecture forms
+the outer layer of the model: the network design supplies the protection that the transport
+itself does not define.
 
-This document records that trust boundary, the assumptions it depends on, and the risk that
-remains if those assumptions are broken.
+> **We recommend that every host in the deployment is air-gapped.** This is our recommended
+> deployment model for a secure installation. Threat modelling of the current release shows
+> that around two thirds of the identified attack paths depend on the TX host having an in-band
+> access path, and that on an air-gapped segment the remaining paths require physical access to
+> the cabinet. Because "isolated" and "restricted" are used loosely across the industry, we set
+> out precisely what we mean in
+> [What "Air-Gapped" Means Here](#what-air-gapped-means-here). Please read it before deploying.
+
+This document records the trust boundary, the deployment assumptions the model depends on, the
+controls the toolkit provides, and the residual risk that remains if those assumptions are not
+met.
 
 ## Table of Contents
 
 - [What "Air-Gapped" Means Here](#what-air-gapped-means-here)
 - [Trust Boundary and Topology](#trust-boundary-and-topology)
 - [Deployment Assumptions](#deployment-assumptions)
-- [Switch Hardening Requirements](#switch-hardening-requirements)
+- [Switch Hardening Recommendations](#switch-hardening-recommendations)
 - [Content and Configuration Ingress](#content-and-configuration-ingress)
-- [Security Properties Not Provided by This Toolkit](#security-properties-not-provided-by-this-toolkit)
+- [Security Controls Implemented in dvledtx](#security-controls-implemented-in-dvledtx)
+- [Properties Supplied by the Deployment Rather Than the Toolkit](#properties-supplied-by-the-deployment-rather-than-the-toolkit)
 - [Residual Risk and Defence in Depth](#residual-risk-and-defence-in-depth)
 - [Commissioning Validation Checklist](#commissioning-validation-checklist)
 
@@ -30,31 +41,33 @@ remains if those assumptions are broken.
 
 Air-gapped means there is **no network path of any kind** between the media segment (or the TX
 host) and any other network, and **no in-band administrative access to the TX host**. The host
-is administered only from a physical keyboard, monitor and mouse inside the locked cabinet.
+is administered from a physical keyboard, monitor and mouse inside the locked cabinet.
 
-**These are required:**
+**A deployment meets this definition when:**
 
-- No uplink, trunk, routed interface or wireless interface anywhere on the media switch.
-- No SSH daemon, no Telnet, no VNC/RDP, no remote-management agent and no remote syslog on the
-  TX host. Any such service must be disabled and masked, not merely firewalled.
-- No secondary "management" NIC on the TX host. Every NIC declared in `interfaces[]` is consumed
-  by ST 2110-20 transmission onto the dedicated switch, and no other NIC may be cabled.
-- The host BMC (IPMI / iDRAC / iLO / AMT) disabled in firmware, or its NIC physically
+- There is no uplink, trunk, routed interface or wireless interface anywhere on the media
+  switch.
+- The TX host runs no SSH daemon, Telnet, VNC/RDP, remote-management agent or remote syslog.
+  Where such a service exists it is disabled and masked rather than firewalled.
+- The TX host has no secondary "management" NIC. Every NIC declared in `interfaces[]` is
+  consumed by ST 2110-20 transmission onto the dedicated switch, and no other NIC is cabled.
+- The host BMC (IPMI / iDRAC / iLO / AMT) is disabled in firmware, or its NIC is physically
   disconnected. A BMC is a live network stack with independent access to the platform.
-- No Wi-Fi, Bluetooth, cellular modem or USB-Ethernet adapter enabled on the TX host.
+- Wi-Fi, Bluetooth, cellular modems and USB-Ethernet adapters are disabled on the TX host.
 
-**None of the following counts as an air gap.** Each of them leaves the in-band access path
-open, and each re-enables the attack paths listed in
-[Residual Risk and Defence in Depth](#residual-risk-and-defence-in-depth):
+**The following arrangements do not meet this definition.** Each leaves an in-band access path
+open, which re-enables the attack paths described in
+[Residual Risk and Defence in Depth](#residual-risk-and-defence-in-depth). We list them because
+they are frequently presented as equivalent:
 
-| Not an air gap | Why it fails |
-|----------------|--------------|
-| A dedicated VLAN on a shared switch | A VLAN is a configuration, not a boundary. A misconfigured trunk, a VLAN-hopping attack or a switch reset places the attacker inside |
-| A firewall or ACL between the media segment and the corporate network | A filtered path is still a path; the firewall becomes a single point of failure carrying the whole security model |
-| A jump host or bastion with SSH into the TX host | Reintroduces in-band access to the TX host — the root of the majority of identified attacks |
-| "Isolated", "restricted" or "segregated" network per site convention | These terms are routinely used for filtered or VLAN-separated networks. Do not accept them as evidence of an air gap |
+| Arrangement | Why it does not meet the definition |
+|-------------|-------------------------------------|
+| A dedicated VLAN on a shared switch | A VLAN is a configuration, not a boundary. A misconfigured trunk, a VLAN-hopping attack or a switch reset places an attacker inside |
+| A firewall or ACL between the media segment and the corporate network | A filtered path is still a path, and the firewall becomes a single point of failure carrying the whole model |
+| A jump host or bastion with SSH into the TX host | Reintroduces in-band access to the TX host, which the threat model identifies as the largest single contributor of attack paths |
+| "Isolated", "restricted" or "segregated" network per site convention | These terms are commonly applied to filtered or VLAN-separated networks. Confirm the actual topology rather than relying on the label |
 | An enabled BMC on a "management-only" network | The BMC has independent, always-on access to the platform below the operating system |
-| SSH left enabled but "only reachable from inside the cabinet" | An overlooked live switch port makes it reachable; the software cannot tell the difference |
+| SSH enabled but "only reachable from inside the cabinet" | An overlooked live switch port makes it reachable, and the software cannot distinguish the two cases |
 
 ## Trust Boundary and Topology
 
@@ -86,26 +99,26 @@ not bridge the media segment to any other network, and has no NIC reserved for m
 
 ## Deployment Assumptions
 
-The model above is only valid while all of the following hold. They are the responsibility of
-the integrator, and should be verified at installation and after any change to the
-installation — see the [Commissioning Validation Checklist](#commissioning-validation-checklist):
+The model above depends on the following holding true. They are the responsibility of the
+integrator, and should be verified at installation and after any change to the installation —
+see the [Commissioning Validation Checklist](#commissioning-validation-checklist):
 
 | # | Assumption | Why it matters |
 |---|------------|----------------|
 | 1 | The TX host, switch and receivers are installed in a **physically locked cabinet**, with keyed access restricted to authorised administrators | Physical access to the equipment is equivalent to full control over what is displayed on the wall |
-| 2 | The TX host has **no in-band management access**: no SSH, Telnet, VNC or RDP daemon, no management NIC, no remote console, and the BMC disabled or disconnected. Administration is by **physical KVM inside the cabinet only** | In-band access to the host is the root of the majority of the attacks in the threat model — configuration tampering, log tampering, malicious media, PATH hijacking of log rotation and log-path traversal all require it. Removing it removes all of them at once |
+| 2 | The TX host has **no in-band management access**: no SSH, Telnet, VNC or RDP daemon, no management NIC, no remote console, and the BMC disabled or disconnected. Administration is by **physical KVM inside the cabinet only** | In-band access to the host is the largest single contributor of attack paths in the threat model, since it is the precondition for configuration tampering, log tampering, supplying malicious media and influencing the log rotation environment. Removing it addresses all of them together |
 | 3 | The switch is **dedicated to the media segment** and has **no uplink** to a corporate, building or guest network | An uplink extends the trust boundary to every network it reaches |
 | 4 | **All unused switch ports are administratively disabled** and assigned to an unused blackhole VLAN | A live port reachable outside the cabinet — for example a patched wall socket believed to be disconnected — places an attacker directly inside the boundary |
 | 5 | Media and PTP traffic run on a **dedicated VLAN**, with no DHCP server and no general-purpose hosts attached to it | Prevents an attached device from being addressed onto the media network, and keeps unrelated traffic off the transmission path |
-| 6 | The switch is configured according to [Switch Hardening Requirements](#switch-hardening-requirements) | The switch is the air gap. Its configuration is the boundary, so it must fail closed |
+| 6 | The switch is configured according to [Switch Hardening Recommendations](#switch-hardening-recommendations) | The switch carries the boundary, so its configuration should fail closed |
 | 7 | Configuration files and video content reach the host under the controls in [Content and Configuration Ingress](#content-and-configuration-ingress) | On an air-gapped host, removable media becomes the primary route for untrusted input |
-| 8 | Administrator access to the host is **named and auditable** — no shared login, and physical cabinet/KVM access is logged | Actions taken at the console are otherwise unattributable; the toolkit does not sign or version its configuration |
+| 8 | Administrator access to the host is **named and auditable** — no shared login, and physical cabinet/KVM access is logged | Actions taken at the console are otherwise unattributable, and the current release does not sign or version its configuration |
 
-## Switch Hardening Requirements
+## Switch Hardening Recommendations
 
-The dedicated switch *is* the air gap, so its configuration carries the boundary. Apply all of
-the following and record the running configuration as part of the commissioning evidence.
-Exact command syntax varies by vendor.
+The dedicated switch carries the boundary, so its configuration matters as much as the topology.
+We recommend applying all of the following and recording the running configuration as part of
+the commissioning evidence. Exact command syntax varies by vendor.
 
 **Port control**
 
@@ -167,40 +180,87 @@ The integrator must therefore operate a controlled ingress procedure:
   unprivileged users can write to.
 - **Retain the media and the checksum record** as commissioning evidence.
 
-## Security Properties Not Provided by This Toolkit
+## Security Controls Implemented in dvledtx
 
-Transmission is delegated to the
-[Media Transport Library (MTL)](https://github.com/OpenVisualCloud/Media-Transport-Library) and
-follows the SMPTE ST 2110 standards. dvledtx hands decoded frames to MTL and does not add
-security controls above it — the security of the wire is offloaded entirely to the air gap.
+The application applies controls at each interface it owns. These are present in the current
+release and are covered by the test suite:
 
-State the following explicitly when assessing a deployment:
+**Configuration input**
 
-- **No authentication** of ST 2110-20 senders or receivers.
-- **No encryption** of the video payload on the wire.
-- **No integrity or replay protection** on the media path.
-- **No authentication on the PTP path** — PTP is a broadcast protocol with no grandmaster
-  validation.
-- **No signing or versioning of the JSON configuration** — a configuration change made at the
-  console cannot be attributed by the application.
-- **No integrity verification of the video source file** — the toolkit transmits whatever file
-  the configuration points at.
-- **No tamper-evident logging** — log files can be edited or removed by anyone with write
-  access to the log directory.
+- The JSON parser is bounds-checked throughout and operates on a fixed, validated schema.
+- Crop rectangles, scaling parameters, UDP ports, payload types and IP addresses are validated
+  at parse time; out-of-range values, privileged UDP ports and unsupported pixel formats are
+  rejected before any resource is allocated.
+- Symlinked configuration files are rejected, so a configuration path cannot be redirected to
+  another file on the host.
+- The log file destination is restricted to `/var/log/` or the working directory, so a
+  configuration cannot be used to write to an arbitrary location.
+
+**Media input**
+
+- A decoder watchdog bounds decode attempts per frame, so a malformed or truncated container
+  cannot stall transmission indefinitely.
+- Raw video source files are size-capped before being read into memory.
+- FFmpeg's own logging is set to error level so that internal paths and addresses are not
+  written into the application log.
+
+**Runtime behaviour**
+
+- Signal handling is async-signal-safe, and shutdown performs a final barrier synchronisation so
+  that a stop request cannot leave transmission threads deadlocked.
+- Session resources are allocated only after the full configuration has been validated.
+
+**Development lifecycle**
+
+- Dependencies (FFmpeg, MTL, DPDK) are pinned to audited versions, with CVE tracking through
+  Dependabot.
+- Continuous analysis covers Coverity, CodeQL, cppcheck, Trivy, ShellCheck and OpenSSF
+  Scorecard, with binary hardening verified by checksec.
+- The configuration reader is fuzzed with both AFL and libFuzzer against a maintained corpus.
+- Unit and smoke tests run on every pull request.
+
+## Properties Supplied by the Deployment Rather Than the Toolkit
+
+Some security properties are outside what the application can provide, and are supplied by the
+deployment architecture instead. State these explicitly when assessing an installation, so that
+the responsibility for each is clear.
+
+**Inherent to the ST 2110 transport.** These apply to all ST 2110-20 equipment, not only to
+dvledtx. Transmission is delegated to the
+[Media Transport Library (MTL)](https://github.com/OpenVisualCloud/Media-Transport-Library),
+which implements the standards as published:
+
+| Property | Where it comes from instead |
+|----------|-----------------------------|
+| Authentication of ST 2110-20 senders and receivers | The standard defines no sender or receiver authentication. Provided by controlling which devices can attach to the media segment |
+| Encryption of the video payload | The standard carries the payload in clear RTP. Provided by the physical security of the segment |
+| Integrity and replay protection on the media path | Not defined by the standard. Provided by the physical security of the segment |
+| Authentication of the PTP timing source | IEEE 1588 provides no grandmaster validation. Provided by keeping PTP inside the boundary, and by leaving PTP disabled (default TSC pacing) unless a trusted grandmaster is present |
+
+**Currently supplied by procedure, and candidates for future releases.** These are provided by
+the operational controls in [Content and Configuration Ingress](#content-and-configuration-ingress)
+rather than by the application today:
+
+| Property | Current provision |
+|----------|-------------------|
+| Attribution of configuration changes | Named administrator accounts and version-controlled configuration files. Signing and versioning of the JSON configuration is under consideration for a future release |
+| Integrity of the video source file | SHA-256 checksums recorded at authoring and verified before use. In-application verification at startup is under consideration for a future release |
+| Tamper-evident logging | Filesystem permissions on the log directory, and scheduled export of logs to controlled media for off-host retention |
 
 ## Residual Risk and Defence in Depth
 
-The air gap reduces exposure but does not eliminate it. If an adversary obtains Layer 2
-access to the media VLAN — for example by connecting to an overlooked live switch port — or
-reaches the host through removable media or the console, the following become feasible and are
-**not** mitigated in software:
+The air gap reduces exposure but does not eliminate it. If an adversary obtains Layer 2 access
+to the media VLAN — for example by connecting to an overlooked live switch port — or reaches
+the host through removable media or the console, the following remain possible. They sit
+outside what the application can address, and are handled by the physical and procedural
+controls shown:
 
 | Risk | Effect | Mitigation |
 |------|--------|------------|
 | Injection of a rogue ST 2110-20 stream | Unauthorised or offensive content displayed on the LED wall | Physically block access to the L2 media VLAN (locked cabinet, disabled unused ports, switch port security / 802.1X); operator visual detection of anomalous wall output |
 | Rogue PTP grandmaster | TX pacing skew and stream disruption | Keep PTP on the air-gapped VLAN; leave PTP disabled (default TSC pacing) unless a trusted grandmaster is present |
 | Traffic flooding on the media VLAN | Frame loss and visible artefacts on the wall | Dedicated switch with no other traffic; IGMP snooping and storm control |
-| Passive capture of video | Loss of content confidentiality | **The air gap only** — no encryption is available on the ST 2110-20 path. This risk has no software mitigation whatsoever |
+| Passive capture of video | Loss of content confidentiality | The deployment architecture, since the ST 2110-20 path defines no encryption. Confidentiality of the payload depends on controlling physical access to the segment |
 | Substituted video source or configuration file arriving on removable media | Unauthorised content on the wall, or streams redirected to an attacker-chosen destination | Controlled ingress and SHA-256 verification per [Content and Configuration Ingress](#content-and-configuration-ingress); version-controlled configuration |
 | Log files edited or deleted to conceal activity | Loss of the only record of what was configured and displayed | Restrict write access to the log directory to the administrator account; export logs to controlled removable media as part of the maintenance procedure and retain them off-host |
 | Configuration changed at the console with no attribution | Change cannot be traced to an individual | Named administrator accounts, logged physical cabinet/KVM access, and version-controlled configuration files |
@@ -211,11 +271,30 @@ disconnect or power-cycle the affected equipment. Because the host is air-gapped
 also a physical activity — build it into the scheduled maintenance procedure, since nothing
 will be noticed between visits.
 
-> **Known accepted risk.** Because all authentication and encryption are absent by design of the
-> transport, an adversary who defeats the air gap has no further software barrier. This is
-> accepted for the current deployment profile and is pending validation by an
-> adversarial-testing exercise. This document will be revisited if authentication or encryption
-> become available in the underlying transport.
+> ### Accepted risk for the current deployment profile
+>
+> Because the ST 2110-20 transport defines no authentication or encryption, an adversary who
+> gains Layer 2 access to the media segment can observe or inject media traffic, and the
+> application has no means of detecting or preventing it. This is a known characteristic of the
+> transport rather than a defect in the toolkit.
+>
+> **What has been accepted.** For the deployment profile described in this document — an
+> air-gapped media segment inside a locked cabinet, with a dedicated switch and no in-band
+> management access — the project has assessed this exposure as acceptable, on the basis that
+> reaching the segment requires physical access to the cabinet or to cabling within the secured
+> installation area. Deployments that cannot meet those conditions should treat the exposure as
+> unmitigated and reassess it against their own risk appetite.
+>
+> **What is still outstanding.** The acceptance is provisional pending an adversarial-testing
+> exercise, in which a tester is given Layer 2 access to a representative media segment and
+> attempts stream injection, passive capture, PTP disruption and traffic flooding against a
+> hardened switch configuration. The purpose is to confirm that the switch hardening in this
+> document behaves as intended, and to establish how quickly anomalous wall output is noticed
+> in practice, since detection is visual. The results will be recorded here.
+>
+> **What would change this position.** If authentication or encryption become available in the
+> underlying transport — for example through adoption of a secured ST 2110 profile in MTL — the
+> project will re-evaluate and this document will be revised.
 
 ## Commissioning Validation Checklist
 

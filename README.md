@@ -59,28 +59,29 @@ dvledtx reads a video source file (e.g., MP4), decodes it using FFmpeg, and tran
 
 ### Deployment Security Model
 
-> **All hosts in a dvledtx deployment must be air-gapped.** The TX host, a dedicated L2 switch
-> and the receivers sit inside a locked cabinet with **no network path to any other network and
-> no in-band administrative access** — no SSH, no management NIC, no remote console, BMC
-> disabled. Administration is by physical KVM inside the cabinet only. A VLAN, a firewall or a
-> jump host is **not** an air gap.
+dvledtx follows a layered security model. The application validates and bounds every input it
+owns — configuration parsing, log file destinations, decoder behaviour and resource limits — and
+is covered by static analysis, fuzzing and dependency CVE tracking in CI. Transport-level
+security is a separate layer: SMPTE ST 2110-20 and the PTP timing it depends on do not define
+authentication, encryption or integrity protection, which is a property of the standards common
+to all ST 2110 equipment. The deployment architecture supplies that layer.
 
-The transport (SMPTE ST 2110-20) and its PTP timing provide no authentication, encryption or
-integrity protection — security is delegated to MTL/ST 2110 and to the air gap. Threat
-modelling of the current code shows that most identified attacks require in-band access to the
-TX host, and that the air gap is the only control protecting the confidentiality of content on
-the wire. Integrators must therefore verify the deployment assumptions before relying on this
-model.
+> **We recommend that all hosts in a dvledtx deployment are air-gapped.** The TX host, a
+> dedicated L2 switch and the receivers sit inside a locked cabinet with no network path to any
+> other network and no in-band administrative access — no SSH, no management NIC, no remote
+> console, BMC disabled — with administration by physical KVM inside the cabinet. Because
+> "isolated" and "restricted" are used loosely, note that a VLAN on a shared switch, a firewall
+> or a jump host does not meet this definition.
 
-The dedicated switch *is* the air gap, so its configuration carries the boundary: disable and
-blackhole every unused port, enable port security (802.1X or sticky MAC) with a shutdown
-violation action, disable dynamic trunking, and enable IGMP snooping, storm control, BPDU guard
-and DHCP snooping. The full list is in the assumptions document.
+We also recommend hardening the dedicated switch, since its configuration carries the boundary:
+disable and blackhole every unused port, enable port security (802.1X or sticky MAC) with a
+shutdown violation action, disable dynamic trunking, and enable IGMP snooping, storm control,
+BPDU guard and DHCP snooping. The full list is in the assumptions document.
 
 See **[Deployment Assumptions and Security Model](docs/assumptions.md)** for the trust boundary,
-the required deployment assumptions, switch hardening requirements, controlled ingress of
-configuration and video content, the security properties the toolkit does not provide, the
-residual risk and mitigations, and a commissioning validation checklist.
+the deployment assumptions, switch hardening recommendations, controlled ingress of
+configuration and video content, the controls the toolkit implements, the residual risk, and a
+commissioning validation checklist.
 
 ## Notices
 
