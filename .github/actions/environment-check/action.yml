@@ -340,8 +340,8 @@ runs:
         echo "===== Cache Content Summary ====="
         du -sh "$RUNNER_TEMP/dvledtx-deps" || true
 
-    - name: Save environment cache (main branch only)
-      if: steps.env-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+    - name: Save environment cache (main and dev branches)
+      if: steps.env-cache.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
       uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: |
