@@ -56,6 +56,12 @@ struct dvledtx_context {
   int fps;                    /* frames per second: 25, 30, 50, 60 */
   enum AVPixelFormat fmt;     /* e.g. AV_PIX_FMT_YUV422P10LE */
 
+  /* VA-API decode of the input stream. Only the decode stage is offloaded:
+   * frames are downloaded to system memory for the existing scale/crop/TX
+   * path, and the decoder falls back to the CPU when the GPU cannot handle
+   * the stream. See src/ffmpeg/ffmpeg_decoder.c. */
+  bool hwaccel;
+
   /* Session controls */
   int st20p_sessions;
   bool use_screen_capture;

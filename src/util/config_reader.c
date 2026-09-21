@@ -229,6 +229,9 @@ int peek_config_log_file(const char* config_file, char* out_buf, size_t out_size
  *          position in the array (0, 1, 2, ...); parsing fails otherwise.
  *     "video": { "width": N, "height": N, "tx_url": "..." },
  *     "tx_video": { "scale_width": N, "scale_height": N, "fps": N, "fmt": "..." },
+ *     "decode": { "hwaccel": true },
+ *          (optional — CPU decode by default; true tries VA-API and falls back
+ *           to the CPU when the GPU/driver/FFmpeg build cannot decode the input)
  *     "ptp": { "enable": true, "pi": true, "unicast": false },  (optional — PTP is
  *          disabled by default; enabling it requires a PTP grandmaster on the network)
  *     "log_file": "/path/to/dvledtx.log",  (optional — omit for console-only logging)
@@ -383,6 +386,16 @@ int parse_tx_config(const char* config_file, struct dvledtx_config* config) {
 
     /* --- optional top-level log_file --- */
     extract_json_string(json, buf_end, "log_file", config->log_file, sizeof(config->log_file));
+
+    /* --- optional decode block (hardware decode) --- */
+    config->hwaccel = false;
+    const char* decode_obj = find_object(json, buf_end, "decode");
+    if (decode_obj != NULL) {
+        const char* decode_end = find_object_end(decode_obj, buf_end);
+        if (decode_end == NULL) decode_end = buf_end;
+        int b = extract_json_bool(decode_obj, decode_end, "hwaccel");
+        if (b >= 0) config->hwaccel = (b != 0);
+    }
 
     /* PTP hardware timing (built-in MTL PTP client).
      * Disabled by default: PTP-paced TX requires a PTP grandmaster on the
@@ -869,6 +882,9 @@ int load_and_apply_config(struct dvledtx_context* app, const char* config_file) 
         app->screen_input[sizeof(app->screen_input) - 1] = '\0';
     }
     app->use_screen_capture = (strcmp(config.input_mode, "screen_capture") == 0);
+
+    /* Hardware decode (optional) */
+    app->hwaccel = config.hwaccel;
 
     /* Copy per-session network + crop into app->session_net[] */
     for (int i = 0; i < config.session_count; i++) {

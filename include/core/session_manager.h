@@ -46,6 +46,11 @@ struct shared_decode_ctx {
   AVPacket*          av_packet;
   int                video_stream_idx;
 
+  /* Hardware decode — all NULL/NONE when decoding on the CPU */
+  AVBufferRef*       hw_device_ctx;
+  enum AVPixelFormat hw_pix_fmt;  /* surface format produced by the decoder */
+  AVFrame*           sw_frame;    /* download target for hardware surfaces  */
+
   pthread_barrier_t  barrier_decoded; /* decode done -> TX threads may copy */
   pthread_barrier_t  barrier_copied;  /* TX done     -> decode may proceed  */
   pthread_t          decode_thread;
@@ -89,6 +94,11 @@ struct st20p_tx_ctx {
   AVFrame*           yuv_frame;      /* decoded + scaled input frame */
   AVPacket*          av_packet;
   int                video_stream_idx;
+
+  /* Hardware decode — all NULL/NONE when decoding on the CPU */
+  AVBufferRef*       hw_device_ctx;
+  enum AVPixelFormat hw_pix_fmt;
+  AVFrame*           sw_frame;
 
 #ifdef ENABLE_MTL_TX
   /* ── MTL pipeline TX path ────────────────────────────────────────────────
