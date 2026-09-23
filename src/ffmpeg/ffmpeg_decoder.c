@@ -160,10 +160,24 @@ static enum AVPixelFormat hwaccel_get_format(AVCodecContext* codec_ctx,
 
   /* The decoder cannot serve the surface format the device was created for
    * (unsupported profile, e.g. a 4:2:2 or 12-bit stream on a device that only
-   * decodes 4:2:0). Take the software format so playback continues on the CPU. */
-  LOG_WARN("Hardware decode: %s surface unavailable for this stream, decoding on CPU",
-           av_get_pix_fmt_name(wanted));
-  return fmts[0];
+   * decodes 4:2:0). Fall back to a software format so playback continues on
+   * the CPU. The list is preference-ordered and may lead with another
+   * hardware format, so pick the first entry that is actually CPU-mappable
+   * rather than assuming fmts[0]. */
+  for (const enum AVPixelFormat* p = fmts; *p != AV_PIX_FMT_NONE; p++) {
+    const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(*p);
+    if (desc != NULL && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL) == 0) {
+      LOG_WARN("Hardware decode: %s surface unavailable for this stream, "
+               "decoding on CPU", ffmpeg_fmt_name(wanted));
+      return *p;
+    }
+  }
+
+  /* Only hardware formats on offer. Returning NONE makes avcodec_receive_frame
+   * fail, which the caller turns into a software reopen. */
+  LOG_WARN("Hardware decode: %s unavailable and no software format offered",
+           ffmpeg_fmt_name(wanted));
+  return AV_PIX_FMT_NONE;
 }
 
 /*
@@ -226,6 +240,9 @@ static int hwaccel_setup(AVCodecContext* codec_ctx, const AVCodec* codec,
  * frame, otherwise returns src untouched. Returns NULL when the download
  * fails so the caller can drop the frame.
  */
+/* Consecutive download errors tolerated before abandoning hardware decode. */
+#define HWACCEL_MAX_XFER_FAILURES 3
+
 static AVFrame* hwaccel_map_to_cpu(const AVBufferRef* hw_device_ctx,
                                    enum AVPixelFormat hw_pix_fmt,
                                    AVFrame* src, AVFrame* sw_frame,
@@ -351,8 +368,24 @@ void* shared_decode_thread(void* arg) {
                                               "Shared decode");
       if (src_frame == NULL) {
         av_frame_unref(dec->av_frame);
+        /* A wedged VA-API driver fails every download, so retrying forever
+         * would stall the pipeline. Honour the best-effort contract by
+         * reopening the source on the CPU instead. */
+        if (++dec->hw_xfer_failures >= HWACCEL_MAX_XFER_FAILURES) {
+          LOG_WARN("Shared decode: %d consecutive hardware transfers failed, "
+                   "reopening on CPU", dec->hw_xfer_failures);
+          dec->hwaccel_disabled = true;
+          dec->hw_xfer_failures = 0;
+          close_shared_ffmpeg(dec);
+          if (open_shared_ffmpeg(dec, dec->app->tx_url) < 0) {
+            LOG_ERROR("Shared decode: CPU reopen failed");
+            dec->exit = true;
+            break;
+          }
+        }
         continue;
       }
+      dec->hw_xfer_failures = 0;
 
       /* The scaler is built here rather than at open time for the hardware
        * path, where the download format is only known now. */
@@ -530,6 +563,34 @@ static int open_ffmpeg_decoder(
   }
 
   ret = avcodec_open2(*out_codec_ctx, codec, NULL);
+  if (ret < 0 && *out_hw_device_ctx != NULL) {
+    /* The device opened but the codec rejected the hardware context. Hardware
+     * decode is best-effort, so rebuild a clean software context and retry
+     * rather than failing the session. */
+    av_strerror(ret, errbuf, sizeof(errbuf));
+    LOG_WARN("%s: avcodec_open2 failed with VA-API (%s), retrying on CPU",
+             log_prefix, errbuf);
+    av_buffer_unref(out_hw_device_ctx);
+    *out_hw_pix_fmt = AV_PIX_FMT_NONE;
+    avcodec_free_context(out_codec_ctx);
+
+    *out_codec_ctx = avcodec_alloc_context3(codec);
+    if (*out_codec_ctx == NULL) {
+      LOG_ERROR("%s: avcodec_alloc_context3 failed", log_prefix);
+      avformat_close_input(out_fmt_ctx);
+      return -1;
+    }
+    ret = avcodec_parameters_to_context(*out_codec_ctx, stream->codecpar);
+    if (ret < 0) {
+      av_strerror(ret, errbuf, sizeof(errbuf));
+      LOG_ERROR("%s: avcodec_parameters_to_context failed: %s", log_prefix, errbuf);
+      avcodec_free_context(out_codec_ctx);
+      avformat_close_input(out_fmt_ctx);
+      return -1;
+    }
+    (*out_codec_ctx)->thread_count = 4;
+    ret = avcodec_open2(*out_codec_ctx, codec, NULL);
+  }
   if (ret < 0) {
     av_strerror(ret, errbuf, sizeof(errbuf));
     LOG_ERROR("%s: avcodec_open2 failed: %s", log_prefix, errbuf);
@@ -599,7 +660,7 @@ static int open_ffmpeg_decoder(
   LOG_INFO("%s: opened '%s' Codec=%s %dx%d %s -> %dx%d %s (hwaccel=%s)",
            log_prefix, filename, codec->name,
            (*out_codec_ctx)->width, (*out_codec_ctx)->height,
-           av_get_pix_fmt_name((*out_codec_ctx)->pix_fmt),
+           ffmpeg_fmt_name((*out_codec_ctx)->pix_fmt),
            target_w, target_h, ffmpeg_fmt_name(target_fmt),
            (*out_hw_device_ctx != NULL) ? "vaapi" : "none");
   return 0;
@@ -644,7 +705,7 @@ int open_shared_ffmpeg(struct shared_decode_ctx* dec, const char* filename) {
     effective_source, "Shared decode",
     app->use_screen_capture, app->screen_input, (int)app->width, (int)app->height, app->fps,
     app->fmt, target_w, target_h,
-    app->hwaccel,
+    app->hwaccel && dec->hwaccel_disabled == false,
     &dec->fmt_ctx, &dec->codec_ctx, &dec->sws_ctx,
     &dec->av_frame, &dec->yuv_frame, &dec->av_packet,
     &dec->hw_device_ctx, &dec->hw_pix_fmt, &dec->sw_frame,
@@ -670,7 +731,7 @@ static int open_ffmpeg_source(struct st20p_tx_ctx* ctx, const char* filename) {
     filename, log_prefix,
     ctx->app->use_screen_capture, ctx->app->screen_input, (int)ctx->app->width, (int)ctx->app->height, ctx->app->fps,
     ctx->app->fmt, target_w, target_h,
-    ctx->app->hwaccel,
+    ctx->app->hwaccel && ctx->hwaccel_disabled == false,
     &ctx->fmt_ctx, &ctx->codec_ctx, &ctx->sws_ctx,
     &ctx->av_frame, &ctx->yuv_frame, &ctx->av_packet,
     &ctx->hw_device_ctx, &ctx->hw_pix_fmt, &ctx->sw_frame,
@@ -838,8 +899,22 @@ bool ffmpeg_decode_next_frame(struct st20p_tx_ctx* ctx) {
                                             ctx->av_frame, ctx->sw_frame, log_prefix);
     if (src_frame == NULL) {
       av_frame_unref(ctx->av_frame);
+      /* See the shared decode path: a persistently failing VA-API driver must
+       * not stall TX, so drop back to CPU decode. */
+      if (++ctx->hw_xfer_failures >= HWACCEL_MAX_XFER_FAILURES) {
+        LOG_WARN("%s: %d consecutive hardware transfers failed, reopening on CPU",
+                 log_prefix, ctx->hw_xfer_failures);
+        ctx->hwaccel_disabled = true;
+        ctx->hw_xfer_failures = 0;
+        close_ffmpeg_source(ctx);
+        if (open_ffmpeg_source(ctx, ctx->app->tx_url) < 0) {
+          LOG_ERROR("%s: CPU reopen failed", log_prefix);
+          break;
+        }
+      }
       continue;
     }
+    ctx->hw_xfer_failures = 0;
 
     if (ensure_sws_ctx(&ctx->sws_ctx, src_frame, ctx->yuv_frame, log_prefix) < 0) {
       av_frame_unref(ctx->av_frame);

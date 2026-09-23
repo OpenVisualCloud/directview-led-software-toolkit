@@ -50,6 +50,8 @@ struct shared_decode_ctx {
   AVBufferRef*       hw_device_ctx;
   enum AVPixelFormat hw_pix_fmt;  /* surface format produced by the decoder */
   AVFrame*           sw_frame;    /* download target for hardware surfaces  */
+  int                hw_xfer_failures;  /* consecutive surface download errors */
+  bool               hwaccel_disabled;  /* latched after repeated failures     */
 
   pthread_barrier_t  barrier_decoded; /* decode done -> TX threads may copy */
   pthread_barrier_t  barrier_copied;  /* TX done     -> decode may proceed  */
@@ -99,6 +101,8 @@ struct st20p_tx_ctx {
   AVBufferRef*       hw_device_ctx;
   enum AVPixelFormat hw_pix_fmt;
   AVFrame*           sw_frame;
+  int                hw_xfer_failures;  /* consecutive surface download errors */
+  bool               hwaccel_disabled;  /* latched after repeated failures     */
 
 #ifdef ENABLE_MTL_TX
   /* ── MTL pipeline TX path ────────────────────────────────────────────────

@@ -136,7 +136,7 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
     If this prints nothing, FFmpeg needs to be reconfigured/rebuilt after installing the packages above — screen capture will otherwise fail at runtime with `x11grab input format not found`.
   - **`x11grab` only works against an X11 (Xorg) display, not Wayland** — see [Ensuring an X11 session](#ensuring-an-x11-session-required-for-screen-capture) below if you're capturing from a machine's own physical desktop session.
   - **Headless machines (no physical monitor)** additionally need a virtual display to capture from. This is an optional, environment-specific setup — not a dependency of dvledtx — so it is documented as an example in [Screen capture on a headless machine](#screen-capture-on-a-headless-machine-no-physical-monitor) below.
-  - **Hardware decode (`decode.hwaccel: true`) requires FFmpeg to be configured with `--enable-vaapi`** and the VA-API runtime installed:
+  - **Hardware decode (`hwaccel: true`) requires FFmpeg to be configured with `--enable-vaapi`** and the VA-API runtime installed:
     ```bash
     sudo apt-get install -y libva-dev vainfo intel-media-va-driver-non-free
     ```
@@ -198,7 +198,7 @@ dvledtx uses a JSON config file with the following sections:
 | **ptp** | `enable` | (Optional) Enable MTL's built-in PTP client and PTP-paced TX. Default `false` (TSC-based pacing). See [PTP Timing](#ptp-timing) |
 | | `pi` | (Optional) Use the PI controller for the built-in PTP client (physical function NICs only). Default `false` |
 | | `unicast` | (Optional) Send `PTP_DELAY_REQ` messages to a unicast address instead of multicast. Default `false` |
-| **decode** | `hwaccel` | (Optional) Decode the input stream on the GPU via VA-API. Default `false` (CPU decode). Falls back to the CPU automatically when the GPU cannot decode the stream. See [Hardware Decode (VA-API)](#hardware-decode-va-api) |
+| **hwaccel** | `hwaccel` | (Optional) Decode the input stream on the GPU via VA-API. Default `false` (CPU decode). Falls back to the CPU automatically when the GPU cannot decode the stream. See [Hardware Decode (VA-API)](#hardware-decode-va-api) |
 | **tx_sessions[]** | `nic_index` | (Optional) Index into `interfaces[]` selecting which NIC this session uses (default: `0`) |
 | | `udp_port` | UDP port for the session |
 | | `payload_type` | (Optional) RTP payload type — defaults to `96` if not present |
@@ -264,13 +264,11 @@ MTL: ... tv_attach(0), pacing way: tsc
 
 #### Hardware Decode (VA-API)
 
-By default dvledtx decodes the input stream on the CPU. An optional top-level `decode` block offloads
+By default dvledtx decodes the input stream on the CPU. An optional top-level `hwaccel` flag offloads
 the compressed-bitstream decode to the GPU's fixed-function video engine via VA-API:
 
 ```json
-"decode": {
-  "hwaccel": true
-}
+"hwaccel": true
 ```
 
 | Value | Behaviour |
@@ -279,10 +277,12 @@ the compressed-bitstream decode to the GPU's fixed-function video engine via VA-
 | `true` | Try VA-API; fall back to the CPU if it is unavailable |
 
 **`hwaccel: true` never fails the run.** If FFmpeg was built without VA-API, no render node is
-accessible, or the decoder cannot produce a GPU surface for the stream, dvledtx logs a warning and
-continues on the CPU. Only the decode stage is offloaded — decoded frames are downloaded to system
-memory so the existing scale/crop/TX path is unchanged. MTL transmits from its own DMA buffers, so
-there is no GPU-to-NIC zero-copy path to keep frames on the device for.
+accessible, the codec rejects the hardware context, or the decoder cannot produce a GPU surface for
+the stream, dvledtx logs a warning and continues on the CPU. Repeated GPU-to-system-memory transfer
+failures mid-stream also trigger a reopen on the CPU rather than stalling transmission. Only the
+decode stage is offloaded — decoded frames are downloaded to system memory so the existing
+scale/crop/TX path is unchanged. MTL transmits from its own DMA buffers, so there is no GPU-to-NIC
+zero-copy path to keep frames on the device for.
 
 Confirm which path was taken from the startup log:
 
@@ -634,7 +634,7 @@ bash scripts/test.sh --no-coverage
 
 ### Hardware decode falls back to the CPU
 
-With `"decode": { "hwaccel": true }` the log shows `(hwaccel=none)`, or shows `(hwaccel=vaapi)`
+With `"hwaccel": true` the log shows `(hwaccel=none)`, or shows `(hwaccel=vaapi)`
 followed by `Hardware decode: vaapi surface unavailable for this stream, decoding on CPU`. The run
 continues on the CPU — this is by design, never a fatal error. Work through the causes in order:
 

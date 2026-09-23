@@ -41,7 +41,7 @@ struct dvledtx_config {
   char     screen_input[128]; /* x11grab source, e.g. ":0.0+0,0" */
   char     tx_url[256];
 
-  /* optional "decode" block — hardware decode of the input stream */
+  /* optional top-level "hwaccel" — hardware decode of the input stream */
   bool hwaccel;             /* true = try VA-API, fall back to CPU (default false) */
 
   /* optional log file path (empty = console only) */
