@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   build:
-    name: Daily Build
+    name: Daily Build (${{ github.event.repository.default_branch }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -37,7 +37,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: refs/heads/${{ github.event.repository.default_branch }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -72,12 +72,12 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: DVLED-SW-TK-DailyBuild-${{ github.run_id }}
+          name: DVLED-SW-TK-DailyBuild-${{ github.event.repository.default_branch }}-${{ github.run_id }}
           path: ${{ github.workspace }}/reports/
           retention-days: 30
 
   afl-fuzz:
-    name: Daily AFL Fuzz
+    name: Daily AFL Fuzz (${{ github.event.repository.default_branch }})
     runs-on: ubuntu-latest
     # 2h of fuzzing plus headroom for dependency install and the harness build.
     timeout-minutes: 138
@@ -88,7 +88,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: refs/heads/${{ github.event.repository.default_branch }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -101,12 +101,12 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: afl-fuzz-results-${{ github.run_id }}
+          name: afl-fuzz-results-${{ github.event.repository.default_branch }}-${{ github.run_id }}
           path: fuzz/findings/
           retention-days: 14
 
   libfuzzer:
-    name: Daily libFuzzer
+    name: Daily libFuzzer (${{ github.event.repository.default_branch }})
     runs-on: ubuntu-latest
     # max-seconds applies per sanitizer mode (ASan + UBSan), so the fuzzing
     # itself takes ~2h; the rest covers the two builds.
@@ -118,7 +118,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: refs/heads/${{ github.event.repository.default_branch }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -131,7 +131,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: libfuzzer-results-${{ github.run_id }}
+          name: libfuzzer-results-${{ github.event.repository.default_branch }}-${{ github.run_id }}
           path: |
             fuzz/libfuzzer_corpus/
             fuzz/ubsan_corpus/
