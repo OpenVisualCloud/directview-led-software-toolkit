@@ -20,6 +20,7 @@
   - [Binding Ethernet Controller to DPDK PMD and Hugepage Setup](#binding-ethernet-controller-to-dpdk-pmd-and-hugepage-setup)
   - [JSON Configuration](#json-configuration)
     - [PTP Timing](#ptp-timing)
+    - [Hardware Decode (VA-API)](#hardware-decode-va-api)
     - [Ensuring an X11 session (required for screen capture)](#ensuring-an-x11-session-required-for-screen-capture)
     - [Screen capture on a headless machine (no physical monitor)](#screen-capture-on-a-headless-machine-no-physical-monitor)
 - [Logging](#logging)
@@ -94,6 +95,7 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
 - **ST20P Video Transmission**: Uncompressed video over SMPTE ST 2110-20
 - **Multi-session Support**: Multiple concurrent video streams
 - **JSON Configuration**: Per-session crop and network settings via JSON config
+- **Optional Hardware Decode**: VA-API GPU decode of the input stream, with automatic CPU fallback
 - **Memory Efficient**: Uses hugepages for optimal performance
 
 ## Building
@@ -134,6 +136,16 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
     If this prints nothing, FFmpeg needs to be reconfigured/rebuilt after installing the packages above — screen capture will otherwise fail at runtime with `x11grab input format not found`.
   - **`x11grab` only works against an X11 (Xorg) display, not Wayland** — see [Ensuring an X11 session](#ensuring-an-x11-session-required-for-screen-capture) below if you're capturing from a machine's own physical desktop session.
   - **Headless machines (no physical monitor)** additionally need a virtual display to capture from. This is an optional, environment-specific setup — not a dependency of dvledtx — so it is documented as an example in [Screen capture on a headless machine](#screen-capture-on-a-headless-machine-no-physical-monitor) below.
+  - **Hardware decode (`hwaccel: true`) requires FFmpeg to be configured with `--enable-vaapi`** and the VA-API runtime installed:
+    ```bash
+    sudo apt-get install -y libva-dev vainfo intel-media-va-driver-non-free
+    ```
+    After building, verify support with:
+    ```bash
+    ffmpeg -hwaccels | grep vaapi
+    vainfo | grep VAEntrypointVLD
+    ```
+    If either prints nothing, hardware decode is unavailable and dvledtx silently falls back to CPU decode. See [Hardware Decode (VA-API)](#hardware-decode-va-api).
   - **12-bit formats (`yuv422p12le`, `yuv444p12le`, `gbrp12le`) require both MTL and FFmpeg to be built from the pinned commit above.** The plugin sources are copied into FFmpeg's `libavdevice/` and compiled in, so rebuilding MTL alone is not enough — FFmpeg must be rebuilt against the same MTL commit or these formats are rejected at session setup.
   - At the pinned commit the `mtl_st20p` muxer exposes `p_port`/`r_port` plus `p2_port`..`p7_port` (and matching `p2_sip`..`p7_sip`), so up to 8 NICs work with the default (non-`ENABLE_MTL_TX`) build with no local patching. Older MTL revisions exposed only `p_port`/`r_port`, which capped `nic_count` at 2 for the FFmpeg TX path; the `ENABLE_MTL_TX` direct-pipeline build has always supported up to 8 NICs.
 
@@ -165,7 +177,7 @@ The built binary will be available at `build/dvledtx`.
 
 ### JSON Configuration
 
-dvledtx uses a JSON config file with three sections:
+dvledtx uses a JSON config file with the following sections:
 
 | Section | Field | Description |
 |---------|-------|-------------|
@@ -186,6 +198,7 @@ dvledtx uses a JSON config file with three sections:
 | **ptp** | `enable` | (Optional) Enable MTL's built-in PTP client and PTP-paced TX. Default `false` (TSC-based pacing). See [PTP Timing](#ptp-timing) |
 | | `pi` | (Optional) Use the PI controller for the built-in PTP client (physical function NICs only). Default `false` |
 | | `unicast` | (Optional) Send `PTP_DELAY_REQ` messages to a unicast address instead of multicast. Default `false` |
+| **hwaccel** | `hwaccel` | (Optional) Decode the input stream on the GPU via VA-API. Default `false` (CPU decode). Falls back to the CPU automatically when the GPU cannot decode the stream. See [Hardware Decode (VA-API)](#hardware-decode-va-api) |
 | **tx_sessions[]** | `nic_index` | (Optional) Index into `interfaces[]` selecting which NIC this session uses (default: `0`) |
 | | `udp_port` | UDP port for the session |
 | | `payload_type` | (Optional) RTP payload type — defaults to `96` if not present |
@@ -248,6 +261,62 @@ MTL: ... tv_attach(0), pacing way: tsc
 ```
 
 > Requires an MTL/FFmpeg build that exposes the `ptp_enable`, `ptp_pi` and `ptp_unicast` AVOptions on the `mtl_st20p` muxer. If they are missing, dvledtx logs a warning and continues without built-in PTP rather than failing.
+
+#### Hardware Decode (VA-API)
+
+By default dvledtx decodes the input stream on the CPU. An optional top-level `hwaccel` flag offloads
+the compressed-bitstream decode to the GPU's fixed-function video engine via VA-API:
+
+```json
+"hwaccel": true
+```
+
+| Value | Behaviour |
+|-------|-----------|
+| absent / `false` | CPU decode (default) |
+| `true` | Try VA-API; fall back to the CPU if it is unavailable |
+
+**`hwaccel: true` never fails the run.** If FFmpeg was built without VA-API, no render node is
+accessible, the codec rejects the hardware context, or the decoder cannot produce a GPU surface for
+the stream, dvledtx logs a warning and continues on the CPU. Repeated GPU-to-system-memory transfer
+failures mid-stream also trigger a reopen on the CPU rather than stalling transmission. Only the
+decode stage is offloaded — decoded frames are downloaded to system memory so the existing
+scale/crop/TX path is unchanged. MTL transmits from its own DMA buffers, so there is no GPU-to-NIC
+zero-copy path to keep frames on the device for.
+
+Confirm which path was taken from the startup log:
+
+```
+[INFO ] ST20P TX(0): opened 'clip.mp4' Codec=hevc 1920x1080 yuv444p12le -> 1920x1080 yuv422p10le (hwaccel=vaapi)
+```
+
+> **Read `(hwaccel=vaapi)` carefully.** It is printed when the VA-API *device* opens, which happens
+> before the decoder negotiates a surface format. It does **not** by itself prove the GPU is
+> decoding. The reliable fallback indicator is this warning, logged once negotiation fails:
+>
+> ```
+> [WARN ] Hardware decode: vaapi surface unavailable for this stream, decoding on CPU
+> ```
+
+**Requirements and limitations**
+
+- FFmpeg must be built with `--enable-vaapi`, and a DRM render node (e.g. `/dev/dri/renderD128`)
+  must be readable and writable by the user running dvledtx. The device is selected automatically;
+  there is no config key to pin a specific render node.
+- The GPU must support the stream's decode profile. Check with `vainfo` — look for a
+  `VAProfileHEVC*` entry with the `VAEntrypointVLD` entrypoint.
+- **RGB (`gbrp10le` / `gbrp12le`) sources can never use VA-API.** FFmpeg's HEVC decoder only offers
+  a VA-API surface for YUV pixel formats, so an RGB source always takes the CPU fallback regardless
+  of what the GPU supports. This is a decoder limitation, not a configuration error.
+- This setting affects the **source** pixel format only. It is independent of `tx_video.fmt`, which
+  controls the format placed on the wire.
+
+> **Note on throughput:** hardware decode reduces decode CPU time, but the frames must then be
+> downloaded from GPU to system memory, which costs roughly what the decode saved. On this pipeline
+> — where MTL pacing and colour conversion dominate — enabling it is not expected to change
+> end-to-end CPU usage or achievable frame rate. Treat it as a way to free CPU cycles for other
+> work on the host, not as a throughput optimisation.
+
 
 #### Ensuring an X11 session (required for screen capture)
 
@@ -562,6 +631,25 @@ bash scripts/test.sh --no-coverage
 ```
 
 ## Troubleshooting
+
+### Hardware decode falls back to the CPU
+
+With `"hwaccel": true` the log shows `(hwaccel=none)`, or shows `(hwaccel=vaapi)`
+followed by `Hardware decode: vaapi surface unavailable for this stream, decoding on CPU`. The run
+continues on the CPU — this is by design, never a fatal error. Work through the causes in order:
+
+| Log message | Cause | Fix |
+|-------------|-------|-----|
+| `decoder '<name>' has no VA-API configuration` | FFmpeg built without `--enable-vaapi`, or the codec has no VA-API support | Rebuild FFmpeg with `--enable-vaapi`; verify with `ffmpeg -hwaccels \| grep vaapi` |
+| `cannot open VA-API device` | No render node, or no permission on it | Check `/dev/dri/renderD128` exists and add the user to the `render` group |
+| `surface unavailable for this stream, decoding on CPU` | GPU cannot decode this profile, **or** the source is RGB | Check `vainfo` for a matching `VAProfile*` with `VAEntrypointVLD`; note RGB (`gbrp*`) sources can never use VA-API |
+
+If a system-wide FFmpeg without VA-API shadows a locally built one, the binary loads the wrong
+libraries and `ffmpeg -hwaccels` prints an empty list. Point the loader at the correct build:
+
+```bash
+export LD_LIBRARY_PATH=/path/to/vaapi-ffmpeg/lib
+```
 
 ### IOMMU / VFIO Kernel Parameters (GRUB)
 

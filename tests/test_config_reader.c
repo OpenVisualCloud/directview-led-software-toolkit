@@ -533,6 +533,71 @@ static void test_parse_ptp_key_without_colon_keeps_default(void **state)
 }
 
 /* ==========================================================================
+ * Optional "hwaccel" flag (hardware decode)
+ *
+ * Absent key means CPU decode. The fragment slots into the same position
+ * as the "ptp" one.
+ * ========================================================================== */
+
+static void test_parse_hwaccel_absent_defaults_false(void **state)
+{
+    (void)state;
+    char *path = write_ptp_config("");
+    assert_non_null(path);
+
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_false(cfg.hwaccel);
+    dvledtx_config_free(&cfg);
+}
+
+static void test_parse_hwaccel_true(void **state)
+{
+    (void)state;
+    char *path = write_ptp_config("\"hwaccel\":true,");
+    assert_non_null(path);
+
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_true(cfg.hwaccel);
+    dvledtx_config_free(&cfg);
+}
+
+static void test_parse_hwaccel_false(void **state)
+{
+    (void)state;
+    char *path = write_ptp_config("\"hwaccel\":false,");
+    assert_non_null(path);
+
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_false(cfg.hwaccel);
+    dvledtx_config_free(&cfg);
+}
+
+/* Only a top-level key counts: a nested "hwaccel" belongs to whatever object
+ * contains it and must not switch the decoder to VA-API. */
+static void test_parse_hwaccel_nested_is_ignored(void **state)
+{
+    (void)state;
+    char *path = write_ptp_config("\"decode\": {\"hwaccel\":true},");
+    assert_non_null(path);
+
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_false(cfg.hwaccel);
+    dvledtx_config_free(&cfg);
+}
+
+/* ==========================================================================
  * validate_tx_config tests
  * ========================================================================== */
 
@@ -2030,6 +2095,10 @@ int main(void)
         cmocka_unit_test(test_parse_ptp_numeric_value_falls_back_to_default),
         cmocka_unit_test(test_parse_ptp_string_value_falls_back_to_default),
         cmocka_unit_test(test_parse_ptp_key_without_colon_keeps_default),
+        cmocka_unit_test(test_parse_hwaccel_absent_defaults_false),
+        cmocka_unit_test(test_parse_hwaccel_true),
+        cmocka_unit_test(test_parse_hwaccel_false),
+        cmocka_unit_test(test_parse_hwaccel_nested_is_ignored),
         cmocka_unit_test(test_load_and_apply_config_ptp_enabled),
         cmocka_unit_test(test_load_and_apply_config_ptp_enabled_without_pi),
         cmocka_unit_test(test_load_and_apply_config_ptp_disabled_by_default),
