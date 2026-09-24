@@ -242,6 +242,36 @@ static void test_open_shared_ffmpeg_bad_file_fails(void **state)
     assert_int_equal(ret, -1);
 }
 
+/* hwaccel "auto" must open regardless of whether this host/FFmpeg build can
+ * decode on the GPU: unavailable hardware falls back to CPU decode, in which
+ * case the scaler is built up front instead of on the first frame. */
+static void test_open_shared_ffmpeg_hwaccel_auto_opens(void **state)
+{
+    (void)state;
+    struct dvledtx_context app;
+    fill_app_16x16(&app, 1);
+    app.hwaccel = true;
+
+    struct shared_decode_ctx dec;
+    memset(&dec, 0, sizeof(dec));
+    dec.app          = &app;
+    dec.num_sessions = 1;
+
+    int ret = open_shared_ffmpeg(&dec, TEST_VIDEO_PATH);
+    assert_int_equal(ret, 0);
+    assert_non_null(dec.codec_ctx);
+    if (dec.hw_device_ctx == NULL) {
+        assert_non_null(dec.sws_ctx);
+        assert_null(dec.sw_frame);
+    } else {
+        assert_non_null(dec.sw_frame);
+    }
+
+    close_shared_ffmpeg(&dec);
+    assert_null(dec.hw_device_ctx);
+    assert_null(dec.sw_frame);
+}
+
 /* =========================================================================
  * Test: load_video_source with a real (generated) video → open_ffmpeg_source
  * ========================================================================= */
@@ -580,6 +610,7 @@ int main(void)
         /* open_shared_ffmpeg */
         cmocka_unit_test(test_open_shared_ffmpeg_success),
         cmocka_unit_test(test_open_shared_ffmpeg_bad_file_fails),
+        cmocka_unit_test(test_open_shared_ffmpeg_hwaccel_auto_opens),
 
         /* load_video_source → open_ffmpeg_source (static) */
         cmocka_unit_test(test_load_video_source_mp4_calls_open_ffmpeg_source),

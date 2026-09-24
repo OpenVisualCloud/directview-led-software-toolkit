@@ -18,6 +18,7 @@
 
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
+#include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
@@ -52,6 +53,212 @@ bool is_raw_yuv(const char* filename) {
   const char* ext = strrchr(filename, '.');
   if (ext == NULL) return false;
   return (strcasecmp(ext, ".yuv") == 0 || strcasecmp(ext, ".raw") == 0);
+}
+
+/* =========================================================================
+ * libswscale context construction
+ * ========================================================================= */
+
+/*
+ * create_sws_ctx() — build the decode→transport colour converter.
+ *
+ * Built explicitly rather than with sws_getContext(): the "threads" option
+ * must be set between allocation and initialisation, and sws_getContext()
+ * does both in one call. Slice threading is what keeps the conversion off the
+ * critical path when the source resolution or pixel format differs from the
+ * transport one.
+ */
+static int create_sws_ctx(struct SwsContext** out_sws_ctx,
+                          int src_w, int src_h, enum AVPixelFormat src_fmt,
+                          int dst_w, int dst_h, enum AVPixelFormat dst_fmt,
+                          const char* log_prefix) {
+  char errbuf[256];
+
+  int sws_threads = ffmpeg_resolve_sws_threads();
+  *out_sws_ctx = sws_alloc_context();
+  if (*out_sws_ctx == NULL) {
+    LOG_ERROR("%s: sws_alloc_context failed", log_prefix);
+    return -1;
+  }
+  av_opt_set_int(*out_sws_ctx, "srcw",       src_w,             0);
+  av_opt_set_int(*out_sws_ctx, "srch",       src_h,             0);
+  av_opt_set_int(*out_sws_ctx, "src_format", src_fmt,           0);
+  av_opt_set_int(*out_sws_ctx, "dstw",       dst_w,             0);
+  av_opt_set_int(*out_sws_ctx, "dsth",       dst_h,             0);
+  av_opt_set_int(*out_sws_ctx, "dst_format", dst_fmt,           0);
+  av_opt_set_int(*out_sws_ctx, "sws_flags",  SWS_FAST_BILINEAR, 0);
+  av_opt_set_int(*out_sws_ctx, "threads",    sws_threads,       0);
+
+  int ret = sws_init_context(*out_sws_ctx, NULL, NULL);
+  if (ret < 0) {
+    av_strerror(ret, errbuf, sizeof(errbuf));
+    LOG_ERROR("%s: sws_init_context failed: %s", log_prefix, errbuf);
+    sws_freeContext(*out_sws_ctx);
+    *out_sws_ctx = NULL;
+    return -1;
+  }
+
+  /* libswscale clamps the request (e.g. to 1 when built without threading). */
+  int64_t sws_threads_actual = sws_threads;
+  av_opt_get_int(*out_sws_ctx, "threads", 0, &sws_threads_actual);
+
+  LOG_INFO("%s: scaler %dx%d %s -> %dx%d %s (sws_threads=%d)", log_prefix,
+           src_w, src_h, av_get_pix_fmt_name(src_fmt),
+           dst_w, dst_h, ffmpeg_fmt_name(dst_fmt), (int)sws_threads_actual);
+  return 0;
+}
+
+/*
+ * ensure_sws_ctx() — (re)build the scaler when it does not match src.
+ *
+ * With hardware decoding the source pixel format is only known once the first
+ * surface has been downloaded, so the context cannot be built up front. This
+ * also covers a mid-stream resolution or format change.
+ */
+static int ensure_sws_ctx(struct SwsContext** sws_ctx, const AVFrame* src,
+                          const AVFrame* dst, const char* log_prefix) {
+  if (src->width <= 0 || src->height <= 0 || src->format == AV_PIX_FMT_NONE) {
+    LOG_ERROR("%s: decoded frame has invalid geometry %dx%d fmt=%d",
+              log_prefix, src->width, src->height, src->format);
+    return -1;
+  }
+
+  if (*sws_ctx != NULL) {
+    int64_t srcw = 0, srch = 0, src_format = AV_PIX_FMT_NONE;
+    av_opt_get_int(*sws_ctx, "srcw",       0, &srcw);
+    av_opt_get_int(*sws_ctx, "srch",       0, &srch);
+    av_opt_get_int(*sws_ctx, "src_format", 0, &src_format);
+    if (srcw == src->width && srch == src->height && src_format == src->format)
+      return 0;
+
+    sws_freeContext(*sws_ctx);
+    *sws_ctx = NULL;
+  }
+
+  return create_sws_ctx(sws_ctx, src->width, src->height, src->format,
+                        dst->width, dst->height, (enum AVPixelFormat)dst->format,
+                        log_prefix);
+}
+
+/* =========================================================================
+ * Hardware decode (VA-API)
+ *
+ * Only the compressed-bitstream decode is offloaded to the GPU's fixed
+ * function video engine. Decoded surfaces are downloaded to system memory so
+ * the existing scale/crop/TX path is unchanged: MTL transmits from its own
+ * DMA buffers, so there is no GPU-to-NIC zero-copy path to keep the frame on
+ * the device for.
+ * ========================================================================= */
+
+/* Selected via AVCodecContext.opaque so the callback stays per-context. */
+static enum AVPixelFormat hwaccel_get_format(AVCodecContext* codec_ctx,
+                                             const enum AVPixelFormat* fmts) {
+  enum AVPixelFormat wanted = (enum AVPixelFormat)(intptr_t)codec_ctx->opaque;
+
+  for (const enum AVPixelFormat* p = fmts; *p != AV_PIX_FMT_NONE; p++)
+    if (*p == wanted) return *p;
+
+  /* The decoder cannot serve the surface format the device was created for
+   * (unsupported profile, e.g. a 4:2:2 or 12-bit stream on a device that only
+   * decodes 4:2:0). Fall back to a software format so playback continues on
+   * the CPU. The list is preference-ordered and may lead with another
+   * hardware format, so pick the first entry that is actually CPU-mappable
+   * rather than assuming fmts[0]. */
+  for (const enum AVPixelFormat* p = fmts; *p != AV_PIX_FMT_NONE; p++) {
+    const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(*p);
+    if (desc != NULL && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL) == 0) {
+      LOG_WARN("Hardware decode: %s surface unavailable for this stream, "
+               "decoding on CPU", ffmpeg_fmt_name(wanted));
+      return *p;
+    }
+  }
+
+  /* Only hardware formats on offer. Returning NONE makes avcodec_receive_frame
+   * fail, which the caller turns into a software reopen. */
+  LOG_WARN("Hardware decode: %s unavailable and no software format offered",
+           ffmpeg_fmt_name(wanted));
+  return AV_PIX_FMT_NONE;
+}
+
+/*
+ * hwaccel_setup() — attach a VA-API device to codec_ctx.
+ *
+ * Returns 0 when hardware decode is armed, -1 when it is unavailable; the
+ * caller decides whether that is fatal (explicit "vaapi") or not ("auto").
+ */
+static int hwaccel_setup(AVCodecContext* codec_ctx, const AVCodec* codec,
+                         const char* log_prefix,
+                         AVBufferRef** out_hw_device_ctx,
+                         enum AVPixelFormat* out_hw_pix_fmt) {
+  char errbuf[256];
+
+  enum AVPixelFormat hw_pix_fmt = AV_PIX_FMT_NONE;
+  for (int i = 0;; i++) {
+    const AVCodecHWConfig* cfg = avcodec_get_hw_config(codec, i);
+    if (cfg == NULL) break;
+    if ((cfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) != 0 &&
+        cfg->device_type == AV_HWDEVICE_TYPE_VAAPI) {
+      hw_pix_fmt = cfg->pix_fmt;
+      break;
+    }
+  }
+  if (hw_pix_fmt == AV_PIX_FMT_NONE) {
+    LOG_WARN("%s: decoder '%s' has no VA-API configuration "
+             "(FFmpeg built without VA-API, or codec unsupported)",
+             log_prefix, codec->name);
+    return -1;
+  }
+
+  AVBufferRef* hw_device_ctx = NULL;
+  /* NULL device: libavutil picks the display or the first DRM render node. */
+  int ret = av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_VAAPI,
+                                   NULL, NULL, 0);
+  if (ret < 0) {
+    av_strerror(ret, errbuf, sizeof(errbuf));
+    LOG_WARN("%s: cannot open VA-API device: %s", log_prefix, errbuf);
+    return -1;
+  }
+
+  codec_ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
+  if (codec_ctx->hw_device_ctx == NULL) {
+    LOG_WARN("%s: av_buffer_ref failed for VA-API device", log_prefix);
+    av_buffer_unref(&hw_device_ctx);
+    return -1;
+  }
+  codec_ctx->opaque     = (void*)(intptr_t)hw_pix_fmt;
+  codec_ctx->get_format = hwaccel_get_format;
+
+  *out_hw_device_ctx = hw_device_ctx;
+  *out_hw_pix_fmt    = hw_pix_fmt;
+  return 0;
+}
+
+/*
+ * hwaccel_map_to_cpu() — return a CPU-readable view of a decoded frame.
+ *
+ * Downloads the surface into sw_frame when the decoder produced a hardware
+ * frame, otherwise returns src untouched. Returns NULL when the download
+ * fails so the caller can drop the frame.
+ */
+/* Consecutive download errors tolerated before abandoning hardware decode. */
+#define HWACCEL_MAX_XFER_FAILURES 3
+
+static AVFrame* hwaccel_map_to_cpu(const AVBufferRef* hw_device_ctx,
+                                   enum AVPixelFormat hw_pix_fmt,
+                                   AVFrame* src, AVFrame* sw_frame,
+                                   const char* log_prefix) {
+  if (hw_device_ctx == NULL || sw_frame == NULL || src->format != hw_pix_fmt)
+    return src;
+
+  av_frame_unref(sw_frame);
+  int ret = av_hwframe_transfer_data(sw_frame, src, 0);
+  if (ret < 0) {
+    char errbuf[256];
+    av_strerror(ret, errbuf, sizeof(errbuf));
+    LOG_ERROR("%s: av_hwframe_transfer_data failed: %s", log_prefix, errbuf);
+    return NULL;
+  }
+  return sw_frame;
 }
 
 /* =========================================================================
@@ -154,11 +361,45 @@ void* shared_decode_thread(void* arg) {
       if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) continue;
       if (ret < 0) break;
 
-      /* Colour-convert + chroma upsample: yuv420p (8-bit) → yuv422p10le (10-bit).
+      /* Hardware decode: bring the GPU surface into system memory first.
+       * No-op when decoding on the CPU. */
+      AVFrame* src_frame = hwaccel_map_to_cpu(dec->hw_device_ctx, dec->hw_pix_fmt,
+                                              dec->av_frame, dec->sw_frame,
+                                              "Shared decode");
+      if (src_frame == NULL) {
+        av_frame_unref(dec->av_frame);
+        /* A wedged VA-API driver fails every download, so retrying forever
+         * would stall the pipeline. Honour the best-effort contract by
+         * reopening the source on the CPU instead. */
+        if (++dec->hw_xfer_failures >= HWACCEL_MAX_XFER_FAILURES) {
+          LOG_WARN("Shared decode: %d consecutive hardware transfers failed, "
+                   "reopening on CPU", dec->hw_xfer_failures);
+          dec->hwaccel_disabled = true;
+          dec->hw_xfer_failures = 0;
+          close_shared_ffmpeg(dec);
+          if (open_shared_ffmpeg(dec, dec->app->tx_url) < 0) {
+            LOG_ERROR("Shared decode: CPU reopen failed");
+            dec->exit = true;
+            break;
+          }
+        }
+        continue;
+      }
+      dec->hw_xfer_failures = 0;
+
+      /* The scaler is built here rather than at open time for the hardware
+       * path, where the download format is only known now. */
+      if (ensure_sws_ctx(&dec->sws_ctx, src_frame, dec->yuv_frame,
+                         "Shared decode") < 0) {
+        av_frame_unref(dec->av_frame);
+        continue;
+      }
+
+      /* Colour-convert + chroma upsample: e.g. yuv420p (8-bit) → yuv422p10le.
        * Output goes into dec->yuv_frame — the single shared full-width (1920px)
        * buffer that all TX threads will read from simultaneously. */
-      int rows = convert_frame_format(dec->sws_ctx, dec->av_frame,
-                                      dec->codec_ctx->height, dec->yuv_frame);
+      int rows = convert_frame_format(dec->sws_ctx, src_frame,
+                                      src_frame->height, dec->yuv_frame);
       av_frame_unref(dec->av_frame); /* return decoded frame back to FFmpeg pool */
       if (rows <= 0) {
         LOG_ERROR("Shared decode: convert_frame_format failed (ret=%d)", rows);
@@ -223,12 +464,19 @@ static int open_ffmpeg_decoder(
     const char* filename, const char* log_prefix,
     bool use_screen_capture, const char* screen_input, int capture_w, int capture_h, int capture_fps,
     enum AVPixelFormat target_fmt, int target_w, int target_h,
+    bool hwaccel,
     AVFormatContext** out_fmt_ctx, AVCodecContext** out_codec_ctx,
     struct SwsContext** out_sws_ctx, AVFrame** out_av_frame,
     AVFrame** out_yuv_frame, AVPacket** out_av_packet,
+    AVBufferRef** out_hw_device_ctx, enum AVPixelFormat* out_hw_pix_fmt,
+    AVFrame** out_sw_frame,
     int* out_video_stream_idx) {
   char errbuf[256];
   int ret;
+
+  *out_hw_device_ctx = NULL;
+  *out_hw_pix_fmt    = AV_PIX_FMT_NONE;
+  *out_sw_frame      = NULL;
 
   if (use_screen_capture == true) {
     const char* input_url = (screen_input && screen_input[0] != '\0') ? screen_input : ":0.0+0,0";
@@ -303,58 +551,85 @@ static int open_ffmpeg_decoder(
     return -1;
   }
   (*out_codec_ctx)->thread_count = 4;
+
+  /* Hardware decode is armed before avcodec_open2(): the device context and
+   * get_format callback must be in place when the decoder negotiates its
+   * output format. */
+  if (hwaccel == true) {
+    if (hwaccel_setup(*out_codec_ctx, codec, log_prefix,
+                      out_hw_device_ctx, out_hw_pix_fmt) < 0) {
+      LOG_WARN("%s: hardware decode unavailable, using CPU decode", log_prefix);
+    }
+  }
+
   ret = avcodec_open2(*out_codec_ctx, codec, NULL);
+  if (ret < 0 && *out_hw_device_ctx != NULL) {
+    /* The device opened but the codec rejected the hardware context. Hardware
+     * decode is best-effort, so rebuild a clean software context and retry
+     * rather than failing the session. */
+    av_strerror(ret, errbuf, sizeof(errbuf));
+    LOG_WARN("%s: avcodec_open2 failed with VA-API (%s), retrying on CPU",
+             log_prefix, errbuf);
+    av_buffer_unref(out_hw_device_ctx);
+    *out_hw_pix_fmt = AV_PIX_FMT_NONE;
+    avcodec_free_context(out_codec_ctx);
+
+    *out_codec_ctx = avcodec_alloc_context3(codec);
+    if (*out_codec_ctx == NULL) {
+      LOG_ERROR("%s: avcodec_alloc_context3 failed", log_prefix);
+      avformat_close_input(out_fmt_ctx);
+      return -1;
+    }
+    ret = avcodec_parameters_to_context(*out_codec_ctx, stream->codecpar);
+    if (ret < 0) {
+      av_strerror(ret, errbuf, sizeof(errbuf));
+      LOG_ERROR("%s: avcodec_parameters_to_context failed: %s", log_prefix, errbuf);
+      avcodec_free_context(out_codec_ctx);
+      avformat_close_input(out_fmt_ctx);
+      return -1;
+    }
+    (*out_codec_ctx)->thread_count = 4;
+    ret = avcodec_open2(*out_codec_ctx, codec, NULL);
+  }
   if (ret < 0) {
     av_strerror(ret, errbuf, sizeof(errbuf));
     LOG_ERROR("%s: avcodec_open2 failed: %s", log_prefix, errbuf);
+    av_buffer_unref(out_hw_device_ctx);
     avcodec_free_context(out_codec_ctx);
     avformat_close_input(out_fmt_ctx);
     return -1;
   }
 
-  /* Build the scaler explicitly rather than with sws_getContext(): the
-   * "threads" option must be set between allocation and initialisation, and
-   * sws_getContext() does both in one call. Slice threading is what keeps the
-   * conversion off the critical path when the source resolution or pixel
-   * format differs from the transport one. */
-  int sws_threads = ffmpeg_resolve_sws_threads();
-  *out_sws_ctx = sws_alloc_context();
-  if (*out_sws_ctx == NULL) {
-    LOG_ERROR("%s: sws_alloc_context failed", log_prefix);
-    avcodec_free_context(out_codec_ctx);
-    avformat_close_input(out_fmt_ctx);
-    return -1;
+  /* With hardware decode the source pixel format is only known after the
+   * first surface is downloaded, so the scaler is built on the first frame
+   * (ensure_sws_ctx) instead of here. */
+  if (*out_hw_device_ctx == NULL) {
+    ret = create_sws_ctx(out_sws_ctx,
+                         (*out_codec_ctx)->width, (*out_codec_ctx)->height,
+                         (*out_codec_ctx)->pix_fmt,
+                         target_w, target_h, target_fmt, log_prefix);
+    if (ret < 0) {
+      avcodec_free_context(out_codec_ctx);
+      avformat_close_input(out_fmt_ctx);
+      return -1;
+    }
+  } else {
+    *out_sws_ctx = NULL;
   }
-  av_opt_set_int(*out_sws_ctx, "srcw",       (*out_codec_ctx)->width,   0);
-  av_opt_set_int(*out_sws_ctx, "srch",       (*out_codec_ctx)->height,  0);
-  av_opt_set_int(*out_sws_ctx, "src_format", (*out_codec_ctx)->pix_fmt, 0);
-  av_opt_set_int(*out_sws_ctx, "dstw",       target_w,                  0);
-  av_opt_set_int(*out_sws_ctx, "dsth",       target_h,                  0);
-  av_opt_set_int(*out_sws_ctx, "dst_format", target_fmt,                0);
-  av_opt_set_int(*out_sws_ctx, "sws_flags",  SWS_FAST_BILINEAR,         0);
-  av_opt_set_int(*out_sws_ctx, "threads",    sws_threads,               0);
-  ret = sws_init_context(*out_sws_ctx, NULL, NULL);
-  if (ret < 0) {
-    av_strerror(ret, errbuf, sizeof(errbuf));
-    LOG_ERROR("%s: sws_init_context failed: %s", log_prefix, errbuf);
-    sws_freeContext(*out_sws_ctx); *out_sws_ctx = NULL;
-    avcodec_free_context(out_codec_ctx);
-    avformat_close_input(out_fmt_ctx);
-    return -1;
-  }
-  /* libswscale clamps the request (e.g. to 1 when built without threading). */
-  int64_t sws_threads_actual = sws_threads;
-  av_opt_get_int(*out_sws_ctx, "threads", 0, &sws_threads_actual);
 
   *out_av_frame  = av_frame_alloc();
   *out_yuv_frame = av_frame_alloc();
   *out_av_packet = av_packet_alloc();
-  if (*out_av_frame == NULL || *out_yuv_frame == NULL || *out_av_packet == NULL) {
+  if (*out_hw_device_ctx != NULL) *out_sw_frame = av_frame_alloc();
+  if (*out_av_frame == NULL || *out_yuv_frame == NULL || *out_av_packet == NULL ||
+      (*out_hw_device_ctx != NULL && *out_sw_frame == NULL)) {
     LOG_ERROR("%s: frame/packet allocation failed", log_prefix);
     av_frame_free(out_av_frame);
     av_frame_free(out_yuv_frame);
+    av_frame_free(out_sw_frame);
     av_packet_free(out_av_packet);
     sws_freeContext(*out_sws_ctx); *out_sws_ctx = NULL;
+    av_buffer_unref(out_hw_device_ctx);
     avcodec_free_context(out_codec_ctx);
     avformat_close_input(out_fmt_ctx);
     return -1;
@@ -373,19 +648,21 @@ static int open_ffmpeg_decoder(
     LOG_ERROR("%s: av_frame_get_buffer failed: %s", log_prefix, errbuf);
     av_frame_free(out_av_frame);
     av_frame_free(out_yuv_frame);
+    av_frame_free(out_sw_frame);
     av_packet_free(out_av_packet);
     sws_freeContext(*out_sws_ctx); *out_sws_ctx = NULL;
+    av_buffer_unref(out_hw_device_ctx);
     avcodec_free_context(out_codec_ctx);
     avformat_close_input(out_fmt_ctx);
     return -1;
   }
 
-  LOG_INFO("%s: opened '%s' Codec=%s %dx%d %s -> %dx%d %s (sws_threads=%d)",
+  LOG_INFO("%s: opened '%s' Codec=%s %dx%d %s -> %dx%d %s (hwaccel=%s)",
            log_prefix, filename, codec->name,
            (*out_codec_ctx)->width, (*out_codec_ctx)->height,
-           av_get_pix_fmt_name((*out_codec_ctx)->pix_fmt),
+           ffmpeg_fmt_name((*out_codec_ctx)->pix_fmt),
            target_w, target_h, ffmpeg_fmt_name(target_fmt),
-           (int)sws_threads_actual);
+           (*out_hw_device_ctx != NULL) ? "vaapi" : "none");
   return 0;
 }
 
@@ -393,8 +670,10 @@ static int open_ffmpeg_decoder(
 static void close_ffmpeg_decoder(
     AVFormatContext** fmt_ctx, AVCodecContext** codec_ctx,
     struct SwsContext** sws_ctx, AVFrame** av_frame,
-    AVFrame** yuv_frame, AVPacket** av_packet) {
+    AVFrame** yuv_frame, AVPacket** av_packet,
+    AVBufferRef** hw_device_ctx, AVFrame** sw_frame) {
   if (*av_frame != NULL)  av_frame_free(av_frame);
+  if (*sw_frame != NULL)  av_frame_free(sw_frame);
   if (*yuv_frame != NULL) {
     /* Reference-counted frames (av_frame_get_buffer) release their storage in
      * av_frame_free(). Only a frame whose data[] came from av_image_alloc
@@ -407,6 +686,8 @@ static void close_ffmpeg_decoder(
   if (*sws_ctx != NULL)   { sws_freeContext(*sws_ctx); *sws_ctx = NULL; }
   if (*codec_ctx != NULL) avcodec_free_context(codec_ctx);
   if (*fmt_ctx != NULL)   avformat_close_input(fmt_ctx);
+  /* Released last: the decoder holds its own reference until it is freed. */
+  if (*hw_device_ctx != NULL) av_buffer_unref(hw_device_ctx);
 }
 
 /* =========================================================================
@@ -424,15 +705,18 @@ int open_shared_ffmpeg(struct shared_decode_ctx* dec, const char* filename) {
     effective_source, "Shared decode",
     app->use_screen_capture, app->screen_input, (int)app->width, (int)app->height, app->fps,
     app->fmt, target_w, target_h,
+    app->hwaccel && dec->hwaccel_disabled == false,
     &dec->fmt_ctx, &dec->codec_ctx, &dec->sws_ctx,
     &dec->av_frame, &dec->yuv_frame, &dec->av_packet,
+    &dec->hw_device_ctx, &dec->hw_pix_fmt, &dec->sw_frame,
     &dec->video_stream_idx);
 }
 
 void close_shared_ffmpeg(struct shared_decode_ctx* dec) {
   close_ffmpeg_decoder(
     &dec->fmt_ctx, &dec->codec_ctx, &dec->sws_ctx,
-    &dec->av_frame, &dec->yuv_frame, &dec->av_packet);
+    &dec->av_frame, &dec->yuv_frame, &dec->av_packet,
+    &dec->hw_device_ctx, &dec->sw_frame);
 }
 
 /* =========================================================================
@@ -447,8 +731,10 @@ static int open_ffmpeg_source(struct st20p_tx_ctx* ctx, const char* filename) {
     filename, log_prefix,
     ctx->app->use_screen_capture, ctx->app->screen_input, (int)ctx->app->width, (int)ctx->app->height, ctx->app->fps,
     ctx->app->fmt, target_w, target_h,
+    ctx->app->hwaccel && ctx->hwaccel_disabled == false,
     &ctx->fmt_ctx, &ctx->codec_ctx, &ctx->sws_ctx,
     &ctx->av_frame, &ctx->yuv_frame, &ctx->av_packet,
+    &ctx->hw_device_ctx, &ctx->hw_pix_fmt, &ctx->sw_frame,
     &ctx->video_stream_idx);
   if (ret == 0) ctx->use_ffmpeg = true;
   return ret;
@@ -458,7 +744,8 @@ void close_ffmpeg_source(struct st20p_tx_ctx* ctx) {
   if (ctx->use_ffmpeg == false) return;
   close_ffmpeg_decoder(
     &ctx->fmt_ctx, &ctx->codec_ctx, &ctx->sws_ctx,
-    &ctx->av_frame, &ctx->yuv_frame, &ctx->av_packet);
+    &ctx->av_frame, &ctx->yuv_frame, &ctx->av_packet,
+    &ctx->hw_device_ctx, &ctx->sw_frame);
 }
 
 /* =========================================================================
@@ -549,7 +836,9 @@ int load_video_source(struct st20p_tx_ctx* ctx, const char* filename) {
  * false on error or when the exit flag is set.
  */
 bool ffmpeg_decode_next_frame(struct st20p_tx_ctx* ctx) {
-  if (ctx->fmt_ctx == NULL || ctx->codec_ctx == NULL || ctx->sws_ctx == NULL ||
+  /* sws_ctx is not checked: with hardware decode it is built lazily by
+   * ensure_sws_ctx() once the downloaded frame format is known. */
+  if (ctx->fmt_ctx == NULL || ctx->codec_ctx == NULL ||
       ctx->yuv_frame == NULL || ctx->av_packet == NULL || ctx->av_frame == NULL)
     return false;
 
@@ -603,8 +892,37 @@ bool ffmpeg_decode_next_frame(struct st20p_tx_ctx* ctx) {
       break;
     }
 
-    int rows = convert_frame_format(ctx->sws_ctx, ctx->av_frame,
-                                    ctx->codec_ctx->height, ctx->yuv_frame);
+    char log_prefix[64];
+    snprintf(log_prefix, sizeof(log_prefix), "ST20P TX(%d)", ctx->idx);
+
+    AVFrame* src_frame = hwaccel_map_to_cpu(ctx->hw_device_ctx, ctx->hw_pix_fmt,
+                                            ctx->av_frame, ctx->sw_frame, log_prefix);
+    if (src_frame == NULL) {
+      av_frame_unref(ctx->av_frame);
+      /* See the shared decode path: a persistently failing VA-API driver must
+       * not stall TX, so drop back to CPU decode. */
+      if (++ctx->hw_xfer_failures >= HWACCEL_MAX_XFER_FAILURES) {
+        LOG_WARN("%s: %d consecutive hardware transfers failed, reopening on CPU",
+                 log_prefix, ctx->hw_xfer_failures);
+        ctx->hwaccel_disabled = true;
+        ctx->hw_xfer_failures = 0;
+        close_ffmpeg_source(ctx);
+        if (open_ffmpeg_source(ctx, ctx->app->tx_url) < 0) {
+          LOG_ERROR("%s: CPU reopen failed", log_prefix);
+          break;
+        }
+      }
+      continue;
+    }
+    ctx->hw_xfer_failures = 0;
+
+    if (ensure_sws_ctx(&ctx->sws_ctx, src_frame, ctx->yuv_frame, log_prefix) < 0) {
+      av_frame_unref(ctx->av_frame);
+      return false;
+    }
+
+    int rows = convert_frame_format(ctx->sws_ctx, src_frame,
+                                    src_frame->height, ctx->yuv_frame);
     av_frame_unref(ctx->av_frame);
     if (rows <= 0) {
       LOG_ERROR("ST20P TX(%d): convert_frame_format failed (ret=%d)",

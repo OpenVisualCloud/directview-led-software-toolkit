@@ -132,6 +132,39 @@ static int extract_json_bool(const char* start, const char* end, const char* key
     return -1;
 }
 
+/* Locate a key at the top level of the root object. Nested objects and arrays
+ * are skipped, so a same-named key inside a sub-object is not mistaken for the
+ * top-level one. Returns a pointer to the key's opening quote, or NULL. */
+static const char* find_toplevel_key(const char* start, const char* end, const char* key) {
+    char search_key[128];
+    int n = snprintf(search_key, sizeof(search_key), "\"%s\"", key);
+    if (n < 0 || (size_t)n >= sizeof(search_key)) return NULL;
+    size_t klen = (size_t)n;
+
+    int depth = 0;
+    bool in_string = false;
+    for (const char* p = start; p < end; p++) {
+        if (in_string) {
+            if (*p == '\\') p++;                 /* skip the escaped character */
+            else if (*p == '"') in_string = false;
+            continue;
+        }
+        if (*p == '"') {
+            if (depth == 1 && (size_t)(end - p) >= klen &&
+                memcmp(p, search_key, klen) == 0) {
+                const char* q = p + klen;
+                while (q < end && (*q == ' ' || *q == '\t' || *q == '\n' || *q == '\r')) q++;
+                if (q < end && *q == ':') return p;  /* a key, not a value */
+            }
+            in_string = true;
+            continue;
+        }
+        if (*p == '{' || *p == '[') depth++;
+        else if (*p == '}' || *p == ']') depth--;
+    }
+    return NULL;
+}
+
 /* Find the opening '{' of the object that follows key within [start, end).
  * Returns pointer to '{', or NULL. */
 static const char* find_object(const char* start, const char* end, const char* key) {
@@ -229,6 +262,9 @@ int peek_config_log_file(const char* config_file, char* out_buf, size_t out_size
  *          position in the array (0, 1, 2, ...); parsing fails otherwise.
  *     "video": { "width": N, "height": N, "tx_url": "..." },
  *     "tx_video": { "scale_width": N, "scale_height": N, "fps": N, "fmt": "..." },
+ *     "hwaccel": true,
+ *          (optional — CPU decode by default; true tries VA-API and falls back
+ *           to the CPU when the GPU/driver/FFmpeg build cannot decode the input)
  *     "ptp": { "enable": true, "pi": true, "unicast": false },  (optional — PTP is
  *          disabled by default; enabling it requires a PTP grandmaster on the network)
  *     "log_file": "/path/to/dvledtx.log",  (optional — omit for console-only logging)
@@ -383,6 +419,14 @@ int parse_tx_config(const char* config_file, struct dvledtx_config* config) {
 
     /* --- optional top-level log_file --- */
     extract_json_string(json, buf_end, "log_file", config->log_file, sizeof(config->log_file));
+
+    /* --- optional top-level hwaccel (hardware decode) --- */
+    config->hwaccel = false;
+    const char* hwaccel_key = find_toplevel_key(json, buf_end, "hwaccel");
+    if (hwaccel_key != NULL) {
+        int hwaccel_val = extract_json_bool(hwaccel_key, buf_end, "hwaccel");
+        if (hwaccel_val >= 0) config->hwaccel = (hwaccel_val != 0);
+    }
 
     /* PTP hardware timing (built-in MTL PTP client).
      * Disabled by default: PTP-paced TX requires a PTP grandmaster on the
@@ -869,6 +913,9 @@ int load_and_apply_config(struct dvledtx_context* app, const char* config_file) 
         app->screen_input[sizeof(app->screen_input) - 1] = '\0';
     }
     app->use_screen_capture = (strcmp(config.input_mode, "screen_capture") == 0);
+
+    /* Hardware decode (optional) */
+    app->hwaccel = config.hwaccel;
 
     /* Copy per-session network + crop into app->session_net[] */
     for (int i = 0; i < config.session_count; i++) {
