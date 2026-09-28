@@ -4,43 +4,73 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 name: 'Gitleaks Scan'
-description: 'Scan repository for secrets and credentials using Gitleaks'
+description: 'Scan git history and the working tree for secrets using the Gitleaks CLI'
 
 inputs:
-  github-token:
-    description: 'GitHub token for Gitleaks API access'
-    required: true
+  version:
+    description: 'Gitleaks release version to install (without the leading v)'
+    required: false
+    default: '8.30.1'
 
 runs:
   using: composite
   steps:
-    - name: Run Gitleaks
-      uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+    - name: Install Gitleaks
+      shell: bash
       env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
+        GITLEAKS_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        TMP_DIR="$(mktemp -d)"
+        pushd "$TMP_DIR" > /dev/null
+
+        ARCHIVE="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+        CHECKSUMS="gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+        BASE_URL="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+
+        echo "Downloading Gitleaks ${GITLEAKS_VERSION}"
+        curl -sSfL --retry 3 -o "$ARCHIVE" "${BASE_URL}/${ARCHIVE}"
+        curl -sSfL --retry 3 -o "$CHECKSUMS" "${BASE_URL}/${CHECKSUMS}"
+
+        echo "Verifying checksum"
+        grep " ${ARCHIVE}\$" "$CHECKSUMS" | sha256sum -c -
+
+        tar -xzf "$ARCHIVE" gitleaks
+        sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+
+        popd > /dev/null
+        rm -rf "$TMP_DIR"
+
+        gitleaks version
 
     - name: Gitleaks git history scan
-      if: always()
       shell: bash
       run: |
+        set -uo pipefail
         REPORT_DIR="$GITHUB_WORKSPACE/reports"
         mkdir -p "$REPORT_DIR"
         echo "===== Gitleaks Git History Scan ====="
-        gitleaks git \
-          --report-format sarif \
-          --report-path "$REPORT_DIR/gitleaks-git-report.sarif" \
-          . 2>&1 | tee "$REPORT_DIR/gitleaks-git-scan.txt" || true
-        echo "Gitleaks git history scan complete."
+        gitleaks git -v 2>&1 | tee "$REPORT_DIR/gitleaks-git-scan.txt"
+        echo "GITLEAKS_GIT_RC=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
 
-    - name: Copy report to reports directory
-      if: always()
+    - name: Gitleaks directory scan
       shell: bash
       run: |
+        set -uo pipefail
         REPORT_DIR="$GITHUB_WORKSPACE/reports"
         mkdir -p "$REPORT_DIR"
-        if [ -f "$GITHUB_WORKSPACE/results.sarif" ]; then
-          cp "$GITHUB_WORKSPACE/results.sarif" "$REPORT_DIR/gitleaks-report.sarif"
-          echo "Gitleaks SARIF written to $REPORT_DIR/gitleaks-report.sarif"
-        else
-          echo "No Gitleaks SARIF output found"
+        echo "===== Gitleaks Directory Scan ====="
+        gitleaks dir . -v 2>&1 | tee "$REPORT_DIR/gitleaks-dir-scan.txt"
+        echo "GITLEAKS_DIR_RC=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+
+    - name: Evaluate Gitleaks result
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "git history scan exit code: $GITLEAKS_GIT_RC"
+        echo "directory scan exit code:   $GITLEAKS_DIR_RC"
+        if [ "$GITLEAKS_GIT_RC" -ne 0 ] || [ "$GITLEAKS_DIR_RC" -ne 0 ]; then
+          echo "::error::Gitleaks detected potential secrets. See reports/gitleaks-*-scan.txt"
+          exit 1
         fi
+        echo "No leaks detected."
