@@ -27,12 +27,6 @@ jobs:
       security-events: write # Required to upload SARIF results to GitHub Security tab
 
     steps:
-      - name: Clean up previous run
-        env:
-          WORKSPACE: ${{ github.workspace }}
-        run: |
-          find "$WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
