@@ -1,0 +1,25 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+name: 'CodeQL Scan'
+description: 'Initialize CodeQL, build dvledtx, and perform CodeQL analysis for C/C++'
+
+runs:
+  using: composite
+  steps:
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+      with:
+        languages: c-cpp
+        build-mode: manual
+
+    # c-cpp requires a manual build so CodeQL can trace the meson/ninja compiler invocations.
+    - name: Build dvledtx
+      uses: $/.github/actions/build-dvledtx
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+      with:
+        category: "/language:c-cpp"
