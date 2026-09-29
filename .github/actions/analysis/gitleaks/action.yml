@@ -44,6 +44,7 @@ runs:
         gitleaks version
 
     - name: Gitleaks git history scan
+      id: git-scan
       shell: bash
       run: |
         set -uo pipefail
@@ -51,9 +52,10 @@ runs:
         mkdir -p "$REPORT_DIR"
         echo "===== Gitleaks Git History Scan ====="
         gitleaks git -v 2>&1 | tee "$REPORT_DIR/gitleaks-git-scan.txt"
-        echo "GITLEAKS_GIT_RC=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+        echo "rc=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
     - name: Gitleaks directory scan
+      id: dir-scan
       shell: bash
       run: |
         set -uo pipefail
@@ -61,10 +63,13 @@ runs:
         mkdir -p "$REPORT_DIR"
         echo "===== Gitleaks Directory Scan ====="
         gitleaks dir . -v 2>&1 | tee "$REPORT_DIR/gitleaks-dir-scan.txt"
-        echo "GITLEAKS_DIR_RC=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+        echo "rc=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
     - name: Evaluate Gitleaks result
       shell: bash
+      env:
+        GITLEAKS_GIT_RC: ${{ steps.git-scan.outputs.rc }}
+        GITLEAKS_DIR_RC: ${{ steps.dir-scan.outputs.rc }}
       run: |
         set -euo pipefail
         echo "git history scan exit code: $GITLEAKS_GIT_RC"
