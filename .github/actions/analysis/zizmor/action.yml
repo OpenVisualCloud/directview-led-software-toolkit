@@ -6,17 +6,28 @@
 name: 'zizmor Scan'
 description: 'Install zizmor and scan all GitHub Actions workflow and action files'
 
+inputs:
+  zizmor-version:
+    description: >-
+      Exact zizmor version to install. Keep in sync with the same input on the
+      environment-check action, which may have installed zizmor already.
+    required: false
+    default: '1.30.1'
+
 runs:
   using: composite
   steps:
     - name: Install zizmor
       shell: bash
+      env:
+        ZIZMOR_VERSION: ${{ inputs.zizmor-version }}
       run: |
         echo "===== zizmor Setup ====="
-        if command -v zizmor > /dev/null 2>&1; then
-          echo "  [OK] zizmor already installed: $(zizmor --version)"
+        HAVE=$(zizmor --version 2>/dev/null | awk '{print $2}')
+        if [ "$HAVE" = "$ZIZMOR_VERSION" ]; then
+          echo "  [OK] zizmor already installed: $HAVE"
         else
-          pip3 install --break-system-packages zizmor
+          pip3 install --break-system-packages "zizmor==${ZIZMOR_VERSION}"
           echo "  zizmor installed: $(zizmor --version)"
         fi
 

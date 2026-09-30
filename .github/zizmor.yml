@@ -1,0 +1,18 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+rules:
+  # zizmor >= 1.30.0 prefers GitHub's self-repository syntax (uses: $/...) over
+  # the workspace-relative form (uses: ./...). OpenSSF Scorecard v5.5.0 does not
+  # recognise "$/" and classifies every such reference as an unpinned
+  # third-party action, which drops Pinned-Dependencies from 10/10 to 1/10.
+  #
+  # The two tools therefore contradict each other and flipping between the forms
+  # just trades one report for the other. We keep "./" because the Scorecard
+  # penalty is a 9-point hit on a published score, whereas this audit is
+  # informational (help severity) and the repository is the sole owner of the
+  # actions being referenced. Revisit once Scorecard understands "$/".
+  self-repository:
+    disable: true
