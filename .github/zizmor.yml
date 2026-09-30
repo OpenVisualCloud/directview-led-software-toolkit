@@ -4,18 +4,10 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 rules:
-  # zizmor >= 1.30.0 wants in-repo actions referenced with GitHub's
-  # self-repository syntax (uses: $/...). We keep the workspace-relative
-  # './' form instead, for two reasons:
-  #
-  #   1. '$/' requires an Actions runner >= 2.336.0 and does not resolve on the
-  #      runners this project uses. Every workflow using it failed within ~30s,
-  #      while the './' form passes.
-  #   2. OpenSSF Scorecard v5.5.0 does not recognise '$/' either, and counts
-  #      each such reference as an unpinned third-party action, dropping
-  #      Pinned-Dependencies from 10/10 to 1/10.
-  #
-  # This audit is informational (help severity) and the actions referenced are
-  # owned by this repository. Revisit if both tools gain '$/' support.
+  # In-repo actions use GitHub's self-repository syntax (uses: $/...), which
+  # this audit already prefers, so the rule is a no-op today. It stays disabled
+  # because the project has moved between '$/' and the workspace-relative './'
+  # form, and the scan should not flip red on that choice alone: the audit is
+  # informational (help severity) and the actions are owned by this repository.
   self-repository:
     disable: true
