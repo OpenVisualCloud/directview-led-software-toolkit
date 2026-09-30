@@ -39,10 +39,10 @@ jobs:
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Environment check
-        uses: $/.github/actions/environment-check
+        uses: ./.github/actions/environment-check
 
       - name: Coverity Scan
-        uses: $/.github/actions/analysis/coverity
+        uses: ./.github/actions/analysis/coverity
         env:
           COVERITY_TOKEN: ${{ secrets.COVERITY_TOKEN }}
           COVERITY_EMAIL: ${{ secrets.COVERITY_EMAIL }}

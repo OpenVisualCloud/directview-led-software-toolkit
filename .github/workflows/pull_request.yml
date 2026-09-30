@@ -38,28 +38,28 @@ jobs:
           persist-credentials: false
 
       - name: Environment check
-        uses: $/.github/actions/environment-check
+        uses: ./.github/actions/environment-check
 
       - name: Build
-        uses: $/.github/actions/build-dvledtx
+        uses: ./.github/actions/build-dvledtx
 
       - name: Smoke test
-        uses: $/.github/actions/smoke-tests
+        uses: ./.github/actions/smoke-tests
 
       - name: Unit tests
-        uses: $/.github/actions/unit-tests
+        uses: ./.github/actions/unit-tests
 
       - name: ShellCheck
-        uses: $/.github/actions/analysis/shellcheck
+        uses: ./.github/actions/analysis/shellcheck
 
       - name: zizmor Scan
-        uses: $/.github/actions/analysis/zizmor
+        uses: ./.github/actions/analysis/zizmor
 
       - name: cppcheck
-        uses: $/.github/actions/analysis/cppcheck
+        uses: ./.github/actions/analysis/cppcheck
 
       - name: Gitleaks Scan
-        uses: $/.github/actions/analysis/gitleaks
+        uses: ./.github/actions/analysis/gitleaks
 
       - name: Upload PR reports
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
