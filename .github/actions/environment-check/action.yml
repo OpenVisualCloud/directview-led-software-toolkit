@@ -19,12 +19,6 @@ inputs:
     description: 'FFmpeg release branch to build'
     required: false
     default: '7.0'
-  zizmor-version:
-    description: >-
-      Exact zizmor version to install. Pinned so that a new release cannot
-      introduce additional audits that fail CI without an explicit bump here.
-    required: false
-    default: '1.30.1'
   env-cache-version:
     description: >-
       Bump this whenever a change alters what gets built/installed into the
@@ -135,23 +129,15 @@ runs:
 
     - name: Install pip packages
       shell: bash
-      env:
-        ZIZMOR_VERSION: ${{ inputs.zizmor-version }}
       run: |
         echo "===== pip Package Setup ====="
-        PIP_PKGS="pyelftools ninja gcovr zizmor==${ZIZMOR_VERSION}"
+        PIP_PKGS="pyelftools ninja gcovr zizmor"
         MISSING=""
         for pkg in $PIP_PKGS; do
-          NAME="${pkg%%==*}"
-          WANT="${pkg#*==}"
-          HAVE=$(pip3 show "$NAME" 2>/dev/null | awk '/^Version:/{print $2}')
-          if [ -z "$HAVE" ]; then
-            MISSING="$MISSING $pkg"
-          elif [ "$WANT" != "$NAME" ] && [ "$WANT" != "$HAVE" ]; then
-            echo "  [MISMATCH] $NAME $HAVE (want $WANT)"
-            MISSING="$MISSING $pkg"
+          if pip3 show "$pkg" &>/dev/null; then
+            echo "  [OK] $pkg"
           else
-            echo "  [OK] $NAME ($HAVE)"
+            MISSING="$MISSING $pkg"
           fi
         done
         if [ -n "$MISSING" ]; then
