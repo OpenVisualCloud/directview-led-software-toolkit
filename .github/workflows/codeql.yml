@@ -49,7 +49,7 @@ jobs:
           persist-credentials: false
 
       - name: Environment check
-        uses: $/.github/actions/environment-check
+        uses: ./.github/actions/environment-check
 
       - name: CodeQL Scan
-        uses: $/.github/actions/analysis/codeql
+        uses: ./.github/actions/analysis/codeql

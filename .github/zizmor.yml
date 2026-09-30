@@ -1,0 +1,13 @@
+#
+# BSD 3-Clause License
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+#
+rules:
+  # zizmor >= 1.30.0 wants in-repo actions referenced with GitHub's
+  # self-repository syntax (uses: $/...). That syntax requires an Actions
+  # runner >= 2.336.0 and fails to resolve on the runners this project uses:
+  # every workflow using it failed within ~30s, while the workspace-relative
+  # './' form passes. Keep './' and silence the audit, which is informational.
+  self-repository:
+    disable: true
