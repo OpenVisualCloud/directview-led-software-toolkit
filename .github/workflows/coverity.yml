@@ -27,12 +27,6 @@ jobs:
       security-events: write # Required to upload SARIF results to GitHub Security tab
 
     steps:
-      - name: Clean up previous run
-        env:
-          WORKSPACE: ${{ github.workspace }}
-        run: |
-          find "$WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -45,10 +39,10 @@ jobs:
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Environment check
-        uses: ./.github/actions/environment-check
+        uses: $/.github/actions/environment-check
 
       - name: Coverity Scan
-        uses: ./.github/actions/analysis/coverity
+        uses: $/.github/actions/analysis/coverity
         env:
           COVERITY_TOKEN: ${{ secrets.COVERITY_TOKEN }}
           COVERITY_EMAIL: ${{ secrets.COVERITY_EMAIL }}
