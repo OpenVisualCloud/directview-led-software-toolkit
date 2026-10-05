@@ -30,6 +30,7 @@
 #include "app_context.h"
 #include "core/session_manager.h"
 #include "util/logger.h"
+#include "util/ptp_clock.h"
 #include <inttypes.h>
 #include <string.h>
 #include <stdlib.h>
@@ -199,12 +200,38 @@ void mtl_copy_crop_to_frame(struct st_frame* dst, const AVFrame* src,
  *
  * mtl_tx_uninit() — release the MTL library instance.
  */
-/* PTP hardware timing (built-in MTL PTP client) — used by both the direct MTL TX
- * pipeline and the FFmpeg avdevice TX path via mtl_tx_init(). See MTL_FLAG_PTP_* in mtl_api.h. */
+/* PTP hardware timing — used by both the direct MTL TX pipeline and the FFmpeg
+ * avdevice TX path via mtl_tx_init(). See MTL_FLAG_PTP_* in mtl_api.h. */
 static void mtl_tx_ptp_sync_notify_cb(void* priv, struct mtl_ptp_sync_notify_meta* meta) {
   (void)priv;
   LOG_INFO("PTP sync: master_utc_offset=%d delta=%" PRId64 "ns",
             meta->master_utc_offset, meta->delta);
+}
+
+/* Grandmaster mode: the local NIC PHC served by ptp4l is the reference clock.
+ * MTL's built-in PTP client is slave-only (it only ever sends PTP_DELAY_REQ and
+ * never Announce/Sync), so it is deliberately NOT enabled here — it would make
+ * MTL lock to whatever grandmaster is on the link instead of to us. Instead the
+ * PHC is handed to MTL as ptp_get_time_fn, which mt_dev.c wires in ahead of its
+ * own sources, and pacing is switched to ST21_TX_PACING_WAY_PTP so the video
+ * transmitter paces off mt_get_ptp_time() rather than the TSC. */
+static int mtl_tx_ptp_grandmaster_init(struct mtl_init_params* mtl_params,
+                                       session_manager_t* manager,
+                                       struct dvledtx_context* app) {
+  manager->ptp_clk = ptp_clock_open(app->ptp_phc, (unsigned int)app->ptp_phc_interval_ms);
+  if (manager->ptp_clk == NULL) {
+    LOG_ERROR("PTP grandmaster mode: no usable PHC time source. The NIC that "
+              "runs ptp4l must keep its kernel interface (use SR-IOV VFs for "
+              "the DPDK ports), and dvledtx needs read access to /dev/ptpN");
+    return -1;
+  }
+
+  mtl_params->priv             = manager->ptp_clk;
+  mtl_params->ptp_get_time_fn  = ptp_clock_get_time_ns;
+  mtl_params->pacing           = ST21_TX_PACING_WAY_PTP;
+  LOG_INFO("MTL init: PTP grandmaster mode, time source %s, pacing=ptp",
+           ptp_clock_device(manager->ptp_clk));
+  return 0;
 }
 
 int mtl_tx_init(session_manager_t* manager, struct dvledtx_context* app) {
@@ -215,18 +242,24 @@ int mtl_tx_init(session_manager_t* manager, struct dvledtx_context* app) {
   mtl_params.num_ports = app->nic_count;
 
   if (app->ptp_enable) {
-    mtl_params.flags |= MTL_FLAG_PTP_ENABLE;
-    mtl_params.pacing = ST21_TX_PACING_WAY_PTP;
-    if (app->ptp_pi) mtl_params.flags |= MTL_FLAG_PTP_PI;
-    if (app->ptp_unicast) mtl_params.flags |= MTL_FLAG_PTP_UNICAST_ADDR;
-    mtl_params.ptp_sync_notify = mtl_tx_ptp_sync_notify_cb;
-    LOG_INFO("MTL init: PTP enabled (pi=%d unicast=%d)", app->ptp_pi, app->ptp_unicast);
+    if (app->ptp_mode == DVLEDTX_PTP_MODE_GRANDMASTER) {
+      if (mtl_tx_ptp_grandmaster_init(&mtl_params, manager, app) < 0) return -1;
+    } else {
+      mtl_params.flags |= MTL_FLAG_PTP_ENABLE;
+      mtl_params.pacing = ST21_TX_PACING_WAY_PTP;
+      if (app->ptp_pi) mtl_params.flags |= MTL_FLAG_PTP_PI;
+      if (app->ptp_unicast) mtl_params.flags |= MTL_FLAG_PTP_UNICAST_ADDR;
+      mtl_params.ptp_sync_notify = mtl_tx_ptp_sync_notify_cb;
+      LOG_INFO("MTL init: PTP slave mode (pi=%d unicast=%d)", app->ptp_pi, app->ptp_unicast);
+    }
   }
 
   /* Count sessions assigned to each NIC for queue allocation */
   int* sessions_per_nic = calloc((size_t)app->nic_count, sizeof(int));
   if (sessions_per_nic == NULL) {
     LOG_ERROR("Failed to allocate sessions_per_nic array");
+    ptp_clock_close(manager->ptp_clk);
+    manager->ptp_clk = NULL;
     return -1;
   }
   for (int i = 0; i < app->st20p_sessions; i++) {
@@ -254,6 +287,8 @@ int mtl_tx_init(session_manager_t* manager, struct dvledtx_context* app) {
   manager->mtl = mtl_init(&mtl_params);
   if (!manager->mtl) {
     LOG_ERROR("Failed to initialise MTL library");
+    ptp_clock_close(manager->ptp_clk);
+    manager->ptp_clk = NULL;
     return -1;
   }
   LOG_INFO("MTL library initialised successfully (%d port(s))", app->nic_count);
@@ -265,6 +300,10 @@ void mtl_tx_uninit(session_manager_t* manager) {
     mtl_uninit(manager->mtl);
     manager->mtl = NULL;
   }
+  /* Closed after mtl_uninit: MTL may still call ptp_get_time_fn while tearing
+   * down its tasklets. */
+  ptp_clock_close(manager->ptp_clk);
+  manager->ptp_clk = NULL;
 }
 
 /* =========================================================================

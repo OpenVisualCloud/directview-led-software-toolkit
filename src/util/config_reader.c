@@ -6,6 +6,7 @@
 #include "util/config_reader.h"
 #include "app_context.h"
 #include "util/logger.h"
+#include "util/ptp_clock.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -428,13 +429,18 @@ int parse_tx_config(const char* config_file, struct dvledtx_config* config) {
         if (hwaccel_val >= 0) config->hwaccel = (hwaccel_val != 0);
     }
 
-    /* PTP hardware timing (built-in MTL PTP client).
-     * Disabled by default: PTP-paced TX requires a PTP grandmaster on the
-     * network, and without one the TX pacing clock never locks. Enable via the
+    /* PTP hardware timing.
+     * Disabled by default: with "mode":"slave" PTP-paced TX requires a PTP
+     * grandmaster on the network, and without one the TX pacing clock never
+     * locks. With "mode":"grandmaster" this host's own NIC PHC is the
+     * reference and no external grandmaster is needed. Enable via the
      * optional top-level "ptp" block. */
     config->ptp_enable  = false;
+    config->ptp_mode    = DVLEDTX_PTP_MODE_SLAVE;
     config->ptp_pi      = false;
     config->ptp_unicast = false;
+    config->ptp_phc[0]  = '\0';
+    config->ptp_phc_interval_ms = 0;
     const char* ptp_obj = find_object(json, buf_end, "ptp");
     if (ptp_obj != NULL) {
         const char* ptp_end = find_object_end(ptp_obj, buf_end);
@@ -443,6 +449,32 @@ int parse_tx_config(const char* config_file, struct dvledtx_config* config) {
         b = extract_json_bool(ptp_obj, ptp_end, "enable");  if (b >= 0) config->ptp_enable  = (b != 0);
         b = extract_json_bool(ptp_obj, ptp_end, "pi");      if (b >= 0) config->ptp_pi      = (b != 0);
         b = extract_json_bool(ptp_obj, ptp_end, "unicast"); if (b >= 0) config->ptp_unicast = (b != 0);
+
+        char mode[32] = {0};
+        if (extract_json_string(ptp_obj, ptp_end, "mode", mode, sizeof(mode)) != NULL &&
+            mode[0] != '\0') {
+            if (strcmp(mode, "grandmaster") == 0) {
+                config->ptp_mode = DVLEDTX_PTP_MODE_GRANDMASTER;
+            } else if (strcmp(mode, "slave") == 0) {
+                config->ptp_mode = DVLEDTX_PTP_MODE_SLAVE;
+            } else {
+                LOG_ERROR("Invalid ptp.mode '%s' (expected \"slave\" or \"grandmaster\")", mode);
+                free(json);
+                return -1;
+            }
+        }
+
+        /* Grandmaster time source: "/dev/ptpN" or the kernel interface that
+         * owns the PHC. Either key populates the same field. */
+        extract_json_string(ptp_obj, ptp_end, "phc_device", config->ptp_phc,
+                            sizeof(config->ptp_phc));
+        if (config->ptp_phc[0] == '\0')
+            extract_json_string(ptp_obj, ptp_end, "phc_interface", config->ptp_phc,
+                                sizeof(config->ptp_phc));
+
+        config->ptp_phc_interval_ms =
+            extract_json_int(ptp_obj, ptp_end, "phc_interval_ms");
+        if (config->ptp_phc_interval_ms < 0) config->ptp_phc_interval_ms = 0;
     }
 
     /* --- tx_sessions array --- */
@@ -629,6 +661,30 @@ int validate_tx_config(const struct dvledtx_config* config) {
         }
     }
     regfree(&bdf_regex);
+
+    /* PTP block validation */
+    if (config->ptp_mode == DVLEDTX_PTP_MODE_GRANDMASTER) {
+        if (!config->ptp_enable) {
+            LOG_WARN("ptp.mode is 'grandmaster' but ptp.enable is false — "
+                     "PTP is off and TX falls back to TSC pacing");
+        }
+        if (config->ptp_pi || config->ptp_unicast) {
+            LOG_WARN("ptp.pi / ptp.unicast only apply to the built-in PTP client "
+                     "(mode 'slave') and are ignored in grandmaster mode");
+        }
+        if (config->ptp_phc[0] != '\0' && !ptp_clock_valid_device_ref(config->ptp_phc)) {
+            LOG_ERROR("invalid ptp.phc_device/phc_interface '%s' "
+                      "(expected '/dev/ptpN' or a kernel interface name)",
+                      config->ptp_phc);
+            return -1;
+        }
+        if (config->ptp_phc_interval_ms != 0 &&
+            (config->ptp_phc_interval_ms < 100 || config->ptp_phc_interval_ms > 10000)) {
+            LOG_ERROR("ptp.phc_interval_ms %d is out of range (100..10000, or 0 for default)",
+                      config->ptp_phc_interval_ms);
+            return -1;
+        }
+    }
 
     /* Video resolution validation */
     if (config->width == 0 || config->height == 0) {
@@ -939,15 +995,35 @@ int load_and_apply_config(struct dvledtx_context* app, const char* config_file) 
         app->log_file[sizeof(app->log_file) - 1] = '\0';
     }
 
-    /* PTP hardware timing (built-in MTL PTP client) */
+    /* PTP hardware timing */
     app->ptp_enable  = config.ptp_enable;
+    app->ptp_mode    = config.ptp_mode;
     app->ptp_pi      = config.ptp_pi;
     app->ptp_unicast = config.ptp_unicast;
-    if (app->ptp_enable)
-        LOG_INFO("PTP enabled: pi_controller=%d unicast_delay_req=%d",
-                 app->ptp_pi, app->ptp_unicast);
-    else
+    app->ptp_phc_interval_ms = config.ptp_phc_interval_ms;
+    strncpy(app->ptp_phc, config.ptp_phc, sizeof(app->ptp_phc) - 1);
+    app->ptp_phc[sizeof(app->ptp_phc) - 1] = '\0';
+    if (!app->ptp_enable)
         LOG_INFO("PTP disabled (default TSC-based TX pacing)");
+    else if (app->ptp_mode == DVLEDTX_PTP_MODE_GRANDMASTER)
+        LOG_INFO("PTP enabled: mode=grandmaster phc=%s resample=%d ms",
+                 app->ptp_phc[0] ? app->ptp_phc : "<auto>",
+                 app->ptp_phc_interval_ms);
+    else
+        LOG_INFO("PTP enabled: mode=slave pi_controller=%d unicast_delay_req=%d",
+                 app->ptp_pi, app->ptp_unicast);
+
+#ifndef ENABLE_MTL_TX
+    /* On the mtl_st20p muxer path the plugin owns the mtl_init() call and
+     * ptp_get_time_fn has no AVOption equivalent, so the PHC could never reach
+     * MTL. Fail here rather than transmitting on the wrong clock. */
+    if (app->ptp_enable && app->ptp_mode == DVLEDTX_PTP_MODE_GRANDMASTER) {
+        LOG_ERROR("ptp.mode 'grandmaster' requires the direct MTL TX build; "
+                  "rebuild with -Denable_mtl_tx=true");
+        dvledtx_config_free(&config);
+        return -1;
+    }
+#endif
 
     LOG_INFO("Config loaded: %s (%d NIC(s), %d session(s))",
              config_file, config.nic_count, config.session_count);
