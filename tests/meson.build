@@ -102,6 +102,7 @@ test_session_manager = executable('test_session_manager',
     'test_session_manager.c',
     '../src/core/session_manager.c',
     '../src/mtl/mtl_tx.c',
+    '../src/util/ptp_clock.c',
     '../src/util/logger.c',
   ],
   include_directories: test_inc,
@@ -179,6 +180,7 @@ if mtl_dep.found()
     sources: [
       'test_mtl_tx.c',
       '../src/mtl/mtl_tx.c',
+      '../src/util/ptp_clock.c',
       '../src/util/logger.c',
     ],
     include_directories: [test_inc, include_directories('/usr/local/include/mtl')],
@@ -194,6 +196,7 @@ if mtl_dep.found()
     sources: [
       'test_mtl_tx_stub.c',
       '../src/mtl/mtl_tx.c',
+      '../src/util/ptp_clock.c',
       '../src/util/logger.c',
     ],
     include_directories: [test_inc, include_directories('/usr/local/include/mtl')],
