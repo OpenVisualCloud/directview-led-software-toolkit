@@ -327,7 +327,14 @@ The second works because MTL never touches the TX port's own clock in this mode 
 
    The script runs `ptp4l` with `masterOnly 1` and `priority1 64`, which keeps BMCA on this host —
    switch grandmasters normally advertise `priority1 128`, so a lower value wins. `masterOnly`
-   additionally stops `ptp4l` from ever slaving to the switch.
+   additionally stops `ptp4l` from ever slaving to the switch. On linuxptp 4.0+ the script emits
+   `serverOnly` instead, which is the same setting under its current name.
+
+   It also forces `network_transport L2`. This is required, not a preference: DPDK's `ixgbe`
+   timestamping installs only an ethertype `0x88F7` filter and never timestamps PTP carried over
+   UDP, so an MTL receiver can never hardware-timestamp a UDPv4 grandmaster. `ptp4l` defaults to
+   UDPv4, so a hand-rolled config will appear to run correctly on this host while no receiver is
+   able to lock to it.
 
 4. Leave it running and start dvledtx as usual.
 
