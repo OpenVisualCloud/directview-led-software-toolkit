@@ -54,6 +54,21 @@ test_logger = executable('test_logger',
 )
 test('logger', test_logger)
 
+# ptp_clock.c is included directly by the test to reach its static servo
+# functions; clock_gettime is wrapped to make the served time deterministic.
+test_ptp_clock = executable('test_ptp_clock',
+  sources: [
+    'test_ptp_clock.c',
+    '../src/util/logger.c',
+  ],
+  include_directories: test_inc,
+  dependencies: [m_dep, pthread_dep, cmocka_dep],
+  c_args: test_c_args,
+  link_args: ['-Wl,--wrap=clock_gettime'],
+  install: false
+)
+test('ptp_clock', test_ptp_clock)
+
 test_ffmpeg_decoder = executable('test_ffmpeg_decoder',
   sources: [
     'test_ffmpeg_decoder.c',
