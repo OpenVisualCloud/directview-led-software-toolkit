@@ -334,6 +334,14 @@ The second works because MTL never touches the TX port's own clock in this mode 
 For the separate-port topology, skip step 1 and run `ptp4l` on the spare port instead; the TX NIC
 stays entirely under DPDK.
 
+> **Sessions per VF are limited by the NIC's TX queues.** MTL requests `sessions + 2` TX queues but
+> silently clamps to what the device provides, then fails later with the unhelpful
+> `mt_dev_get_tx_queue(0), fail to find free tx queue`. An Intel E610 VF exposes 4 TX queues and MTL
+> reserves one for system traffic, so **3 sessions per VF is the ceiling**. Spread further sessions
+> across additional VFs — one session per VF, as in `config/tx_ptp_gm_4session.json`. Check the
+> startup log: `MTL init: port[0]=... tx_queues=5` is the request,
+> `dev_config_port(0), tx_q(4 ...)` is what the hardware actually gave.
+
 **Verifying it works**
 
 On a **receiver**, confirm which clock actually won the election:

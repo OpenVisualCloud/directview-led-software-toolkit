@@ -1,0 +1,52 @@
+{
+  "log_file": "dvledtx_ptp_4session.log",
+  "interfaces": [
+    { "nic_index": 0, "name": "0000:04:10.0", "sip": "192.168.50.29", "dip": "239.168.85.20" },
+    { "nic_index": 1, "name": "0000:04:10.2", "sip": "192.168.50.30", "dip": "239.168.85.20" },
+    { "nic_index": 2, "name": "0000:04:10.4", "sip": "192.168.50.31", "dip": "239.168.85.20" },
+    { "nic_index": 3, "name": "0000:04:10.6", "sip": "192.168.50.32", "dip": "239.168.85.20" }
+  ],
+  "video": {
+    "width":  1920,
+    "height": 1080,
+    "tx_url": "bbb_sunflower_1080p_30fps_normal.mp4"
+  },
+  "tx_video": {
+    "scale_width":  1920,
+    "scale_height": 1080,
+    "fps":    30,
+    "fmt":    "yuv422p10le"
+  },
+  "ptp": {
+    "enable":          true,
+    "mode":            "grandmaster",
+    "phc_interface":   "enp4s0",
+    "phc_interval_ms": 1000
+  },
+  "tx_sessions": [
+    {
+      "nic_index":    0,
+      "udp_port":     20000,
+      "payload_type": 96,
+      "crop": { "x": 0, "y": 0, "w": 960, "h": 540 }
+    },
+    {
+      "nic_index":    1,
+      "udp_port":     20002,
+      "payload_type": 96,
+      "crop": { "x": 960, "y": 0, "w": 960, "h": 540 }
+    },
+    {
+      "nic_index":    2,
+      "udp_port":     20004,
+      "payload_type": 96,
+      "crop": { "x": 0, "y": 540, "w": 960, "h": 540 }
+    },
+    {
+      "nic_index":    3,
+      "udp_port":     20006,
+      "payload_type": 96,
+      "crop": { "x": 960, "y": 540, "w": 960, "h": 540 }
+    }
+  ]
+}

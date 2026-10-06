@@ -39,10 +39,19 @@ if [[ -z "${PHC_INDEX}" || "${PHC_INDEX}" == "none" || "${PHC_INDEX}" == "-1" ]]
   exit 1
 fi
 
-CONF="$(mktemp /tmp/ptp4l-gm-XXXXXX.conf)"
-trap 'rm -f "${CONF}"' EXIT
+# Fixed path, not mktemp: the final exec replaces this shell so an EXIT trap
+# would never fire, and repeated runs would leak a file each time.
+CONF="/tmp/ptp4l-gm-${IFACE}.conf"
 
-# priority1 below the switch's keeps BMCA on this host; masterOnly stops ptp4l
+# linuxptp 4.0 renamed masterOnly to serverOnly and warns on the old spelling.
+PTP4L_MAJOR="$(ptp4l -v 2>&1 | head -1 | sed -E 's/[^0-9]*([0-9]+).*/\1/')"
+if [[ -n "${PTP4L_MAJOR}" && "${PTP4L_MAJOR}" -ge 4 ]]; then
+  SERVER_ONLY_KEY="serverOnly"
+else
+  SERVER_ONLY_KEY="masterOnly"
+fi
+
+# priority1 below the switch's keeps BMCA on this host; serverOnly stops ptp4l
 # from ever slaving to the switch's GPS-less grandmaster.
 cat >"${CONF}" <<EOF
 [global]
@@ -58,7 +67,7 @@ tx_timestamp_timeout    50
 summary_interval        4
 
 [${IFACE}]
-masterOnly              1
+${SERVER_ONLY_KEY}              1
 EOF
 
 echo "PTP grandmaster on ${IFACE} (/dev/ptp${PHC_INDEX}), priority1=${PRIORITY1}"
