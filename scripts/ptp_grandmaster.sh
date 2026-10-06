@@ -53,12 +53,19 @@ fi
 
 # priority1 below the switch's keeps BMCA on this host; serverOnly stops ptp4l
 # from ever slaving to the switch's GPS-less grandmaster.
+#
+# network_transport L2 is required, not cosmetic: DPDK's ixgbe timesync only
+# installs an ethertype 0x88F7 filter (ixgbe_timesync_enable), so a receiver
+# using MTL's built-in PTP client can only hardware-timestamp L2 PTP. Over the
+# UDPv4 default the receiver falls back to software timestamps, or fails with
+# ptp_timesync_read_rx_time err -22.
 cat >"${CONF}" <<EOF
 [global]
 priority1               ${PRIORITY1}
 priority2               128
 clockClass              248
 domainNumber            0
+network_transport       L2
 time_stamping           hardware
 logAnnounceInterval     -2
 logSyncInterval         -3
