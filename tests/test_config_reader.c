@@ -761,6 +761,33 @@ static void test_ptp_clock_device_ref_length_boundary(void **state)
     assert_false(ptp_clock_valid_device_ref(name));
 }
 
+/* Multiple interfaces in grandmaster mode warns but still validates, so the
+ * config keeps working once MTL guards mt_ptp_parse. */
+static void test_validate_grandmaster_multi_nic_warns_but_passes(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+
+    cfg.interface_name = realloc(cfg.interface_name, 2 * sizeof(*cfg.interface_name));
+    cfg.interface_sip  = realloc(cfg.interface_sip,  2 * sizeof(*cfg.interface_sip));
+    cfg.interface_dip  = realloc(cfg.interface_dip,  2 * sizeof(*cfg.interface_dip));
+    assert_non_null(cfg.interface_name);
+    assert_non_null(cfg.interface_sip);
+    assert_non_null(cfg.interface_dip);
+    snprintf(cfg.interface_name[1], sizeof(cfg.interface_name[1]), "0000:06:00.1");
+    snprintf(cfg.interface_sip[1],  sizeof(cfg.interface_sip[1]),  "192.168.50.30");
+    snprintf(cfg.interface_dip[1],  sizeof(cfg.interface_dip[1]),  "239.168.85.20");
+    cfg.nic_cap   = 2;
+    cfg.nic_count = 2;
+
+    cfg.ptp_enable = true;
+    cfg.ptp_mode   = DVLEDTX_PTP_MODE_GRANDMASTER;
+    snprintf(cfg.ptp_phc, sizeof(cfg.ptp_phc), "enp4s0");
+    assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
+}
+
 /* Opening a PHC that does not exist must fail cleanly, and the NULL handle
  * must then be safe to pass to every other entry point — MTL calls the time
  * function from the dataplane with whatever priv it was given. */
@@ -2358,6 +2385,7 @@ int main(void)
         cmocka_unit_test(test_validate_grandmaster_interval_boundaries),
         cmocka_unit_test(test_validate_slave_mode_ignores_phc_fields),
         cmocka_unit_test(test_ptp_clock_device_ref_length_boundary),
+        cmocka_unit_test(test_validate_grandmaster_multi_nic_warns_but_passes),
         cmocka_unit_test(test_ptp_clock_open_nonexistent_device_fails),
         cmocka_unit_test(test_ptp_clock_null_handle_is_safe),
         cmocka_unit_test(test_parse_hwaccel_absent_defaults_false),

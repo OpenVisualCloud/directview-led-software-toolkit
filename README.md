@@ -341,13 +341,40 @@ The second works because MTL never touches the TX port's own clock in this mode 
 For the separate-port topology, skip step 1 and run `ptp4l` on the spare port instead; the TX NIC
 stays entirely under DPDK.
 
-> **Sessions per VF are limited by the NIC's TX queues.** MTL requests `sessions + 2` TX queues but
-> silently clamps to what the device provides, then fails later with the unhelpful
-> `mt_dev_get_tx_queue(0), fail to find free tx queue`. An Intel E610 VF exposes 4 TX queues and MTL
-> reserves one for system traffic, so **3 sessions per VF is the ceiling**. Spread further sessions
-> across additional VFs — one session per VF, as in `config/tx_ptp_gm_4session.json`. Check the
-> startup log: `MTL init: port[0]=... tx_queues=5` is the request,
-> `dev_config_port(0), tx_q(4 ...)` is what the hardware actually gave.
+> **In the SR-IOV topology, 3 sessions on a single VF is the practical ceiling.** Two separate
+> limits combine to produce it, and only the first is obvious.
+>
+> *The VF's TX queues.* MTL requests `sessions + 2` TX queues but silently clamps to what the device
+> provides, then fails later with the unhelpful `mt_dev_get_tx_queue(0), fail to find free tx queue`.
+> An Intel E610 VF exposes 4 TX queues however many VFs you create, and MTL reserves one for system
+> traffic — so **3 sessions per VF**. Check the startup log: `MTL init: port[0]=... tx_queues=5` is
+> the request, `dev_config_port(0), tx_q(4 ...)` is what the hardware actually gave.
+>
+> *A NULL dereference in MTL, which stops you using a second VF.* `mt_ptp_init()` allocates a PTP
+> instance only for port 0 unless a port reports offload timestamping, which ixgbe VFs do not — so
+> `impl->ptp[i]` is NULL for ports 1 and up. `cni_rx_handle()` then calls `mt_ptp_parse(ptp, ...)`
+> for ethertype `0x88F7` with no NULL check (the UDP path a few lines below *is* guarded). Because
+> `ptp4l` runs on the PF, the NIC's internal switch replicates its L2 multicast to every VF, so the
+> second VF takes a `SIGSEGV` in `mt_ptp_parse` as soon as the first PTP frame lands.
+>
+> This is independent of dvledtx: it reproduces with `ptp.enable: false`, and disappears only when
+> no PTP traffic is on the wire. Until it is fixed upstream, keep `interfaces[]` to a **single VF**
+> and at most 3 sessions. Creating extra VFs is harmless — only *using* a second one crashes.
+>
+> The fix is one line in MTL's `lib/src/mt_cni.c`, mirroring the guard its own UDP path already has:
+>
+> ```c
+> case RTE_ETHER_TYPE_1588:
+>   if (!ptp) break;              /* port has no PTP instance */
+>   ptp_hdr = rte_pktmbuf_mtod_offset(m, struct mt_ptp_header*, hdr_offset);
+>   mt_ptp_parse(ptp, ptp_hdr, vlan, MT_PTP_L2, m->timesync, NULL);
+>   break;
+> ```
+>
+> With that guard in place the ceiling becomes 3 sessions per VF, so 4 VFs give 12.
+>
+> Note this limit applies **only** when PTP forces the SR-IOV topology. Without PTP, dvledtx owns the
+> PF, which has ample queues — 8 sessions on one PF port is known to work.
 
 **Verifying it works**
 

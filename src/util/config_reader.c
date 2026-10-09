@@ -684,6 +684,15 @@ int validate_tx_config(const struct dvledtx_config* config) {
                       config->ptp_phc_interval_ms);
             return -1;
         }
+        /* MTL gives ports >0 no PTP instance and parses 0x88F7 without a NULL check,
+         * so a second port segfaults once ptp4l's multicast reaches it. */
+        if (config->ptp_enable && config->nic_count > 1) {
+            LOG_WARN("ptp.mode 'grandmaster' with %d interfaces: MTL crashes on the "
+                     "second and later ports when PTP frames arrive. Use a single VF "
+                     "(max 3 sessions) until MTL's mt_cni.c guards mt_ptp_parse against "
+                     "a NULL ptp instance. See the SR-IOV notes in README.md.",
+                     config->nic_count);
+        }
     }
 
     /* Video resolution validation */
