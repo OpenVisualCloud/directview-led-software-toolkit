@@ -34,6 +34,7 @@ test_config_reader = executable('test_config_reader',
     'test_config_reader.c',
     '../src/util/config_reader.c',
     '../src/util/logger.c',
+    '../src/util/ptp_clock.c',
   ],
   include_directories: test_inc,
   dependencies: test_deps,
@@ -52,6 +53,21 @@ test_logger = executable('test_logger',
   install: false
 )
 test('logger', test_logger)
+
+# ptp_clock.c is included directly by the test to reach its static servo
+# functions; clock_gettime is wrapped to make the served time deterministic.
+test_ptp_clock = executable('test_ptp_clock',
+  sources: [
+    'test_ptp_clock.c',
+    '../src/util/logger.c',
+  ],
+  include_directories: test_inc,
+  dependencies: [m_dep, pthread_dep, cmocka_dep],
+  c_args: test_c_args,
+  link_args: ['-Wl,--wrap=clock_gettime'],
+  install: false
+)
+test('ptp_clock', test_ptp_clock)
 
 test_ffmpeg_decoder = executable('test_ffmpeg_decoder',
   sources: [
@@ -101,6 +117,7 @@ test_session_manager = executable('test_session_manager',
     'test_session_manager.c',
     '../src/core/session_manager.c',
     '../src/mtl/mtl_tx.c',
+    '../src/util/ptp_clock.c',
     '../src/util/logger.c',
   ],
   include_directories: test_inc,
@@ -178,6 +195,7 @@ if mtl_dep.found()
     sources: [
       'test_mtl_tx.c',
       '../src/mtl/mtl_tx.c',
+      '../src/util/ptp_clock.c',
       '../src/util/logger.c',
     ],
     include_directories: [test_inc, include_directories('/usr/local/include/mtl')],
@@ -193,6 +211,7 @@ if mtl_dep.found()
     sources: [
       'test_mtl_tx_stub.c',
       '../src/mtl/mtl_tx.c',
+      '../src/util/ptp_clock.c',
       '../src/util/logger.c',
     ],
     include_directories: [test_inc, include_directories('/usr/local/include/mtl')],

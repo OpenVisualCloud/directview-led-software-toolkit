@@ -42,7 +42,8 @@ executable('dvledtx',
     'src/ffmpeg/ffmpeg_frame_handler.c',
     'src/ffmpeg/ffmpeg_tx.c',
     'src/mtl/mtl_tx.c',
-    'src/util/logger.c'
+    'src/util/logger.c',
+    'src/util/ptp_clock.c'
   ],
   include_directories: include_directories('include'),
   dependencies: all_deps,
