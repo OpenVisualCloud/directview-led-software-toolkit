@@ -4,7 +4,7 @@
 [![CI](https://github.com/OpenVisualCloud/directview-led-software-toolkit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/OpenVisualCloud/directview-led-software-toolkit/actions/workflows/ci.yml)
 <a href="https://scan.coverity.com/projects/openvisualcloud-directview-led-software-toolkit"><img alt="Coverity Scan Build Status" src="https://scan.coverity.com/projects/33108/badge.svg"/></a>
 [![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20|%2024.04-orange.svg)](https://releases.ubuntu.com/jammy/)
-[![MTL](https://img.shields.io/badge/MTL-v26.01+-green.svg)](https://github.com/OpenVisualCloud/Media-Transport-Library)
+[![MTL](https://img.shields.io/badge/MTL-v26.09-green.svg)](https://github.com/OpenVisualCloud/Media-Transport-Library/releases/tag/v26.09)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/OpenVisualCloud/directview-led-software-toolkit/badge)](https://securityscorecards.dev/viewer/?uri=github.com/OpenVisualCloud/directview-led-software-toolkit)
 
 ## Table of Contents
@@ -60,9 +60,10 @@ dvledtx reads a video source file (e.g., MP4), decodes it using FFmpeg, and tran
 
 ### Deployment Security Model
 
-dvledtx follows a layered security model. The application validates and bounds every input it
-owns — configuration parsing, log file destinations, decoder behaviour and resource limits — and
-is covered by static analysis, fuzzing and dependency CVE tracking in CI. Transport-level
+dvledtx and dvledrx follow a layered security model. The applications validate and bound their
+inputs — including configuration parsing, log file destinations, decoder behaviour and resource
+limits — and are covered by static analysis, AFL/libFuzzer fuzzing and dependency CVE tracking in
+CI. Transport-level
 security is a separate layer: SMPTE ST 2110-20 and the PTP timing it depends on do not define
 authentication, encryption or integrity protection, which is a property of the standards common
 to all ST 2110 equipment. The deployment architecture supplies that layer.
@@ -111,20 +112,22 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
 > **Note:** This toolkit has been validated against **Ubuntu 22.04 LTS** but should work on Ubuntu 24.04 LTS and higher versions.
 
 - Ubuntu [22.04](https://releases.ubuntu.com/jammy/) or [24.04](https://releases.ubuntu.com/noble/) LTS
-- [Media Transport Library (MTL) v26.01+](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md)
+- Receiver build dependencies: `libx11-dev`, `libxext-dev`, `libxrandr-dev`, `libjson-c-dev`, and `zlib1g-dev`.
+- Receiver X11/session unit tests use `xvfb-run`; install `xvfb` and `xauth` to run the full receiver test suite.
+- [Media Transport Library (MTL) v26.09](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md)
   - Follow these steps
-    - [Install APT packages](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md#111-ubuntudebian)
+    - [Install APT packages](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md#111-ubuntudebian)
     - Clone Media-Transport-Library
       ```
       git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git
       cd Media-Transport-Library
-      git checkout 7bee24231c864d12da6db2c2ffbfd3986717af5a
+      git checkout 9762c314ed24bd628d3f808b95a94c3aa8525723
       cd ..
       export mtl_source_code=${PWD}/Media-Transport-Library
       ```
-    - [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md#2-dpdk-build-and-install)
-    - [Build and install MTL](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md#3-build-media-transport-library-and-app)
-- [FFmpeg 7.0 with MTL Plugin](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/ecosystem/ffmpeg_plugin/README.md#1-build)
+    - [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md#2-dpdk-build-and-install)
+    - [Build and install MTL](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md#3-build-media-transport-library-and-app)
+  - [FFmpeg 7.0 with MTL Plugin](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/ecosystem/ffmpeg_plugin/README.md#1-build)
   - **Screen capture support (`input_mode: screen_capture`) requires FFmpeg's `x11grab` device.** It is auto-detected and compiled in by FFmpeg's `./configure` script, but only if these packages are installed *before* building FFmpeg:
     ```bash
     sudo apt-get install -y libx11-dev libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev
@@ -146,7 +149,7 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
     vainfo | grep VAEntrypointVLD
     ```
     If either prints nothing, hardware decode is unavailable and dvledtx silently falls back to CPU decode. See [Hardware Decode (VA-API)](#hardware-decode-va-api).
-  - **12-bit formats (`yuv422p12le`, `yuv444p12le`, `gbrp12le`) require both MTL and FFmpeg to be built from the pinned commit above.** The plugin sources are copied into FFmpeg's `libavdevice/` and compiled in, so rebuilding MTL alone is not enough — FFmpeg must be rebuilt against the same MTL commit or these formats are rejected at session setup.
+  - **12-bit formats (`yuv422p12le`, `yuv444p12le`, `gbrp12le`) require both MTL and FFmpeg to be built from the pinned v26.09 commit above.** The plugin sources are copied into FFmpeg's `libavdevice/` and compiled in, so rebuilding MTL alone is not enough — FFmpeg must be rebuilt against the same MTL commit or these formats are rejected at session setup.
   - At the pinned commit the `mtl_st20p` muxer exposes `p_port`/`r_port` plus `p2_port`..`p7_port` (and matching `p2_sip`..`p7_sip`), so up to 8 NICs work with the default (non-`ENABLE_MTL_TX`) build with no local patching. Older MTL revisions exposed only `p_port`/`r_port`, which capped `nic_count` at 2 for the FFmpeg TX path; the `ENABLE_MTL_TX` direct-pipeline build has always supported up to 8 NICs.
 
 ### Build Steps
@@ -165,15 +168,15 @@ To build with MTL TX support enabled:
 bash scripts/build.sh -Denable_mtl_tx=true
 ```
 
-The built binary will be available at `build/dvledtx`.
+The build produces `build/dvledtx/dvledtx` and `build/dvledrx/dvledrx`.
 
 ## Usage
 
 ### Binding Ethernet Controller to DPDK PMD and Hugepage Setup 
 
 - Ensure VFIO group exists [follow](#vfio-group-setup)
-- [DPDK PMD Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/run.md#3-dpdk-pmd-setup)
-- [Hugepage Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/run.md#4-setup-hugepage)
+- [DPDK PMD Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/run.md#3-dpdk-pmd-setup)
+- [Hugepage Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/run.md#4-setup-hugepage)
 
 ### JSON Configuration
 
@@ -204,7 +207,7 @@ dvledtx uses a JSON config file with the following sections:
 | | `payload_type` | (Optional) RTP payload type — defaults to `96` if not present |
 | | `crop` | Region to transmit: `x`, `y`, `w`, `h` in pixels |
 
-#### Example: MP4 file input (`config/tx_fullhd_single_session.json`)
+#### Example: MP4 file input (`dvledtx/config/tx_fullhd_single_session.json`)
 ```json
 {
   "log_file": "dvledtx.log",
@@ -228,7 +231,7 @@ dvledtx uses a JSON config file with the following sections:
 }
 ```
 
-Multiple sessions can be defined in `tx_sessions` to transmit different crop regions of the same video simultaneously (see `config/tx_fullhd_multi_session.json`).
+Multiple sessions can be defined in `tx_sessions` to transmit different crop regions of the same video simultaneously (see `dvledtx/config/tx_fullhd_multi_session.json`).
 
 #### PTP Timing
 
@@ -422,7 +425,7 @@ Your physical keyboard and mouse now control the virtual display directly.
 > DISPLAY=:99 PULSE_SERVER=unix:/run/user/$(id -u)/pulse/native google-chrome &
 > ```
 
-#### Example: screen-capture input (`config/tx_fullhd_screen_capture.json`)
+#### Example: screen-capture input (`dvledtx/config/tx_fullhd_screen_capture.json`)
 
 ```json
 {
@@ -445,7 +448,7 @@ Your physical keyboard and mouse now control the virtual display directly.
 }
 ```
 
-#### Example: multi-session screen capture (`config/tx_fullhd_screen_capture_multi_session.json`)
+#### Example: multi-session screen capture (`dvledtx/config/tx_fullhd_screen_capture_multi_session.json`)
 
 Splits a 1920×1080 screen capture into 3 vertical strips, each transmitted as a separate ST2110 session:
 
@@ -476,7 +479,7 @@ Splits a 1920×1080 screen capture into 3 vertical strips, each transmitted as a
 
 Run dvledtx as usual — `x11grab` will capture whatever is rendered on the display (desktop, windows, applications) and transmit it, exactly as it would for a physical display:
 ```bash
-./build/dvledtx --config config/tx_fullhd_screen_capture.json
+./build/dvledtx/dvledtx --config dvledtx/config/tx_fullhd_screen_capture.json
 ```
 
 **Tear down** the virtual display when done:
@@ -485,7 +488,7 @@ pkill -f "gnome-session --session=ubuntu"
 sudo pkill -f "Xorg :99"
 ```
 
-`interfaces[]` supports up to 8 NICs (MTL's port limit); each `tx_sessions[]` entry picks its NIC via `nic_index` (see `config/tx_fullhd_multi_nic.json` for an 8-NIC/8-session example). Using more than 2 NICs with the default FFmpeg TX path requires the `p2_port`..`p7_port` AVOptions described above, which are present at the pinned MTL commit.
+`interfaces[]` supports up to 8 NICs (MTL's port limit); each `tx_sessions[]` entry picks its NIC via `nic_index` (see `dvledtx/config/tx_fullhd_multi_nic.json` for an 8-NIC/8-session example). Using more than 2 NICs with the default FFmpeg TX path requires the `p2_port`..`p7_port` AVOptions described above, which are present at the pinned MTL commit.
 
 ## Logging
 
@@ -517,7 +520,7 @@ When `log_file` is set, log output is written to that file in addition to the co
 
 #### Using JSON Configuration (recommended)
 ```bash
-./build/dvledtx --config config/tx_fullhd_single_session.json
+./build/dvledtx/dvledtx --config dvledtx/config/tx_fullhd_single_session.json
 ```
 
 ## Command-Line Options
@@ -530,9 +533,9 @@ When `log_file` is set, log output is written to that file in addition to the co
 
 #### Show Version
 ```bash
-./build/dvledtx --version
+./build/dvledtx/dvledtx --version
 # or
-./build/dvledtx -v
+./build/dvledtx/dvledtx -v
 ```
 
 ## Supported Formats
@@ -618,7 +621,7 @@ sudo apt install libcmocka-dev
 pip install gcovr
 ```
 
-To build and run all unit tests with coverage:
+To build and run both the transmitter and receiver unit tests with coverage:
 
 ```bash
 bash scripts/test.sh
@@ -730,7 +733,7 @@ sudo pkill -9 -f dvledtx
 
      # Check MTL pkg-config file is available
      pkg-config --modversion mtl
-     # Expected: 26.01.0.REL (or higher)
+      # Expected: 26.09.0.REL
 
      # Check MTL header files exist
      ls /usr/local/include/mtl/mtl_api.h

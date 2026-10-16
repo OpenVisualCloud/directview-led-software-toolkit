@@ -1,0 +1,9 @@
+{
+  "log_level": "loud",
+  "interfaces": [ { "name": "0000:03:00.0", "sip": "192.168.50.65", "dip": "239.168.85.20" } ],
+  "video": { "width": 64, "height": 16, "fps": 25, "fmt": "yuv444p10le" },
+  "rx_sessions": [
+    { "udp_port": 20000, "crop": { "x": 0,  "y": 0, "w": 32, "h": 16 } },
+    { "udp_port": 20002, "crop": { "x": 32, "y": 0, "w": 32, "h": 16 } }
+  ]
+}

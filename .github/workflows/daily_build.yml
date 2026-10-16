@@ -75,8 +75,8 @@ jobs:
   afl-fuzz:
     name: Daily AFL Fuzz (${{ github.event.repository.default_branch }})
     runs-on: ubuntu-latest
-    # 2h of fuzzing plus headroom for dependency install and the harness build.
-    timeout-minutes: 138
+    # 4h of TX+RX fuzzing plus headroom for dependency install and builds.
+    timeout-minutes: 258
     permissions:
       contents: read
 
@@ -98,15 +98,17 @@ jobs:
         if: always()
         with:
           name: afl-fuzz-results-${{ github.event.repository.default_branch }}-${{ github.run_id }}
-          path: fuzz/findings/
+          path: |
+            dvledtx/fuzz/findings/
+            dvledrx/fuzz/findings/
           retention-days: 14
 
   libfuzzer:
     name: Daily libFuzzer (${{ github.event.repository.default_branch }})
     runs-on: ubuntu-latest
-    # max-seconds applies per sanitizer mode (ASan + UBSan), so the fuzzing
-    # itself takes ~2h; the rest covers the two builds.
-    timeout-minutes: 138
+    # max-seconds applies per target and sanitizer mode (TX+RX, ASan+UBSan),
+    # so fuzzing takes ~4h; the rest covers the four builds.
+    timeout-minutes: 258
     permissions:
       contents: read
 
@@ -129,8 +131,10 @@ jobs:
         with:
           name: libfuzzer-results-${{ github.event.repository.default_branch }}-${{ github.run_id }}
           path: |
-            fuzz/libfuzzer_corpus/
-            fuzz/ubsan_corpus/
+            dvledtx/fuzz/libfuzzer_corpus/
+            dvledtx/fuzz/ubsan_corpus/
+            dvledrx/fuzz/libfuzzer_corpus/
+            dvledrx/fuzz/ubsan_corpus/
           retention-days: 14
 
 

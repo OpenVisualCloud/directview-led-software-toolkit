@@ -1,0 +1,24 @@
+{
+  "log_file": "RxApp.log",
+  "log_level": "info",
+  "interfaces": [
+    {
+      "name": "0000:03:00.1",
+      "SIP":  "192.168.50.65",
+      "DIP":  "239.168.85.20"
+    }
+  ],
+  "video": {
+    "width":  960,
+    "height": 1080,
+    "fps":    30,
+    "fmt":    "gbrp10le"
+  },
+  "rx_sessions": [
+    {
+      "udp_port":     20000,
+      "payload_type": 96,
+      "crop": { "x": 0,    "y": 0, "w": 960, "h": 1080 }
+    }
+  ]
+}

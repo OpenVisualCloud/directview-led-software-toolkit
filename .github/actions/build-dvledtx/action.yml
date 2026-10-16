@@ -3,8 +3,8 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: BSD-3-Clause
 #
-name: 'Build dvledtx'
-description: 'Build dvledtx with FFMPEG and MTL TX APIs, keep both binaries'
+name: 'Build dvledtx and dvledrx'
+description: 'Build both applications with FFMPEG and MTL TX APIs'
 
 runs:
   using: composite
@@ -14,23 +14,33 @@ runs:
       run: |
         echo "===== Build: FFMPEG TX APIs ====="
         ./scripts/build.sh
-        if [ ! -f "./build/dvledtx" ]; then
+        if [ ! -f "./build/dvledtx/dvledtx" ]; then
           echo "ERROR: dvledtx not found after FFMPEG build!"
           exit 1
         fi
+        if [ ! -f "./build/dvledrx/dvledrx" ]; then
+          echo "ERROR: dvledrx not found after FFMPEG build!"
+          exit 1
+        fi
         mkdir -p ./bins
-        cp ./build/dvledtx ./bins/dvledtx
+        cp ./build/dvledtx/dvledtx ./bins/dvledtx
+        cp ./build/dvledrx/dvledrx ./bins/dvledrx
         echo "FFMPEG build saved: $(file ./bins/dvledtx)"
+        echo "Receiver build saved: $(file ./bins/dvledrx)"
 
     - name: Build with MTL TX APIs
       shell: bash
       run: |
         echo "===== Build: MTL TX APIs ====="
         ./scripts/build.sh -Denable_mtl_tx=true
-        if [ ! -f "./build/dvledtx" ]; then
+        if [ ! -f "./build/dvledtx/dvledtx" ]; then
           echo "ERROR: dvledtx not found after MTL build!"
           exit 1
         fi
+        if [ ! -f "./build/dvledrx/dvledrx" ]; then
+          echo "ERROR: dvledrx not found after MTL build!"
+          exit 1
+        fi
         mkdir -p ./bins
-        cp ./build/dvledtx ./bins/dvledtx-mtl
+        cp ./build/dvledtx/dvledtx ./bins/dvledtx-mtl
         echo "MTL build saved: $(file ./bins/dvledtx-mtl)"

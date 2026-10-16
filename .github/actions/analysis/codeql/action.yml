@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 name: 'CodeQL Scan'
-description: 'Initialize CodeQL, build dvledtx, and perform CodeQL analysis for C/C++'
+description: 'Initialize CodeQL, build dvledtx and dvledrx, and perform CodeQL analysis for C/C++'
 
 runs:
   using: composite
@@ -16,7 +16,7 @@ runs:
         build-mode: manual
 
     # c-cpp requires a manual build so CodeQL can trace the meson/ninja compiler invocations.
-    - name: Build dvledtx
+    - name: Build applications
       uses: $/.github/actions/build-dvledtx
 
     - name: Perform CodeQL Analysis
