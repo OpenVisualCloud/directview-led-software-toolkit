@@ -9,11 +9,25 @@
 #include "test_common.h"
 
 #include <dirent.h>
+#include <stdarg.h>
 
 #include "config_reader.h"
 #include "logger.h"
 
 static const char* g_config_dir;
+
+/* Append formatted text at *len; fails the test instead of overflowing 'buf'. */
+__attribute__((format(printf, 4, 5)))
+static bool appendf(char* buf, size_t size, size_t* len, const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  int n = vsnprintf(buf + *len, size - *len, fmt, ap);
+  va_end(ap);
+  CHECK(n >= 0 && (size_t)n < size - *len);
+  if (n < 0 || (size_t)n >= size - *len) return false;
+  *len += (size_t)n;
+  return true;
+}
 
 /* Parse JSON text via a scratch file. */
 static int parse_text(const char* json, struct rx_config* cfg) {
@@ -183,21 +197,23 @@ static void test_parse_display_unknown_session(void) {
 static void test_parse_too_many_mirrors(void) {
   char json[2048];
   struct rx_config c;
-  int n = snprintf(json, sizeof(json), "{ \"rx_sessions\": [ {} ], \"displays\": [");
+  size_t n = 0;
+  REQUIRE(appendf(json, sizeof(json), &n, "{ \"rx_sessions\": [ {} ], \"displays\": ["));
   for (int d = 0; d < MAX_MIRRORS + 2; d++)
-    n += snprintf(json + n, sizeof(json) - n,
-                  "%s { \"output\": \"OUT-%d\", \"sessions\": [ { \"session\": 0 } ] }",
-                  d ? "," : "", d);
-  snprintf(json + n, sizeof(json) - n, " ] }");
+    REQUIRE(appendf(json, sizeof(json), &n,
+                    "%s { \"output\": \"OUT-%d\", \"sessions\": [ { \"session\": 0 } ] }",
+                    d ? "," : "", d));
+  REQUIRE(appendf(json, sizeof(json), &n, " ] }"));
   CHECK_EQ_INT(parse_text(json, &c), -1);
 
   /* exactly 1 primary + MAX_MIRRORS mirrors is fine */
-  n = snprintf(json, sizeof(json), "{ \"rx_sessions\": [ {} ], \"displays\": [");
+  n = 0;
+  REQUIRE(appendf(json, sizeof(json), &n, "{ \"rx_sessions\": [ {} ], \"displays\": ["));
   for (int d = 0; d < MAX_MIRRORS + 1; d++)
-    n += snprintf(json + n, sizeof(json) - n,
-                  "%s { \"output\": \"OUT-%d\", \"sessions\": [ { \"session\": 0 } ] }",
-                  d ? "," : "", d);
-  snprintf(json + n, sizeof(json) - n, " ] }");
+    REQUIRE(appendf(json, sizeof(json), &n,
+                    "%s { \"output\": \"OUT-%d\", \"sessions\": [ { \"session\": 0 } ] }",
+                    d ? "," : "", d));
+  REQUIRE(appendf(json, sizeof(json), &n, " ] }"));
   REQUIRE(parse_text(json, &c) == 0);
   CHECK_EQ_INT(c.rx_sessions[0].num_mirrors, MAX_MIRRORS);
 }
@@ -232,13 +248,14 @@ static void test_parse_display_without_sessions_ignored(void) {
 static void test_parse_truncates_arrays(void) {
   char json[8192];
   struct rx_config c;
-  int n = snprintf(json, sizeof(json), "{ \"interfaces\": [");
+  size_t n = 0;
+  REQUIRE(appendf(json, sizeof(json), &n, "{ \"interfaces\": ["));
   for (int i = 0; i < MAX_INTERFACES + 2; i++)
-    n += snprintf(json + n, sizeof(json) - n, "%s{ \"name\": \"n%d\" }", i ? "," : "", i);
-  n += snprintf(json + n, sizeof(json) - n, "], \"rx_sessions\": [");
+    REQUIRE(appendf(json, sizeof(json), &n, "%s{ \"name\": \"n%d\" }", i ? "," : "", i));
+  REQUIRE(appendf(json, sizeof(json), &n, "], \"rx_sessions\": ["));
   for (int i = 0; i < MAX_RX_SESSIONS + 3; i++)
-    n += snprintf(json + n, sizeof(json) - n, "%s{ \"udp_port\": %d }", i ? "," : "", 20000 + i);
-  snprintf(json + n, sizeof(json) - n, "] }");
+    REQUIRE(appendf(json, sizeof(json), &n, "%s{ \"udp_port\": %d }", i ? "," : "", 20000 + i));
+  REQUIRE(appendf(json, sizeof(json), &n, "] }"));
   REQUIRE(parse_text(json, &c) == 0);
   CHECK_EQ_INT(c.num_interfaces, MAX_INTERFACES);
   CHECK_EQ_INT(c.num_rx_sessions, MAX_RX_SESSIONS);

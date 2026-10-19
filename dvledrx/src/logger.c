@@ -2,6 +2,10 @@
  * Copyright(c) 2026 Intel Corporation
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE /* renameat2() */
+#endif
+
 #include "logger.h"
 
 #include <ctype.h>
@@ -234,6 +238,22 @@ static void* gz_worker(void* arg) {
   return NULL;
 }
 
+/* Atomically rename 'from' to 'to', failing with EEXIST instead of replacing an
+ * existing 'to'.  Avoids a separate existence check that could race. */
+static int rename_noreplace(const char* from, const char* to) {
+  if (renameat2(AT_FDCWD, from, AT_FDCWD, to, RENAME_NOREPLACE) == 0) return 0;
+  if (errno != EINVAL && errno != ENOSYS) return -1;
+  /* Filesystem without RENAME_NOREPLACE: link() also refuses an existing target. */
+  if (link(from, to) != 0) return -1;
+  if (unlink(from) != 0) {
+    int err = errno;
+    unlink(to);
+    errno = err;
+    return -1;
+  }
+  return 0;
+}
+
 /* Must be called with g_log_lock held. */
 static void start_archiver(void) {
   char* base = strdup(g_log_file_path);
@@ -319,9 +339,9 @@ static void check_and_rotate(void) {
 
   long pos = ftell(g_log_file);
   if (pos < 0) {
-    /* ftell failed – try stat as fallback */
+    /* ftell failed – try fstat on the open descriptor as fallback */
     struct stat st;
-    if (stat(g_log_file_path, &st) == 0)
+    if (fstat(fileno(g_log_file), &st) == 0)
       pos = (long)st.st_size;
     else
       return;
@@ -335,26 +355,24 @@ static void check_and_rotate(void) {
 
   char pending[PATH_MAX];
   snprintf(pending, sizeof(pending), "%s.rotating", g_log_file_path);
-  struct stat pst;
-  if (lstat(pending, &pst) == 0) {
-    /* An earlier archive failed to compress: never overwrite it.  Keep appending
-     * and retry compressing it at most every 10 s. */
-    time_t now = time(NULL);
-    if (now - g_gz_last_retry >= 10) {
-      g_gz_last_retry = now;
-      start_archiver();
+  /* Rename while the file is still open so a failed rotation keeps appending. */
+  fflush(g_log_file);
+  if (rename_noreplace(g_log_file_path, pending) != 0) {
+    if (errno == EEXIST) {
+      /* An earlier archive failed to compress: never overwrite it.  Keep appending
+       * and retry compressing it at most every 10 s. */
+      time_t now = time(NULL);
+      if (now - g_gz_last_retry >= 10) {
+        g_gz_last_retry = now;
+        start_archiver();
+      }
+    } else {
+      fprintf(g_log_file, "--- log rotation failed: %s ---\n", strerror(errno));
     }
     return;
   }
   fclose(g_log_file);
-  g_log_file = NULL;
-  bool renamed = rename(g_log_file_path, pending) == 0;
   g_log_file = open_log_file(g_log_file_path);
-  if (!renamed) {
-    if (g_log_file)
-      fprintf(g_log_file, "--- log rotation failed: %s ---\n", strerror(errno));
-    return;
-  }
   if (g_log_file) {
     fprintf(g_log_file, "--- log rotated: previous %ld bytes -> %s.1.gz (keeping %d archives) ---\n",
             pos, g_log_file_path, LOGGER_MAX_ARCHIVES);

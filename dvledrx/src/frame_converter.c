@@ -104,7 +104,7 @@ int convert_frame_to_rgb(struct st_frame* frame, uint8_t* rgb_buffer, uint32_t w
 	switch (frame->fmt) {
 		case ST_FRAME_FMT_BGRA: {
 			/* MTL already converted to BGRA — direct memcpy, no pixel conversion needed */
-			memcpy(rgb_buffer, frame->addr[0], width * height * 4);
+			memcpy(rgb_buffer, frame->addr[0], (size_t)width * height * 4);
 			break;
 		}
 
