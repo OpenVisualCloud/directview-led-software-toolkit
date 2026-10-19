@@ -20,7 +20,7 @@ concurrency:
 jobs:
   build:
     name: Daily Build (${{ github.event.repository.default_branch }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read
@@ -74,7 +74,7 @@ jobs:
 
   afl-fuzz:
     name: Daily AFL Fuzz (${{ github.event.repository.default_branch }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # 4h of TX+RX fuzzing plus headroom for dependency install and builds.
     timeout-minutes: 258
     permissions:
@@ -105,7 +105,7 @@ jobs:
 
   libfuzzer:
     name: Daily libFuzzer (${{ github.event.repository.default_branch }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # max-seconds applies per target and sanitizer mode (TX+RX, ASan+UBSan),
     # so fuzzing takes ~4h; the rest covers the four builds.
     timeout-minutes: 258
