@@ -31,5 +31,6 @@ runs:
           --enable=warning,style,performance,portability \
           --std=c11 --force --inline-suppr \
           --suppress=missingIncludeSystem \
-          -Iinclude src 2>&1 | tee "$REPORT_DIR/cppcheck-report.txt" || true
+          -Idvledtx/include -Idvledrx/include \
+          dvledtx/src dvledrx/src 2>&1 | tee "$REPORT_DIR/cppcheck-report.txt" || true
         echo "cppcheck scan complete. Report: $REPORT_DIR/cppcheck-report.txt"

@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 name: 'AFL Fuzz'
-description: 'Build and run AFL++ fuzzing for config parser harness'
+description: 'Build and run AFL++ fuzzing for transmitter and receiver config parsers'
 
 inputs:
   max-seconds:
@@ -19,7 +19,7 @@ runs:
       shell: bash
       run: |
         sudo apt-get update -qq
-        sudo apt-get install -y -qq afl++ libavutil-dev libavformat-dev libavcodec-dev libswscale-dev pkg-config
+        sudo apt-get install -y -qq afl++ libavutil-dev libavformat-dev libavcodec-dev libswscale-dev libjson-c-dev zlib1g-dev pkg-config
 
     - name: Verify AFL environment
       shell: bash
@@ -40,7 +40,7 @@ runs:
     - name: Build AFL fuzz harness
       shell: bash
       run: |
-        cd fuzz
+        cd dvledtx/fuzz
         export CC=afl-clang-fast
         $CC -g -O1 -fno-omit-frame-pointer -I../include -c fuzz_config_reader.c -o fuzz_config_reader.o
         $CC -g -O1 -fno-omit-frame-pointer -I../include -c ../src/util/config_reader.c -o config_reader.o
@@ -48,12 +48,19 @@ runs:
         $CC -o fuzz_config_reader fuzz_config_reader.o config_reader.o logger.o -lavutil -lm
         echo "Build successful: $(file fuzz_config_reader)"
 
+        cd ../../dvledrx/fuzz
+        $CC -g -O1 -fno-omit-frame-pointer -I../include \
+          fuzz_config_reader.c ../src/config_reader.c ../src/logger.c \
+          -pthread $(pkg-config --cflags --libs json-c zlib) \
+          -o fuzz_config_reader
+        echo "Receiver build successful: $(file fuzz_config_reader)"
+
     - name: Run AFL fuzzer
       shell: bash
       env:
         MAX_SECONDS: ${{ inputs.max-seconds }}
       run: |
-        cd fuzz
+        cd dvledtx/fuzz
         if ! [[ "$MAX_SECONDS" =~ ^[0-9]+$ ]]; then
           echo "ERROR: max-seconds must be a positive integer"
           exit 1
@@ -66,7 +73,7 @@ runs:
     - name: Check AFL crashes
       shell: bash
       run: |
-        cd fuzz
+        cd dvledtx/fuzz
         CRASH_COUNT=$(find findings/default/crashes -type f ! -name "README.txt" 2>/dev/null | wc -l)
         echo "Crashes found: $CRASH_COUNT"
         if [ "$CRASH_COUNT" -gt 0 ]; then
@@ -76,11 +83,41 @@ runs:
         fi
         echo "No crashes found - fuzzing passed."
 
+    - name: Run receiver AFL fuzzer
+      shell: bash
+      env:
+        MAX_SECONDS: ${{ inputs.max-seconds }}
+      run: |
+        cd dvledrx/fuzz
+        if ! [[ "$MAX_SECONDS" =~ ^[0-9]+$ ]]; then
+          echo "ERROR: max-seconds must be a positive integer"
+          exit 1
+        fi
+        mkdir -p findings
+        export AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
+        export AFL_SKIP_CPUFREQ=1
+        timeout "$MAX_SECONDS" afl-fuzz -i corpus/ -o findings/ -V "$MAX_SECONDS" -- ./fuzz_config_reader @@ || true
+
+    - name: Check receiver AFL crashes
+      shell: bash
+      run: |
+        cd dvledrx/fuzz
+        CRASH_COUNT=$(find findings/default/crashes -type f ! -name "README.txt" 2>/dev/null | wc -l)
+        echo "Receiver crashes found: $CRASH_COUNT"
+        if [ "$CRASH_COUNT" -gt 0 ]; then
+          echo "::error::AFL found $CRASH_COUNT receiver crash(es)!"
+          ls -la findings/default/crashes/
+          exit 1
+        fi
+        echo "No receiver crashes found - fuzzing passed."
+
     - name: Sanitize AFL filenames
       if: always()
       shell: bash
       run: |
-        cd fuzz/findings
-        find . -name '*:*' | while read -r f; do
-          mv "$f" "$(echo "$f" | tr ':' '_')"
+        for FINDINGS_DIR in dvledtx/fuzz/findings dvledrx/fuzz/findings; do
+          [ -d "$FINDINGS_DIR" ] || continue
+          find "$FINDINGS_DIR" -name '*:*' -print0 | while IFS= read -r -d '' f; do
+            mv "$f" "$(echo "$f" | tr ':' '_')"
+          done
         done
