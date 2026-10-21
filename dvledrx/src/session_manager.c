@@ -12,6 +12,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <fcntl.h>
 #include <ctype.h>
 #include <strings.h>
 #include <time.h>
@@ -99,12 +100,14 @@ static bool is_valid_pci_bdf(const char* pci_bdf) {
  * Best-effort: logs a warning and returns on any failure.
  */
 static void prepare_vf_parent_pf(const char* vf_bdf) {
-  char path[512];
+  char physfn_path[256];
+  char pf_path[256];
   char link_target[512];
   ssize_t len;
   char pf_bdf[64];
   char pf_iface[64] = {0};
   int vf_index = -1;
+  int pf_fd, net_fd;
   DIR* dir;
   struct dirent* ent;
   char cmd[512];
@@ -115,8 +118,8 @@ static void prepare_vf_parent_pf(const char* vf_bdf) {
   }
 
   /* Resolve parent PF BDF via /sys/bus/pci/devices/<vf>/physfn */
-  snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/physfn", vf_bdf);
-  len = readlink(path, link_target, sizeof(link_target) - 1);
+  snprintf(physfn_path, sizeof(physfn_path), "/sys/bus/pci/devices/%s/physfn", vf_bdf);
+  len = readlink(physfn_path, link_target, sizeof(link_target) - 1);
   if (len <= 0) {
     log_warn(LOGGER_TAG, "VF setup: cannot resolve parent PF for %s", vf_bdf);
     return;
@@ -126,10 +129,22 @@ static void prepare_vf_parent_pf(const char* vf_bdf) {
     const char* base = strrchr(link_target, '/');
     snprintf(pf_bdf, sizeof(pf_bdf), "%s", base ? base + 1 : link_target);
   }
+  if (!is_valid_pci_bdf(pf_bdf)) {
+    log_warn(LOGGER_TAG, "VF setup: invalid parent PF '%s' for %s", pf_bdf, vf_bdf);
+    return;
+  }
 
-  /* Find the PF kernel netdev name via /sys/bus/pci/devices/<pf>/net/ */
-  snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/net", pf_bdf);
-  dir = opendir(path);
+  /* All PF lookups go through one directory fd, so they cannot be redirected between steps. */
+  snprintf(pf_path, sizeof(pf_path), "/sys/bus/pci/devices/%s", pf_bdf);
+  pf_fd = open(pf_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (pf_fd < 0) {
+    log_warn(LOGGER_TAG, "VF setup: cannot open PF %s for %s", pf_bdf, vf_bdf);
+    return;
+  }
+
+  /* Find the PF kernel netdev name via <pf>/net/ */
+  net_fd = openat(pf_fd, "net", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  dir = (net_fd >= 0) ? fdopendir(net_fd) : NULL;
   if (dir) {
     while ((ent = readdir(dir)) != NULL) {
       if (ent->d_name[0] == '.') continue;
@@ -137,20 +152,23 @@ static void prepare_vf_parent_pf(const char* vf_bdf) {
       break;
     }
     closedir(dir);
+  } else if (net_fd >= 0) {
+    close(net_fd);
   }
   if (!pf_iface[0]) {
     log_warn(LOGGER_TAG, "VF setup: cannot find PF netdev for %s (PF %s)", vf_bdf, pf_bdf);
+    close(pf_fd);
     return;
   }
 
   /* Determine VF index by matching virtfn* symlinks under the PF */
-  snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s", pf_bdf);
-  dir = opendir(path);
-  if (dir) {
+  dir = fdopendir(pf_fd);
+  if (!dir) {
+    close(pf_fd);
+  } else {
     while ((ent = readdir(dir)) != NULL) {
       if (strncmp(ent->d_name, "virtfn", 6) != 0) continue;
-      snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/%s", pf_bdf, ent->d_name);
-      len = readlink(path, link_target, sizeof(link_target) - 1);
+      len = readlinkat(dirfd(dir), ent->d_name, link_target, sizeof(link_target) - 1);
       if (len <= 0) continue;
       link_target[len] = '\0';
       const char* base = strrchr(link_target, '/');
@@ -160,7 +178,7 @@ static void prepare_vf_parent_pf(const char* vf_bdf) {
         break;
       }
     }
-    closedir(dir);
+    closedir(dir); /* also closes pf_fd */
   }
   if (vf_index < 0) {
     log_warn(LOGGER_TAG, "VF setup: cannot resolve VF index for %s under PF %s", vf_bdf, pf_bdf);
@@ -203,6 +221,13 @@ static void prepare_vf_parent_pf(const char* vf_bdf) {
 /* "per_output": one fullscreen window per session, each on its own HDMI/DP output. */
 static bool is_per_output_mode(const struct rx_app_context* app) {
   return strcmp(app->json_config.display_mode, "per_output") == 0;
+}
+
+/* Return a frame to MTL; RX and display threads may both put frames. */
+static void rx_put_frame(struct st20p_rx_ctx* ctx, struct st_frame* frame) {
+  pthread_mutex_lock(&ctx->put_lock);
+  st20p_rx_put_frame(ctx->handle, frame);
+  pthread_mutex_unlock(&ctx->put_lock);
 }
 
 /*
@@ -255,10 +280,7 @@ static void* st20p_display_thread(void* arg) {
         if (!display_copy_x11(&ctx->mirror_display[m], &ctx->display))
           display_frame_x11(&ctx->mirror_display[m], frame);
       rendered++;
-      /* All puts go through disp_lock so RX and display threads never race in MTL. */
-      pthread_mutex_lock(&ctx->disp_lock);
-      st20p_rx_put_frame(ctx->handle, frame);
-      pthread_mutex_unlock(&ctx->disp_lock);
+      rx_put_frame(ctx, frame);
     }
     /* X11 events are pumped by the main thread to avoid concurrent event handling. */
 
@@ -308,12 +330,10 @@ static bool publish_frame_to_display(struct st20p_rx_ctx* ctx, struct st_frame* 
   pthread_mutex_lock(&ctx->disp_lock);
   struct st_frame* stale = ctx->disp_pending;
   ctx->disp_pending = frame;
-  if (stale) {
-    st20p_rx_put_frame(ctx->handle, stale);
-    ctx->disp_skipped++;
-  }
+  if (stale) ctx->disp_skipped++;
   pthread_cond_signal(&ctx->disp_cond);
   pthread_mutex_unlock(&ctx->disp_lock);
+  if (stale) rx_put_frame(ctx, stale);
   return true;
 }
 
@@ -344,16 +364,15 @@ static void* st20p_rx_thread(void* arg) {
   for (int m = 0; m < ctx->num_mirror_displays; m++)
     has_window |= ctx->mirror_display[m].initialized;
   bool use_disp_thread = !ctx->composite && has_window;
+  pthread_mutex_init(&ctx->disp_lock, NULL);
+  pthread_cond_init(&ctx->disp_cond, NULL);
+  pthread_mutex_init(&ctx->put_lock, NULL);
+  ctx->disp_pending = NULL;
   if (use_disp_thread) {
-    pthread_mutex_init(&ctx->disp_lock, NULL);
-    pthread_cond_init(&ctx->disp_cond, NULL);
-    ctx->disp_pending = NULL;
     if (pthread_create(&ctx->disp_thread, NULL, st20p_display_thread, ctx) == 0) {
       ctx->disp_thread_started = true;
     } else {
       log_error(LOGGER_TAG, "Failed to start display thread %d; rendering inline", ctx->idx);
-      pthread_mutex_destroy(&ctx->disp_lock);
-      pthread_cond_destroy(&ctx->disp_cond);
       use_disp_thread = false;
     }
   }
@@ -420,7 +439,7 @@ static void* st20p_rx_thread(void* arg) {
 
     /* Return the frame buffer to MTL so it can be reused for the next frame.
      * Frames handed to the display thread are returned by it instead. */
-    if (!handed_off) st20p_rx_put_frame(ctx->handle, frame);
+    if (!handed_off) rx_put_frame(ctx, frame);
 
     /* Periodic progress log — printed every 50 frames to avoid console spam */
     if (ctx->frames_received % 50 == 0) {
@@ -438,13 +457,16 @@ static void* st20p_rx_thread(void* arg) {
     pthread_mutex_unlock(&ctx->disp_lock);
     pthread_join(ctx->disp_thread, NULL);
     ctx->disp_thread_started = false;
-    if (ctx->disp_pending) {
-      st20p_rx_put_frame(ctx->handle, ctx->disp_pending);
-      ctx->disp_pending = NULL;
-    }
-    pthread_mutex_destroy(&ctx->disp_lock);
-    pthread_cond_destroy(&ctx->disp_cond);
   }
+  pthread_mutex_lock(&ctx->disp_lock);
+  struct st_frame* pending = ctx->disp_pending;
+  ctx->disp_pending = NULL;
+  pthread_mutex_unlock(&ctx->disp_lock);
+  if (pending) rx_put_frame(ctx, pending);
+
+  pthread_mutex_destroy(&ctx->put_lock);
+  pthread_mutex_destroy(&ctx->disp_lock);
+  pthread_cond_destroy(&ctx->disp_cond);
 
   return NULL;
 }
@@ -664,7 +686,10 @@ int session_manager_init(session_manager_t* manager, struct rx_app_context* app)
   for (int p = 0; p < num_ports; p++) {
     const char* name = cfg->interfaces[p].name;
     uint8_t sip[MTL_IP_ADDR_LEN];
-    inet_pton(AF_INET, cfg->interfaces[p].sip, sip); /* validated at load */
+    if (inet_pton(AF_INET, cfg->interfaces[p].sip, sip) != 1) {
+      log_error(LOGGER_TAG, "Invalid source IP '%s' for interface %s", cfg->interfaces[p].sip, name);
+      return -1;
+    }
 
     snprintf(mtl_params.port[p], MTL_PORT_MAX_LEN, "%s", name);
     memcpy(mtl_params.sip_addr[p], sip, MTL_IP_ADDR_LEN);
@@ -838,9 +863,16 @@ int session_manager_start(session_manager_t* manager, struct rx_app_context* app
       /* NIC, multicast group, port and crop from the JSON rx_sessions entry. */
       const struct rx_session_config* ts = &app->json_config.rx_sessions[i];
       int p = rx_config_port_for_nic(&app->json_config, ts->nic_index);
-      const struct interface_config* ifc = &app->json_config.interfaces[p]; /* validated */
+      if (p < 0 || p >= app->json_config.num_interfaces) {
+        log_error(LOGGER_TAG, "Session %d: no interface for nic %d", i, ts->nic_index);
+        return -1;
+      }
+      const struct interface_config* ifc = &app->json_config.interfaces[p];
       snprintf(manager->st20p_sessions[i].port_name, MTL_PORT_MAX_LEN, "%s", ifc->name);
-      inet_pton(AF_INET, ifc->dip, manager->st20p_sessions[i].dip_addr);
+      if (inet_pton(AF_INET, ifc->dip, manager->st20p_sessions[i].dip_addr) != 1) {
+        log_error(LOGGER_TAG, "Session %d: invalid multicast IP '%s'", i, ifc->dip);
+        return -1;
+      }
       manager->st20p_sessions[i].session_udp_port     = (uint16_t)ts->udp_port;
       manager->st20p_sessions[i].session_payload_type  = (uint8_t)ts->payload_type;
       manager->st20p_sessions[i].crop = ts->crop;

@@ -416,9 +416,9 @@ static void finish_fixed_wall(struct x11_display_ctx* d) {
   XMoveResizeWindow(dpy, win, hx, hy, d->home_w, d->home_h);
   XMapRaised(dpy, win);
   XFlush(dpy);
-  pthread_mutex_unlock(&d->xlock);
   d->wall_pending = false;
   d->windowed = false;
+  pthread_mutex_unlock(&d->xlock);
 }
 
 /* Caller holds g_wall_lock. */
@@ -453,15 +453,16 @@ static void toggle_wall_mode(void) {
     }
   }
   g_all_windowed = !g_all_windowed;
+  bool windowed = g_all_windowed;
   for (int i = 0; i < g_nwall; i++) {
-    if (g_all_windowed) enter_windowed(g_wall[i]);
+    if (windowed) enter_windowed(g_wall[i]);
     else leave_windowed(g_wall[i]);
   }
   int n = g_nwall;
   pthread_mutex_unlock(&g_wall_lock);
   log_info(LOGGER_TAG, "Escape: %d window(s) %s", n,
-           g_all_windowed ? "switched to normal windows (Escape again to go back)"
-                          : "back to full-screen wall mode");
+           windowed ? "switched to normal windows (Escape again to go back)"
+                    : "back to full-screen wall mode");
 }
 
 /* True only for a fresh Escape press, not keyboard auto-repeat. The 1 s timeout
@@ -953,8 +954,7 @@ void display_frame_x11(struct x11_display_ctx* display, struct st_frame* frame) 
     char status_text[96];
     if (frame && frame->addr[0])
       snprintf(status_text, sizeof(status_text),
-               "Converting frame %d (fmt=%d)...", frame_counter,
-               frame ? frame->fmt : -1);
+               "Converting frame %d (fmt=%d)...", frame_counter, frame->fmt);
     else
       snprintf(status_text, sizeof(status_text), "Waiting for video data...");
     XDrawString(x_display, x_window, x_gc, 10, 30, status_text, strlen(status_text));
@@ -1033,8 +1033,7 @@ void process_x11_events(struct x11_display_ctx* display) {
         break;
 
       case ReparentNotify:
-        if (display->wall_pending &&
-            event.xreparent.parent == RootWindow(x_display, display->screen)) {
+        if (event.xreparent.parent == RootWindow(x_display, display->screen)) {
           pthread_mutex_lock(&g_wall_lock);
           if (display->wall_pending) finish_fixed_wall(display);
           pthread_mutex_unlock(&g_wall_lock);
@@ -1070,11 +1069,10 @@ void process_x11_events(struct x11_display_ctx* display) {
     XFlush(x_display);
   }
 
-  if (display->wall_pending && now_ms() - display->pending_ms > 1000) {
-    pthread_mutex_lock(&g_wall_lock); /* WM never released the window */
-    if (display->wall_pending) finish_fixed_wall(display);
-    pthread_mutex_unlock(&g_wall_lock);
-  }
+  pthread_mutex_lock(&g_wall_lock);
+  if (display->wall_pending && now_ms() - display->pending_ms > 1000)
+    finish_fixed_wall(display); /* WM never released the window */
+  pthread_mutex_unlock(&g_wall_lock);
 }
 
 /* ============================================================
