@@ -83,7 +83,7 @@ static void test_path_is_safe_world_writable_parent(void) {
   REQUIRE(mkdir("open/inner", 0750) == 0);
   CHECK(!logger_path_is_safe("open/app.log", why, sizeof(why)));
   CHECK(!logger_path_is_safe("open/inner/app.log", why, sizeof(why))); /* any ancestor */
-  chmod("open", 0750);
+  REQUIRE(chmod("open", 0750) == 0);
   CHECK(logger_path_is_safe("open/inner/app.log", why, sizeof(why)));
 }
 
@@ -231,7 +231,7 @@ static void test_unwritable_dir_uses_console(void) {
   log_info("t", "console");
   logger_close();
   CHECK(!file_exists("ro/app.log"));
-  chmod("ro", 0750);
+  CHECK(chmod("ro", 0750) == 0);
 }
 
 /* A leftover that cannot be compressed is kept (never overwritten) and the live
@@ -320,20 +320,15 @@ static void test_interrupted_rotation_recovered(void) {
 /* Input larger than the archiver's read/write buffers and poorly compressible,
  * so deflate needs several input chunks and several output flushes. */
 static void test_large_archive_round_trip(void) {
-  const size_t len = 300 * 1024;
-  char* src = malloc(len + 1);
-  char* out = malloc(len + 2);
-  REQUIRE(src && out);
+  enum { LEN = 300 * 1024 };
+  static char src[LEN + 1], out[LEN + 2];
   unsigned seed = 12345;
-  for (size_t i = 0; i < len; i++) {
+  for (size_t i = 0; i < LEN; i++) {
     seed = seed * 1103515245u + 12345u;
     src[i] = (char)(' ' + (seed >> 16) % 95);
   }
-  src[len] = '\0';
-  FILE* f = fopen("big.log.rotating", "w");
-  REQUIRE(f != NULL);
-  CHECK_EQ_INT(fwrite(src, 1, len, f), len);
-  fclose(f);
+  src[LEN] = '\0';
+  REQUIRE(write_file("big.log.rotating", src) == 0);
 
   logger_set_file("big.log", 0);
   logger_close();
@@ -343,10 +338,8 @@ static void test_large_archive_round_trip(void) {
   struct stat st;
   REQUIRE(stat("big.log.1.gz", &st) == 0);
   CHECK_EQ_INT(st.st_mode & 0777, 0640);
-  CHECK_EQ_INT(read_gz("big.log.1.gz", out, len + 2), (long)len);
-  CHECK(memcmp(out, src, len) == 0);
-  free(src);
-  free(out);
+  CHECK_EQ_INT(read_gz("big.log.1.gz", out, sizeof(out)), LEN);
+  CHECK(memcmp(out, src, LEN) == 0);
 }
 
 /* An empty pending file still becomes a valid (empty) gzip archive. */

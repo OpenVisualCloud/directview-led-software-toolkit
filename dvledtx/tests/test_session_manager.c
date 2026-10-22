@@ -276,14 +276,41 @@ static void reset_mock_counters(void)
 
 /* ==========================================================================
  * Test fixture helpers
+ *
+ * Every test runs with fx_setup/fx_teardown: the context and manager live in
+ * g_fx, so teardown releases them even when an assertion aborts the test.
  * ========================================================================== */
+
+static struct {
+    struct dvledtx_context app;
+    session_manager_t      mgr;
+} g_fx;
+
+static int fx_setup(void **state)
+{
+    (void)state;
+    memset(&g_fx, 0, sizeof(g_fx));
+    reset_mock_counters();
+    return 0;
+}
+
+static int fx_teardown(void **state)
+{
+    (void)state;
+    session_manager_cleanup(&g_fx.mgr);
+    dvledtx_context_free(&g_fx.app);
+    return 0;
+}
+
+#define fx_test(fn) cmocka_unit_test_setup_teardown(fn, fx_setup, fx_teardown)
 
 static void fill_app(struct dvledtx_context* app, int sessions, const char* url)
 {
+    dvledtx_context_free(app);
     memset(app, 0, sizeof(*app));
 
     /* Allocate dynamic arrays */
-    dvledtx_context_alloc(app, 1, sessions);
+    assert_int_equal(dvledtx_context_alloc(app, 1, sessions), 0);
 
     strncpy(app->nics[0].port,         "0000:06:00.0",  sizeof(app->nics[0].port) - 1);
     strncpy(app->nics[0].sip_addr_str, "192.168.50.29", sizeof(app->nics[0].sip_addr_str) - 1);
@@ -326,20 +353,17 @@ static void test_is_running_false_on_fresh_manager(void **state)
 static void test_init_single_session_no_url(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 1, "");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 1, "");
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
+    assert_int_equal(session_manager_init(mgr, app), 0);
 
-    assert_int_equal(mgr.st20p_count, 1);
-    assert_null(mgr.shared_dec);       /* no shared decoder for single session */
+    assert_int_equal(mgr->st20p_count, 1);
+    assert_null(mgr->shared_dec);       /* no shared decoder for single session */
     assert_int_equal(mock_open_ffmpeg_tx_calls, 1);
     assert_int_equal(mock_open_shared_ffmpeg_calls, 0);
     assert_int_equal(mock_load_video_source_calls,  0); /* empty tx_url skipped */
-
-    session_manager_cleanup(&mgr);
 }
 
 /* ==========================================================================
@@ -349,19 +373,16 @@ static void test_init_single_session_no_url(void **state)
 static void test_init_3sessions_with_url_uses_shared_decoder(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 3, "video.mp4");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 3, "video.mp4");
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
+    assert_int_equal(session_manager_init(mgr, app), 0);
 
-    assert_int_equal(mgr.st20p_count, 3);
-    assert_non_null(mgr.shared_dec);
+    assert_int_equal(mgr->st20p_count, 3);
+    assert_non_null(mgr->shared_dec);
     assert_int_equal(mock_open_shared_ffmpeg_calls, 1);
     assert_int_equal(mock_open_ffmpeg_tx_calls, 3); /* one per session */
-
-    session_manager_cleanup(&mgr);
 }
 
 /* ==========================================================================
@@ -371,18 +392,15 @@ static void test_init_3sessions_with_url_uses_shared_decoder(void **state)
 static void test_init_3sessions_raw_yuv_no_shared_decoder(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 3, "source.yuv");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 3, "source.yuv");
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
+    assert_int_equal(session_manager_init(mgr, app), 0);
 
-    assert_null(mgr.shared_dec);           /* raw YUV -> no shared decoder */
+    assert_null(mgr->shared_dec);           /* raw YUV -> no shared decoder */
     assert_int_equal(mock_open_shared_ffmpeg_calls, 0);
     assert_int_equal(mock_open_ffmpeg_tx_calls, 3);
-
-    session_manager_cleanup(&mgr);
 }
 
 /* ==========================================================================
@@ -392,20 +410,17 @@ static void test_init_3sessions_raw_yuv_no_shared_decoder(void **state)
 static void test_init_3sessions_screen_capture_uses_shared_decoder(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 3, "");
-    app.use_screen_capture = true;
-    strncpy(app.screen_input, ":0.0+0,0", sizeof(app.screen_input) - 1);
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 3, "");
+    app->use_screen_capture = true;
+    strncpy(app->screen_input, ":0.0+0,0", sizeof(app->screen_input) - 1);
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
+    assert_int_equal(session_manager_init(mgr, app), 0);
 
-    assert_non_null(mgr.shared_dec);
+    assert_non_null(mgr->shared_dec);
     assert_int_equal(mock_open_shared_ffmpeg_calls, 1);
     assert_int_equal(mock_load_video_source_calls, 0);
-
-    session_manager_cleanup(&mgr);
 }
 
 /* ==========================================================================
@@ -415,19 +430,16 @@ static void test_init_3sessions_screen_capture_uses_shared_decoder(void **state)
 static void test_init_single_session_screen_capture_loads_source(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 1, "");
-    app.use_screen_capture = true;
-    strncpy(app.screen_input, ":0.0+0,0", sizeof(app.screen_input) - 1);
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 1, "");
+    app->use_screen_capture = true;
+    strncpy(app->screen_input, ":0.0+0,0", sizeof(app->screen_input) - 1);
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
+    assert_int_equal(session_manager_init(mgr, app), 0);
 
-    assert_null(mgr.shared_dec);
+    assert_null(mgr->shared_dec);
     assert_int_equal(mock_load_video_source_calls, 1);
-
-    session_manager_cleanup(&mgr);
 }
 
 /* ==========================================================================
@@ -437,14 +449,12 @@ static void test_init_single_session_screen_capture_loads_source(void **state)
 static void test_init_fails_when_open_output_fails(void **state)
 {
     (void)state;
-    reset_mock_counters();
     mock_open_ffmpeg_tx_ret = -1; /* simulate TX unavailable */
 
-    struct dvledtx_context app;
-    fill_app(&app, 1, "");
+    struct dvledtx_context* app = &g_fx.app;
+    fill_app(app, 1, "");
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), -1);
+    assert_int_equal(session_manager_init(&g_fx.mgr, app), -1);
 }
 
 /* ==========================================================================
@@ -454,15 +464,14 @@ static void test_init_fails_when_open_output_fails(void **state)
 static void test_init_fails_when_open_shared_ffmpeg_fails(void **state)
 {
     (void)state;
-    reset_mock_counters();
     mock_open_shared_ffmpeg_ret = -1;
 
-    struct dvledtx_context app;
-    fill_app(&app, 3, "video.mp4");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 3, "video.mp4");
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), -1);
-    assert_null(mgr.shared_dec);
+    assert_int_equal(session_manager_init(mgr, app), -1);
+    assert_null(mgr->shared_dec);
 }
 
 /* ==========================================================================
@@ -472,17 +481,14 @@ static void test_init_fails_when_open_shared_ffmpeg_fails(void **state)
 static void test_init_zero_sessions(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 0, "");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 0, "");
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
-    assert_int_equal(mgr.st20p_count, 0);
-    assert_null(mgr.shared_dec);
+    assert_int_equal(session_manager_init(mgr, app), 0);
+    assert_int_equal(mgr->st20p_count, 0);
+    assert_null(mgr->shared_dec);
     assert_int_equal(mock_open_ffmpeg_tx_calls, 0);
-
-    session_manager_cleanup(&mgr);
 }
 
 /* ==========================================================================
@@ -492,23 +498,20 @@ static void test_init_zero_sessions(void **state)
 static void test_create_session_uses_session_net_crop(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 3, "");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 3, "");
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
+    assert_int_equal(session_manager_init(mgr, app), 0);
 
     const int expected_x[] = {0, 640, 1280};
     for (int i = 0; i < 3; i++) {
-        struct st20p_tx_ctx* ctx = &mgr.st20p_sessions[i];
+        struct st20p_tx_ctx* ctx = &mgr->st20p_sessions[i];
         assert_int_equal(ctx->crop_x_offset, expected_x[i]);
         assert_int_equal(ctx->crop_y_offset, 0);
         assert_int_equal(ctx->crop_width,    640);
         assert_int_equal(ctx->crop_height,   1080);
     }
-
-    session_manager_cleanup(&mgr);
 }
 
 /* ==========================================================================
@@ -518,44 +521,38 @@ static void test_create_session_uses_session_net_crop(void **state)
 static void test_create_session_crop_fallback_3sessions(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 3, "");
-    memset(app.session_net, 0, (size_t)app.st20p_sessions * sizeof(*app.session_net));
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 3, "");
+    memset(app->session_net, 0, (size_t)app->st20p_sessions * sizeof(*app->session_net));
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
+    assert_int_equal(session_manager_init(mgr, app), 0);
 
     /* Fallback: divide 1920 px evenly across 3 sessions → 640 each */
     const int expected_x[] = {0, 640, 1280};
     for (int i = 0; i < 3; i++) {
-        struct st20p_tx_ctx* ctx = &mgr.st20p_sessions[i];
+        struct st20p_tx_ctx* ctx = &mgr->st20p_sessions[i];
         assert_int_equal(ctx->crop_x_offset, expected_x[i]);
         assert_int_equal(ctx->crop_y_offset, 0);
         assert_int_equal(ctx->crop_width,    640);
         assert_int_equal(ctx->crop_height,   1080);
     }
-
-    session_manager_cleanup(&mgr);
 }
 
 static void test_create_session_crop_fallback_last_gets_remainder(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 3, "");
-    app.width = 1920;
-    memset(app.session_net, 0, (size_t)app.st20p_sessions * sizeof(*app.session_net));
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 3, "");
+    app->width = 1920;
+    memset(app->session_net, 0, (size_t)app->st20p_sessions * sizeof(*app->session_net));
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
+    assert_int_equal(session_manager_init(mgr, app), 0);
 
     /* Last session covers remaining pixels: 1920 - 2*640 = 640 */
-    assert_int_equal(mgr.st20p_sessions[2].crop_x_offset, 1280);
-    assert_int_equal(mgr.st20p_sessions[2].crop_width,    640);
-
-    session_manager_cleanup(&mgr);
+    assert_int_equal(mgr->st20p_sessions[2].crop_x_offset, 1280);
+    assert_int_equal(mgr->st20p_sessions[2].crop_width,    640);
 }
 
 /* ==========================================================================
@@ -565,17 +562,14 @@ static void test_create_session_crop_fallback_last_gets_remainder(void **state)
 static void test_create_session_idx_assigned(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 3, "");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 3, "");
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
+    assert_int_equal(session_manager_init(mgr, app), 0);
 
     for (int i = 0; i < 3; i++)
-        assert_int_equal(mgr.st20p_sessions[i].idx, i);
-
-    session_manager_cleanup(&mgr);
+        assert_int_equal(mgr->st20p_sessions[i].idx, i);
 }
 
 /* ==========================================================================
@@ -585,51 +579,44 @@ static void test_create_session_idx_assigned(void **state)
 static void test_start_sets_running_true(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 1, "");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 1, "");
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
-    assert_int_equal(session_manager_start(&mgr), 0);
-    assert_true(session_manager_is_running(&mgr));
+    assert_int_equal(session_manager_init(mgr, app), 0);
+    assert_int_equal(session_manager_start(mgr), 0);
+    assert_true(session_manager_is_running(mgr));
 
-    session_manager_stop(&mgr);
-    session_manager_cleanup(&mgr);
+    session_manager_stop(mgr);
 }
 
 static void test_stop_sets_running_false(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 1, "");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 1, "");
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
-    assert_int_equal(session_manager_start(&mgr), 0);
-    assert_int_equal(session_manager_stop(&mgr), 0);
-    assert_false(session_manager_is_running(&mgr));
-
-    session_manager_cleanup(&mgr);
+    assert_int_equal(session_manager_init(mgr, app), 0);
+    assert_int_equal(session_manager_start(mgr), 0);
+    assert_int_equal(session_manager_stop(mgr), 0);
+    assert_false(session_manager_is_running(mgr));
 }
 
 static void test_start_resets_g_dvledtx_exit(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 1, "");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 1, "");
 
     session_manager_request_exit(); /* simulate previous run */
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
-    assert_int_equal(session_manager_start(&mgr), 0);
+    assert_int_equal(session_manager_init(mgr, app), 0);
+    assert_int_equal(session_manager_start(mgr), 0);
     assert_false(session_manager_should_exit()); /* must be cleared on start */
 
-    session_manager_stop(&mgr);
-    session_manager_cleanup(&mgr);
+    session_manager_stop(mgr);
 }
 
 /* ==========================================================================
@@ -639,27 +626,25 @@ static void test_start_resets_g_dvledtx_exit(void **state)
 static void test_cleanup_idempotent(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 1, "");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 1, "");
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
-    session_manager_cleanup(&mgr);
+    assert_int_equal(session_manager_init(mgr, app), 0);
+    session_manager_cleanup(mgr);
     /* Second cleanup on already-cleaned-up manager must not crash */
-    session_manager_cleanup(&mgr);
+    session_manager_cleanup(mgr);
 }
 
 static void test_cleanup_calls_close_ffmpeg_tx(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 3, "");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 3, "");
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
-    session_manager_cleanup(&mgr);
+    assert_int_equal(session_manager_init(mgr, app), 0);
+    session_manager_cleanup(mgr);
 
     assert_int_equal(mock_close_ffmpeg_tx_calls, 3);
 }
@@ -667,13 +652,12 @@ static void test_cleanup_calls_close_ffmpeg_tx(void **state)
 static void test_cleanup_3sessions_with_url_calls_close_shared(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 3, "video.mp4");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 3, "video.mp4");
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
-    session_manager_cleanup(&mgr);
+    assert_int_equal(session_manager_init(mgr, app), 0);
+    session_manager_cleanup(mgr);
 
     assert_int_equal(mock_close_shared_ffmpeg_calls, 1);
 }
@@ -685,19 +669,16 @@ static void test_cleanup_3sessions_with_url_calls_close_shared(void **state)
 static void test_start_stop_3sessions_shared_decoder(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 3, "video.mp4");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 3, "video.mp4");
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
-    assert_int_equal(session_manager_start(&mgr), 0);
-    assert_true(session_manager_is_running(&mgr));
+    assert_int_equal(session_manager_init(mgr, app), 0);
+    assert_int_equal(session_manager_start(mgr), 0);
+    assert_true(session_manager_is_running(mgr));
 
-    assert_int_equal(session_manager_stop(&mgr), 0);
-    assert_false(session_manager_is_running(&mgr));
-
-    session_manager_cleanup(&mgr);
+    assert_int_equal(session_manager_stop(mgr), 0);
+    assert_false(session_manager_is_running(mgr));
 }
 
 /* ==========================================================================
@@ -711,20 +692,19 @@ static void test_start_stop_3sessions_shared_decoder(void **state)
 static void test_thread_executes_ffmpeg_decode_path(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 1, "");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 1, "");
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
+    assert_int_equal(session_manager_init(mgr, app), 0);
+    assert_non_null(mgr->st20p_sessions);
 
     /* Force Path A */
-    mgr.st20p_sessions[0].use_ffmpeg = true;
+    mgr->st20p_sessions[0].use_ffmpeg = true;
 
-    assert_int_equal(session_manager_start(&mgr), 0);
+    assert_int_equal(session_manager_start(mgr), 0);
     usleep(5000); /* let the thread run at least one iteration */
-    session_manager_stop(&mgr);
-    session_manager_cleanup(&mgr);
+    session_manager_stop(mgr);
 }
 
 /* ==========================================================================
@@ -737,27 +717,28 @@ static void test_thread_executes_ffmpeg_decode_path(void **state)
 static void test_thread_executes_raw_yuv_path(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 1, "");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 1, "");
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
+    assert_int_equal(session_manager_init(mgr, app), 0);
+    assert_non_null(mgr->st20p_sessions);
 
-    struct st20p_tx_ctx* ctx = &mgr.st20p_sessions[0];
+    struct st20p_tx_ctx* ctx = &mgr->st20p_sessions[0];
 
     /* Inject a fake raw YUV source buffer (Path B conditions) */
     ctx->use_ffmpeg = false;
-    int w = ctx->crop_width  > 0 ? ctx->crop_width  : (int)app.width;
-    int h = ctx->crop_height > 0 ? ctx->crop_height : (int)app.height;
-    int fsz = av_image_get_buffer_size(app.fmt, w, h, 1);
+    int w = ctx->crop_width  > 0 ? ctx->crop_width  : (int)app->width;
+    int h = ctx->crop_height > 0 ? ctx->crop_height : (int)app->height;
+    int fsz = av_image_get_buffer_size(app->fmt, w, h, 1);
     assert_true(fsz > 0);
 
     /* Allocate yuv_frame container (no buffer — data[] are set per-frame by
-     * tx_fetch_next_frame using av_image_fill_arrays into source_buffer). */
+     * tx_fetch_next_frame using av_image_fill_arrays into source_buffer).
+     * session_manager_cleanup() releases it and source_buffer. */
     ctx->yuv_frame = av_frame_alloc();
     assert_non_null(ctx->yuv_frame);
-    ctx->yuv_frame->format = app.fmt;
+    ctx->yuv_frame->format = app->fmt;
     ctx->yuv_frame->width  = w;
     ctx->yuv_frame->height = h;
 
@@ -768,18 +749,11 @@ static void test_thread_executes_raw_yuv_path(void **state)
     ctx->current_pos   = 0;
     ctx->loop_playback = true;
 
-    assert_int_equal(session_manager_start(&mgr), 0);
+    assert_int_equal(session_manager_start(mgr), 0);
     usleep(10000);
-    session_manager_stop(&mgr);
+    session_manager_stop(mgr);
 
     assert_true(ctx->frames_sent >= 1);
-
-    free(ctx->source_buffer);
-    ctx->source_buffer = NULL;
-    /* yuv_frame data[] point into source_buffer (no AVBuffer), so av_frame_free
-     * only releases the AVFrame struct — safe to call after freeing source_buffer. */
-    av_frame_free(&ctx->yuv_frame);
-    session_manager_cleanup(&mgr);
 }
 
 /* ==========================================================================
@@ -789,25 +763,24 @@ static void test_thread_executes_raw_yuv_path(void **state)
 static void test_shared_thread_crop_fallback(void **state)
 {
     (void)state;
-    reset_mock_counters();
-    struct dvledtx_context app;
-    fill_app(&app, 3, "video.mp4");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 3, "video.mp4");
     /* Zero out crop fields to trigger the fallback path */
     for (int i = 0; i < 3; i++) {
-        app.session_net[i].crop_w = 0;
-        app.session_net[i].crop_h = 0;
+        app->session_net[i].crop_w = 0;
+        app->session_net[i].crop_h = 0;
     }
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
+    assert_int_equal(session_manager_init(mgr, app), 0);
+    assert_non_null(mgr->st20p_sessions);
 
     /* Fallback: divide app->width among 3 sessions — crop_width > 0 */
-    assert_true(mgr.st20p_sessions[0].crop_width > 0);
+    assert_true(mgr->st20p_sessions[0].crop_width > 0);
 
-    assert_int_equal(session_manager_start(&mgr), 0);
+    assert_int_equal(session_manager_start(mgr), 0);
     usleep(10000);
-    session_manager_stop(&mgr);
-    session_manager_cleanup(&mgr);
+    session_manager_stop(mgr);
 }
 
 /* ==========================================================================
@@ -817,19 +790,13 @@ static void test_shared_thread_crop_fallback(void **state)
 static void test_init_fails_when_load_video_source_fails(void **state)
 {
     (void)state;
-    reset_mock_counters();
-
-    struct dvledtx_context app;
-    fill_app(&app, 1, "video.mp4"); /* non-empty, non-raw → load_video_source called */
+    struct dvledtx_context* app = &g_fx.app;
+    fill_app(app, 1, "video.mp4"); /* non-empty, non-raw → load_video_source called */
 
     /* Inject failure into load_video_source mock */
     mock_load_video_source_ret = -1;
 
-    session_manager_t mgr;
-    int ret = session_manager_init(&mgr, &app);
-    assert_int_equal(ret, -1);
-
-    session_manager_cleanup(&mgr);
+    assert_int_equal(session_manager_init(&g_fx.mgr, app), -1);
 }
 
 /* ==========================================================================
@@ -841,23 +808,21 @@ static void test_init_fails_when_load_video_source_fails(void **state)
 static void test_thread_no_source_exits_immediately(void **state)
 {
     (void)state;
-    reset_mock_counters();
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 1, "");
 
-    struct dvledtx_context app;
-    fill_app(&app, 1, "");
-
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
+    assert_int_equal(session_manager_init(mgr, app), 0);
+    assert_non_null(mgr->st20p_sessions);
 
     /* Force the "no valid source" branch */
-    mgr.st20p_sessions[0].use_ffmpeg    = false;
-    mgr.st20p_sessions[0].source_buffer = NULL;
-    mgr.st20p_sessions[0].source_size   = 0;
+    mgr->st20p_sessions[0].use_ffmpeg    = false;
+    mgr->st20p_sessions[0].source_buffer = NULL;
+    mgr->st20p_sessions[0].source_size   = 0;
 
-    assert_int_equal(session_manager_start(&mgr), 0);
+    assert_int_equal(session_manager_start(mgr), 0);
     usleep(5000);
-    session_manager_stop(&mgr);
-    session_manager_cleanup(&mgr);
+    session_manager_stop(mgr);
 }
 
 /* ==========================================================================
@@ -869,21 +834,18 @@ static void test_thread_no_source_exits_immediately(void **state)
 static void test_shared_thread_send_yuv_failure_is_non_fatal(void **state)
 {
     (void)state;
-    reset_mock_counters();
-
-    struct dvledtx_context app;
-    fill_app(&app, 3, "video.mp4");
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 3, "video.mp4");
 
     /* Make ffmpeg_tx_send_yuv_frame fail */
     mock_ffmpeg_tx_send_yuv_frame_ret = -1;
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
+    assert_int_equal(session_manager_init(mgr, app), 0);
 
-    assert_int_equal(session_manager_start(&mgr), 0);
+    assert_int_equal(session_manager_start(mgr), 0);
     usleep(10000);
-    session_manager_stop(&mgr);
-    session_manager_cleanup(&mgr);
+    session_manager_stop(mgr);
 }
 
 /* ==========================================================================
@@ -897,23 +859,21 @@ static void test_shared_thread_send_yuv_failure_is_non_fatal(void **state)
 static void test_thread_single_path_a_send_failure(void **state)
 {
     (void)state;
-    reset_mock_counters();
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 1, "");
 
-    struct dvledtx_context app;
-    fill_app(&app, 1, "");
-
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
+    assert_int_equal(session_manager_init(mgr, app), 0);
+    assert_non_null(mgr->st20p_sessions);
 
     /* Force Path A; decode succeeds once then fails */
-    mgr.st20p_sessions[0].use_ffmpeg            = true;
+    mgr->st20p_sessions[0].use_ffmpeg            = true;
     mock_ffmpeg_decode_next_frame_true_n         = 1;
     mock_ffmpeg_tx_send_yuv_frame_ret            = -1;
 
-    assert_int_equal(session_manager_start(&mgr), 0);
+    assert_int_equal(session_manager_start(mgr), 0);
     usleep(5000);
-    session_manager_stop(&mgr);
-    session_manager_cleanup(&mgr);
+    session_manager_stop(mgr);
 }
 
 /* ==========================================================================
@@ -923,19 +883,18 @@ static void test_thread_single_path_a_send_failure(void **state)
 static void test_thread_raw_yuv_send_failure_logs_and_continues(void **state)
 {
     (void)state;
-    reset_mock_counters();
+    struct dvledtx_context* app = &g_fx.app;
+    session_manager_t* mgr = &g_fx.mgr;
+    fill_app(app, 1, "");
 
-    struct dvledtx_context app;
-    fill_app(&app, 1, "");
+    assert_int_equal(session_manager_init(mgr, app), 0);
+    assert_non_null(mgr->st20p_sessions);
 
-    session_manager_t mgr;
-    assert_int_equal(session_manager_init(&mgr, &app), 0);
+    struct st20p_tx_ctx* ctx = &mgr->st20p_sessions[0];
 
-    struct st20p_tx_ctx* ctx = &mgr.st20p_sessions[0];
-
-    int w   = ctx->crop_width  > 0 ? ctx->crop_width  : (int)app.width;
-    int h   = ctx->crop_height > 0 ? ctx->crop_height : (int)app.height;
-    int fsz = av_image_get_buffer_size(app.fmt, w, h, 1);
+    int w   = ctx->crop_width  > 0 ? ctx->crop_width  : (int)app->width;
+    int h   = ctx->crop_height > 0 ? ctx->crop_height : (int)app->height;
+    int fsz = av_image_get_buffer_size(app->fmt, w, h, 1);
     assert_true(fsz > 0);
 
     ctx->use_ffmpeg    = false;
@@ -946,24 +905,19 @@ static void test_thread_raw_yuv_send_failure_logs_and_continues(void **state)
     ctx->current_pos   = 0;
     ctx->loop_playback = true;
 
-    /* Allocate yuv_frame container required by tx_fetch_next_frame Path B */
+    /* yuv_frame container required by tx_fetch_next_frame Path B; freed by cleanup */
     ctx->yuv_frame = av_frame_alloc();
     assert_non_null(ctx->yuv_frame);
-    ctx->yuv_frame->format = app.fmt;
+    ctx->yuv_frame->format = app->fmt;
     ctx->yuv_frame->width  = w;
     ctx->yuv_frame->height = h;
 
     /* Make the raw-yuv send fail: Path B now routes through ffmpeg_tx_send_yuv_frame */
     mock_ffmpeg_tx_send_yuv_frame_ret = -1;
 
-    assert_int_equal(session_manager_start(&mgr), 0);
+    assert_int_equal(session_manager_start(mgr), 0);
     usleep(5000);
-    session_manager_stop(&mgr);
-
-    free(ctx->source_buffer);
-    ctx->source_buffer = NULL;
-    av_frame_free(&ctx->yuv_frame);
-    session_manager_cleanup(&mgr);
+    session_manager_stop(mgr);
 }
 
 /* ==========================================================================
@@ -979,43 +933,43 @@ int main(void)
         cmocka_unit_test(test_is_running_false_on_fresh_manager),
 
         /* init */
-        cmocka_unit_test(test_init_single_session_no_url),
-        cmocka_unit_test(test_init_3sessions_with_url_uses_shared_decoder),
-        cmocka_unit_test(test_init_3sessions_raw_yuv_no_shared_decoder),
-        cmocka_unit_test(test_init_3sessions_screen_capture_uses_shared_decoder),
-        cmocka_unit_test(test_init_single_session_screen_capture_loads_source),
-        cmocka_unit_test(test_init_fails_when_open_output_fails),
-        cmocka_unit_test(test_init_fails_when_open_shared_ffmpeg_fails),
-        cmocka_unit_test(test_init_zero_sessions),
-        cmocka_unit_test(test_init_fails_when_load_video_source_fails),
+        fx_test(test_init_single_session_no_url),
+        fx_test(test_init_3sessions_with_url_uses_shared_decoder),
+        fx_test(test_init_3sessions_raw_yuv_no_shared_decoder),
+        fx_test(test_init_3sessions_screen_capture_uses_shared_decoder),
+        fx_test(test_init_single_session_screen_capture_loads_source),
+        fx_test(test_init_fails_when_open_output_fails),
+        fx_test(test_init_fails_when_open_shared_ffmpeg_fails),
+        fx_test(test_init_zero_sessions),
+        fx_test(test_init_fails_when_load_video_source_fails),
 
         /* create_st20p_tx_session — crop */
-        cmocka_unit_test(test_create_session_uses_session_net_crop),
-        cmocka_unit_test(test_create_session_crop_fallback_3sessions),
-        cmocka_unit_test(test_create_session_crop_fallback_last_gets_remainder),
-        cmocka_unit_test(test_create_session_idx_assigned),
+        fx_test(test_create_session_uses_session_net_crop),
+        fx_test(test_create_session_crop_fallback_3sessions),
+        fx_test(test_create_session_crop_fallback_last_gets_remainder),
+        fx_test(test_create_session_idx_assigned),
 
         /* start / stop */
-        cmocka_unit_test(test_start_sets_running_true),
-        cmocka_unit_test(test_stop_sets_running_false),
-        cmocka_unit_test(test_start_resets_g_dvledtx_exit),
+        fx_test(test_start_sets_running_true),
+        fx_test(test_stop_sets_running_false),
+        fx_test(test_start_resets_g_dvledtx_exit),
 
         /* cleanup */
-        cmocka_unit_test(test_cleanup_idempotent),
-        cmocka_unit_test(test_cleanup_calls_close_ffmpeg_tx),
-        cmocka_unit_test(test_cleanup_3sessions_with_url_calls_close_shared),
+        fx_test(test_cleanup_idempotent),
+        fx_test(test_cleanup_calls_close_ffmpeg_tx),
+        fx_test(test_cleanup_3sessions_with_url_calls_close_shared),
 
         /* start/stop with shared decoder */
-        cmocka_unit_test(test_start_stop_3sessions_shared_decoder),
+        fx_test(test_start_stop_3sessions_shared_decoder),
 
         /* thread paths */
-        cmocka_unit_test(test_thread_executes_ffmpeg_decode_path),
-        cmocka_unit_test(test_thread_executes_raw_yuv_path),
-        cmocka_unit_test(test_shared_thread_crop_fallback),
-        cmocka_unit_test(test_thread_no_source_exits_immediately),
-        cmocka_unit_test(test_shared_thread_send_yuv_failure_is_non_fatal),
-        cmocka_unit_test(test_thread_single_path_a_send_failure),
-        cmocka_unit_test(test_thread_raw_yuv_send_failure_logs_and_continues),
+        fx_test(test_thread_executes_ffmpeg_decode_path),
+        fx_test(test_thread_executes_raw_yuv_path),
+        fx_test(test_shared_thread_crop_fallback),
+        fx_test(test_thread_no_source_exits_immediately),
+        fx_test(test_shared_thread_send_yuv_failure_is_non_fatal),
+        fx_test(test_thread_single_path_a_send_failure),
+        fx_test(test_thread_raw_yuv_send_failure_logs_and_continues),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

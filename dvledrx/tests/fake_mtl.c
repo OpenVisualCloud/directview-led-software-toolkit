@@ -42,6 +42,13 @@ void fake_mtl_reset(void) {
 
 __attribute__((constructor)) static void fake_mtl_ctor(void) { fake_mtl_reset(); }
 
+struct fake_mtl_state fake_mtl_snapshot(void) {
+  pthread_mutex_lock(&g_lock);
+  struct fake_mtl_state s = fake_mtl;
+  pthread_mutex_unlock(&g_lock);
+  return s;
+}
+
 static bool is_planar16(enum st_frame_fmt f) {
   return f == ST_FRAME_FMT_YUV422PLANAR10LE || f == ST_FRAME_FMT_YUV422PLANAR12LE ||
          f == ST_FRAME_FMT_YUV444PLANAR10LE || f == ST_FRAME_FMT_YUV444PLANAR12LE ||

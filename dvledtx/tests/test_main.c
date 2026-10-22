@@ -38,6 +38,7 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <getopt.h>
 #include <arpa/inet.h>
 
@@ -340,7 +341,8 @@ static void test_sig_handler_sets_flag_and_apply_propagates(void **state)
 
     /* Simulate a signal and apply */
     dvledtx_sig_handler(SIGINT);
-    assert_int_equal(g_dvledtx_signal_exit, 1);
+    int signal_exit = g_dvledtx_signal_exit;
+    assert_int_equal(signal_exit, 1);
     dvledtx_apply_pending_signal_exit();
     assert_true(session_manager_should_exit());
     assert_true(app.exit);
@@ -376,6 +378,16 @@ static void test_print_help_does_not_crash(void **state)
  * Each test calls tx_app_real_main() with controlled argv and stub config.
  * The stubs are reset via reset_stubs() before each test.
  * =========================================================================== */
+
+/* Create an empty owner-only temp file from a mkstemp() template (fails the test on error). */
+static void make_private_tmpfile(char *tmpl)
+{
+    mode_t old_mask = umask(077);
+    int fd = mkstemp(tmpl);
+    umask(old_mask);
+    if (fd < 0) fail_msg("mkstemp(%s) failed", tmpl);
+    close(fd);
+}
 
 /* No config file → print_help + return -1 */
 static void test_main_no_config_returns_minus1(void **state)
@@ -496,9 +508,7 @@ static void test_main_with_log_file_redirect(void **state)
     reset_stubs();
     stub_peek_config_log_file_ret = 0;
     char log_path[] = "/tmp/dvledtx_test_log_XXXXXX";
-    int log_fd = mkstemp(log_path);
-    assert_true(log_fd >= 0);
-    close(log_fd);
+    make_private_tmpfile(log_path);
     strncpy(stub_peek_config_log_file_buf, log_path,
             sizeof(stub_peek_config_log_file_buf) - 1);
     stub_load_config_set_exit = true;
@@ -550,12 +560,11 @@ static void run_parse_args_in_child(char **argv, int argc,
 
     /* Parent: drain pipe, then waitpid. */
     close(pipefd[1]);
-    size_t total = 0;
     if (out_buf != NULL && out_size > 0) {
-        out_buf[0] = '\0';
-        ssize_t n;
-        while (total + 1 < out_size &&
-               (n = read(pipefd[0], out_buf + total, out_size - 1 - total)) > 0) {
+        size_t cap = out_size - 1, total = 0;
+        while (total < cap) {
+            ssize_t n = read(pipefd[0], out_buf + total, cap - total);
+            if (n <= 0) break;
             total += (size_t)n;
         }
         out_buf[total] = '\0';
@@ -615,9 +624,7 @@ static void test_main_with_log_env_variable(void **state)
     stub_peek_config_log_file_ret = -1;
     stub_load_config_set_exit = true;
     char env_log_path[] = "/tmp/dvledtx_test_env_log_XXXXXX";
-    int env_fd = mkstemp(env_log_path);
-    assert_true(env_fd >= 0);
-    close(env_fd);
+    make_private_tmpfile(env_log_path);
     setenv("LOG_FILE", env_log_path, 1);
     optind = 1;
     char *argv[] = {"dvledtx", "--config", "test.json", NULL};
