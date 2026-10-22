@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 name: 'Smoke Tests'
-description: 'Run smoke tests on dvledtx and dvledtx-mtl binaries. Results written to $GITHUB_WORKSPACE/reports/'
+description: 'Run smoke tests on dvledtx and dvledrx binaries. Results written to $GITHUB_WORKSPACE/reports/'
 
 runs:
   using: composite
@@ -15,15 +15,19 @@ runs:
         REPORT_DIR="$GITHUB_WORKSPACE/reports"
         mkdir -p "$REPORT_DIR"
 
-        for BINARY in ./bins/dvledtx ./bins/dvledtx-mtl; do
+        for BINARY in ./bins/dvledtx ./bins/dvledtx-mtl ./bins/dvledrx; do
           NAME=$(basename "$BINARY")
           echo "===== Smoke Test: $NAME ====="
           OUTFILE="$REPORT_DIR/smoke-test-${NAME}.txt"
 
           # version check
           VERSION_OUTPUT=$(timeout 5s "$BINARY" -v 2>&1)
-          if ! echo "$VERSION_OUTPUT" | grep -qE "^dvledtx version [0-9]+\.[0-9]+\.[0-9]+"; then
-            echo "ERROR: $NAME -v output did not match expected format 'dvledtx version X.Y.Z'"
+          VERSION_PREFIX=dvledtx
+          if [ "$NAME" = "dvledrx" ]; then
+            VERSION_PREFIX=dvledrx
+          fi
+          if ! echo "$VERSION_OUTPUT" | grep -qE "^${VERSION_PREFIX} version [0-9]+\.[0-9]+\.[0-9]+"; then
+            echo "ERROR: $NAME -v output did not match expected format '${VERSION_PREFIX} version X.Y.Z'"
             echo "Got: $VERSION_OUTPUT"
             exit 1
           fi
