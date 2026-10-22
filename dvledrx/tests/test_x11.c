@@ -346,6 +346,68 @@ static void test_fixed_window_and_escape(void) {
   cleanup_x11_display(&d);
 }
 
+/* ReparentNotify with no toggle pending (e.g. the WM managing a windowed fixed
+ * window) must not force the window back into wall mode. */
+static void test_reparent_without_pending_is_ignored(void) {
+  struct crop_config rect = {0, 0, 16, 16};
+  struct x11_display_ctx d;
+  REQUIRE(init_x11_display(&d, 16, 16, 0, g_output, true, &rect) == 0);
+  send_reparent_to_root(win_of(&d));
+  pump(&d);
+  CHECK(!d.wall_pending);
+  CHECK(!d.windowed);
+
+  send_key(win_of(&d), true);
+  send_key(win_of(&d), false);
+  pump(&d);
+  REQUIRE(d.windowed);
+  send_reparent_to_root(win_of(&d));
+  pump(&d);
+  CHECK(d.windowed);
+  CHECK(!d.wall_pending);
+  sleep_ms(1100); /* no pending toggle: the timeout path does nothing either */
+  process_x11_events(&d);
+  CHECK(d.windowed);
+
+  send_key(win_of(&d), true); /* leave the shared wall state as it was */
+  send_key(win_of(&d), false);
+  pump(&d);
+  send_reparent_to_root(win_of(&d));
+  pump(&d);
+  CHECK(!d.windowed);
+  cleanup_x11_display(&d);
+}
+
+/* Escape in one wall window toggles every wall window together. */
+static void test_escape_toggles_all_wall_windows(void) {
+  struct x11_display_ctx a, b;
+  REQUIRE(init_x11_display(&a, 16, 16, 0, g_output, true, NULL) == 0);
+  struct crop_config rect = {0, 0, 16, 16};
+  if (init_x11_display(&b, 16, 16, 1, g_output, true, &rect) != 0) {
+    cleanup_x11_display(&a);
+    REQUIRE(0);
+  }
+
+  send_key(win_of(&a), true);
+  send_key(win_of(&a), false);
+  pump(&a);
+  pump(&b);
+  CHECK(a.windowed);
+  CHECK(b.windowed);
+
+  send_key(win_of(&a), true);
+  send_key(win_of(&a), false);
+  pump(&a);
+  CHECK(!a.windowed);
+  CHECK(b.wall_pending); /* fixed window waits for the WM to release it */
+  send_reparent_to_root(win_of(&b));
+  pump(&b);
+  CHECK(!b.wall_pending);
+  CHECK(!b.windowed);
+  cleanup_x11_display(&b);
+  cleanup_x11_display(&a);
+}
+
 /* Composite window: crop and strip writes, expose, resize to scaled and back. */
 static void test_composite_window(void) {
   struct composite_x11_ctx c;
@@ -469,6 +531,8 @@ int main(void) {
   RUN_TEST(test_fullscreen_output_and_escape);
   RUN_TEST(test_missing_output);
   RUN_TEST(test_fixed_window_and_escape);
+  RUN_TEST(test_reparent_without_pending_is_ignored);
+  RUN_TEST(test_escape_toggles_all_wall_windows);
   RUN_TEST(test_composite_window);
   RUN_TEST(test_composite_abort_releases_waiters);
   RUN_TEST(test_x_error_is_logged);
