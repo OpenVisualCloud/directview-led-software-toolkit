@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 /* Pull in FFmpeg types before dvledtx_context.h which uses AVPixelFormat */
@@ -247,20 +248,20 @@ static void test_load_video_source_real_yuv_file_populates_buffer(void **state)
 {
     (void)state;
     /* Write a small .yuv file (48 bytes = 4x4 YUV422 8-bit packed) and
-     * verify that load_video_source reads it into source_buffer. */
-    char path[] = "/tmp/dvledtx_test_XXXXXX";
-    int fd = mkstemp(path);
-    assert_true(fd >= 0);
-    close(fd);
-    /* Rename to .yuv suffix so is_raw_yuv() recognises it */
-    char yuv_path[256];
-    snprintf(yuv_path, sizeof(yuv_path), "%s.yuv", path);
-    rename(path, yuv_path);
-    FILE *f = fopen(yuv_path, "wb");
-    assert_non_null(f);
+     * verify that load_video_source reads it into source_buffer.  The .yuv
+     * suffix makes is_raw_yuv() recognise it. */
+    char yuv_path[] = "/tmp/dvledtx_test_XXXXXX.yuv";
+    mode_t old_mask = umask(077);
+    int fd = mkstemps(yuv_path, 4);
+    umask(old_mask);
+    if (fd < 0) fail_msg("mkstemps failed");
     const uint8_t dummy[48] = {0xAB};
-    fwrite(dummy, 1, sizeof(dummy), f);
-    fclose(f);
+    ssize_t written = write(fd, dummy, sizeof(dummy));
+    close(fd);
+    if (written != (ssize_t)sizeof(dummy)) {
+        unlink(yuv_path);
+        fail_msg("write to %s failed", yuv_path);
+    }
 
     struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
@@ -273,13 +274,14 @@ static void test_load_video_source_real_yuv_file_populates_buffer(void **state)
 
     int ret = load_video_source(&ctx, yuv_path);
     unlink(yuv_path);
+    bool has_buffer = ctx.source_buffer != NULL;
+    size_t size = ctx.source_size;
+    free(ctx.source_buffer);
     assert_int_equal(ret, 0);
-    assert_non_null(ctx.source_buffer);
-    assert_true(ctx.source_size > 0);
+    assert_true(has_buffer);
+    assert_true(size > 0);
     assert_false(ctx.use_ffmpeg);
     assert_true(ctx.loop_playback);
-
-    free(ctx.source_buffer);
 }
 
 /* ==========================================================================
