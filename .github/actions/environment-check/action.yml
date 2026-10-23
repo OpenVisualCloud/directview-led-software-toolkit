@@ -31,11 +31,14 @@ runs:
   using: composite
   steps:
     # The cache holds binaries built against the runner's system libraries, so key it
-    # on the runner image (e.g. ubuntu24) as well; runner.os alone is just "Linux".
+    # on the image family, exact image revision, and architecture; runner.os alone is
+    # just "Linux" and ImageOS alone does not distinguish image updates.
     - name: Resolve runner image
       id: runner-image
       shell: bash
-      run: echo "name=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
+      run: |
+        echo "name=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
+        echo "version=${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
 
     - name: Restore environment cache
       id: env-cache
@@ -44,7 +47,7 @@ runs:
         path: |
           ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
-        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}
+        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}-${{ steps.runner-image.outputs.version }}-${{ runner.arch }}
 
     - name: Deploy cache to system
       if: steps.env-cache.outputs.cache-hit == 'true'
@@ -252,9 +255,23 @@ runs:
       run: |
         echo "===== FFmpeg Setup ====="
         export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
-        if pkg-config --exists libavformat libavcodec libavutil libavdevice 2>/dev/null; then
-          echo "  [OK] FFmpeg already installed — skipping build (cached)"
-          exit 0
+        FFMPEG_BIN=$(command -v ffmpeg 2>/dev/null || true)
+        if pkg-config --exists libavformat libavcodec libavutil libavdevice 2>/dev/null && [ -n "$FFMPEG_BIN" ]; then
+          echo "  Checking cached FFmpeg runtime: $FFMPEG_BIN"
+          if FFMPEG_VERSION_OUT=$(timeout 10s "$FFMPEG_BIN" -version </dev/null 2>&1); then
+            if printf '%s\n' "$FFMPEG_VERSION_OUT" | grep -q '^ffmpeg version '; then
+              FFMPEG_VERSION_LINE=${FFMPEG_VERSION_OUT%%$'\n'*}
+              echo "  $FFMPEG_VERSION_LINE"
+              echo "  [OK] Cached FFmpeg runtime is healthy — skipping build"
+              exit 0
+            fi
+            echo "  [WARN] Cached ffmpeg -version returned no recognizable version; rebuilding FFmpeg."
+          else
+            FFMPEG_VERSION_STATUS=$?
+            echo "  [WARN] Cached ffmpeg -version failed (status $FFMPEG_VERSION_STATUS); rebuilding FFmpeg."
+          fi
+        else
+          echo "  FFmpeg libraries or binary missing; building FFmpeg from source."
         fi
         echo "  Building FFmpeg $FFMPEG_VERSION with MTL plugin from source..."
         MTL_SOURCE="$RUNNER_TEMP/mtl-source"
@@ -272,6 +289,27 @@ runs:
         sudo make install
         sudo ldconfig
         echo "  FFmpeg installed."
+
+        FFMPEG_BIN=$(command -v ffmpeg 2>/dev/null || true)
+        if [ -z "$FFMPEG_BIN" ]; then
+          echo "ERROR: ffmpeg binary was not found after installation."
+          exit 1
+        fi
+        if FFMPEG_VERSION_OUT=$(timeout 10s "$FFMPEG_BIN" -version </dev/null 2>&1); then
+          :
+        else
+          FFMPEG_VERSION_STATUS=$?
+          echo "ERROR: rebuilt ffmpeg -version failed with status $FFMPEG_VERSION_STATUS."
+          printf '%s\n' "$FFMPEG_VERSION_OUT"
+          exit 1
+        fi
+        if ! printf '%s\n' "$FFMPEG_VERSION_OUT" | grep -q '^ffmpeg version '; then
+          echo "ERROR: rebuilt ffmpeg returned no recognizable version string."
+          printf '%s\n' "$FFMPEG_VERSION_OUT"
+          exit 1
+        fi
+        FFMPEG_VERSION_LINE=${FFMPEG_VERSION_OUT%%$'\n'*}
+        echo "  [OK] Rebuilt FFmpeg runtime: $FFMPEG_VERSION_LINE"
 
     - name: Verify build dependencies
       shell: bash
@@ -310,7 +348,14 @@ runs:
 
         # Run ffmpeg -version and print full output
         echo "  --- ffmpeg -version output ---"
-        FFMPEG_VERSION_OUT=$(ffmpeg -version 2>&1)
+        if FFMPEG_VERSION_OUT=$(timeout 10s "$FFMPEG_PATH" -version </dev/null 2>&1); then
+          :
+        else
+          FFMPEG_VERSION_STATUS=$?
+          echo "ERROR: ffmpeg -version failed with status $FFMPEG_VERSION_STATUS."
+          printf '%s\n' "$FFMPEG_VERSION_OUT"
+          exit 1
+        fi
         echo "$FFMPEG_VERSION_OUT"
         FFMPEG_VER=$(echo "$FFMPEG_VERSION_OUT" | head -1)
         if [ -z "$FFMPEG_VER" ]; then
@@ -321,7 +366,14 @@ runs:
 
         # Check MTL device is registered
         echo "  --- ffmpeg -devices output ---"
-        DEVICES=$(ffmpeg -devices 2>&1)
+        if DEVICES=$(timeout 10s "$FFMPEG_PATH" -devices </dev/null 2>&1); then
+          :
+        else
+          FFMPEG_STATUS=$?
+          echo "ERROR: ffmpeg -devices failed with status $FFMPEG_STATUS."
+          printf '%s\n' "$DEVICES"
+          exit 1
+        fi
         echo "$DEVICES"
         if echo "$DEVICES" | grep -qi "mtl"; then
           MTL_DEVICES=$(echo "$DEVICES" | grep -i "mtl")
@@ -354,4 +406,4 @@ runs:
         path: |
           ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
-        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}
+        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}-${{ steps.runner-image.outputs.version }}-${{ runner.arch }}
