@@ -93,6 +93,7 @@ static int  stub_load_and_apply_config_ret   = 0;
 static bool  stub_load_config_set_ips        = true;
 static int   stub_load_config_test_time_s    = 0;
 static bool  stub_load_config_set_exit       = true; /* set app->exit=true immediately */
+static void* stub_loaded_nics                = NULL; /* nics allocated by the load stub */
 
 int peek_config_log_file(const char* f, char* buf, size_t sz)
 {
@@ -115,6 +116,7 @@ int load_and_apply_config(struct dvledtx_context* app, const char* f)
          * infinite transmit loop and hang the whole test binary). */
         dvledtx_context_free(app);
         dvledtx_context_alloc(app, 1, 1);
+        stub_loaded_nics = app->nics;
         if (stub_load_config_set_ips) {
             strncpy(app->nics[0].sip_addr_str, "192.168.50.29", sizeof(app->nics[0].sip_addr_str) - 1);
             strncpy(app->nics[0].dip_addr_str, "239.168.85.20", sizeof(app->nics[0].dip_addr_str) - 1);
@@ -159,6 +161,17 @@ int resolve_ip_addrs(struct dvledtx_context* ctx) {
  * g_dvledtx_signal_exit (from main.c) is visible. */
 static void reset_stubs(void);
 
+/* main.c's dvledtx_context_free() calls are routed here to check nothing leaks. */
+static int  ctx_free_calls      = 0;
+static bool ctx_freed_load_nics = false;
+static void tracked_context_free(struct dvledtx_context* ctx)
+{
+    ctx_free_calls++;
+    if (ctx != NULL && ctx->nics != NULL && ctx->nics == stub_loaded_nics)
+        ctx_freed_load_nics = true;
+    dvledtx_context_free(ctx);
+}
+
 /* ===========================================================================
  * Include production source with main() renamed so our cmocka main() can
  * coexist.  After this point all static symbols from main.c
@@ -167,7 +180,9 @@ static void reset_stubs(void);
  * =========================================================================== */
 
 #define main tx_app_real_main
+#define dvledtx_context_free tracked_context_free
 #include "../src/main.c"
+#undef dvledtx_context_free
 #undef main
 
 static void reset_stubs(void)
@@ -180,6 +195,9 @@ static void reset_stubs(void)
     stub_load_config_set_ips       = true;
     stub_load_config_test_time_s   = 0;
     stub_load_config_set_exit      = true;
+    stub_loaded_nics               = NULL;
+    ctx_free_calls                 = 0;
+    ctx_freed_load_nics            = false;
     g_dvledtx_signal_exit           = 0;
     g_test_exit                    = false;
 }
@@ -381,6 +399,8 @@ static void test_main_happy_path_exits_immediately(void **state)
     char *argv[] = {"dvledtx", "--config", "test.json", NULL};
     int ret = tx_app_real_main(3, argv);
     assert_int_equal(ret, 0);
+    assert_true(ctx_freed_load_nics);
+    assert_int_equal(ctx_free_calls, 1);
 }
 
 /* Regression test for commit f74a727: avdevice_register_all() must be
@@ -440,6 +460,7 @@ static void test_main_session_init_fails(void **state)
     char *argv[] = {"dvledtx", "--config", "test.json", NULL};
     int ret = tx_app_real_main(3, argv);
     assert_int_equal(ret, -1);
+    assert_true(ctx_freed_load_nics); /* no leak when the config was already loaded */
 }
 
 /* session_manager_start fails → return -1 */
@@ -452,6 +473,7 @@ static void test_main_session_start_fails(void **state)
     char *argv[] = {"dvledtx", "--config", "test.json", NULL};
     int ret = tx_app_real_main(3, argv);
     assert_int_equal(ret, -1);
+    assert_true(ctx_freed_load_nics);
 }
 
 /* resolve_ip_addrs fails (bad IPs injected by stub) → return -1 */
@@ -464,6 +486,7 @@ static void test_main_resolve_ip_fails(void **state)
     char *argv[] = {"dvledtx", "--config", "test.json", NULL};
     int ret = tx_app_real_main(3, argv);
     assert_int_equal(ret, -1);
+    assert_true(ctx_freed_load_nics); /* no leak when the config was already loaded */
 }
 
 /* Log file redirection via peek_config_log_file → exercises the log block */
