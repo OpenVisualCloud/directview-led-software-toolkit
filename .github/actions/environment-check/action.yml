@@ -30,8 +30,8 @@ inputs:
 runs:
   using: composite
   steps:
-    # The cache holds binaries built against runner system libraries and CPU features,
-    # so key it on image revision, architecture, and the exposed CPU instruction set.
+    # CPU diagnostics are logged below; temporarily use the pre-CPU cache key to
+    # reproduce restores from the shared cache and compare runner CPU capabilities.
     - name: Resolve runner image
       id: runner-image
       shell: bash
@@ -55,7 +55,7 @@ runs:
         path: |
           ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
-        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}-${{ steps.runner-image.outputs.version }}-${{ runner.arch }}-${{ steps.runner-image.outputs.cpu-features }}
+        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}
 
     - name: Deploy cache to system
       if: steps.env-cache.outputs.cache-hit == 'true'
@@ -414,4 +414,4 @@ runs:
         path: |
           ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
-        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}-${{ steps.runner-image.outputs.version }}-${{ runner.arch }}-${{ steps.runner-image.outputs.cpu-features }}
+        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}
