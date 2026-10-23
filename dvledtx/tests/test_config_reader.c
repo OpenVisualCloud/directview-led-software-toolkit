@@ -23,6 +23,7 @@
 #include <unistd.h>
 
 #include "util/config_reader.h"
+#include "util/ptp_clock.h"
 #include "app_context.h"
 
 /* --------------------------------------------------------------------------
@@ -530,6 +531,281 @@ static void test_parse_ptp_key_without_colon_keeps_default(void **state)
     assert_int_equal(ret, 0);
     assert_false(cfg.ptp_enable);
     dvledtx_config_free(&cfg);
+}
+
+/* ==========================================================================
+ * PTP "mode" / grandmaster time source
+ * ========================================================================== */
+
+/* Absent "mode" keeps the historical behaviour: slave to an external GM. */
+static void test_parse_ptp_mode_defaults_to_slave(void **state)
+{
+    (void)state;
+    char *path = write_ptp_config("\"ptp\": {\"enable\":true},");
+    assert_non_null(path);
+
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_int_equal(cfg.ptp_mode, DVLEDTX_PTP_MODE_SLAVE);
+    assert_string_equal(cfg.ptp_phc, "");
+    assert_int_equal(cfg.ptp_phc_interval_ms, 0);
+    dvledtx_config_free(&cfg);
+}
+
+static void test_parse_ptp_mode_grandmaster_with_interface(void **state)
+{
+    (void)state;
+    char *path = write_ptp_config(
+        "\"ptp\": {\"enable\":true,\"mode\":\"grandmaster\","
+        "\"phc_interface\":\"enp4s0\",\"phc_interval_ms\":500},");
+    assert_non_null(path);
+
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_true(cfg.ptp_enable);
+    assert_int_equal(cfg.ptp_mode, DVLEDTX_PTP_MODE_GRANDMASTER);
+    assert_string_equal(cfg.ptp_phc, "enp4s0");
+    assert_int_equal(cfg.ptp_phc_interval_ms, 500);
+    dvledtx_config_free(&cfg);
+}
+
+/* phc_device takes precedence over phc_interface — both land in ptp_phc. */
+static void test_parse_ptp_phc_device_preferred_over_interface(void **state)
+{
+    (void)state;
+    char *path = write_ptp_config(
+        "\"ptp\": {\"enable\":true,\"mode\":\"grandmaster\","
+        "\"phc_device\":\"/dev/ptp3\",\"phc_interface\":\"enp4s0\"},");
+    assert_non_null(path);
+
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_string_equal(cfg.ptp_phc, "/dev/ptp3");
+    dvledtx_config_free(&cfg);
+}
+
+static void test_parse_ptp_mode_unknown_is_rejected(void **state)
+{
+    (void)state;
+    char *path = write_ptp_config("\"ptp\": {\"enable\":true,\"mode\":\"master\"},");
+    assert_non_null(path);
+
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, -1);
+}
+
+/* The PHC reference comes from a config file, so anything that is not a
+ * /dev/ptpN path or a kernel interface name must be refused before open(). */
+static void test_ptp_clock_device_ref_validation(void **state)
+{
+    (void)state;
+    assert_true(ptp_clock_valid_device_ref("/dev/ptp0"));
+    assert_true(ptp_clock_valid_device_ref("/dev/ptp11"));
+    assert_true(ptp_clock_valid_device_ref("enp4s0"));
+    assert_true(ptp_clock_valid_device_ref("eth0.100"));
+
+    assert_false(ptp_clock_valid_device_ref(NULL));
+    assert_false(ptp_clock_valid_device_ref(""));
+    assert_false(ptp_clock_valid_device_ref("/dev/ptp"));
+    assert_false(ptp_clock_valid_device_ref("/dev/ptp0x"));
+    assert_false(ptp_clock_valid_device_ref("/dev/../etc/passwd"));
+    assert_false(ptp_clock_valid_device_ref("../../dev/ptp0"));
+    assert_false(ptp_clock_valid_device_ref("eth0; reboot"));
+}
+
+static void test_validate_grandmaster_rejects_bad_phc_ref(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.ptp_enable = true;
+    cfg.ptp_mode   = DVLEDTX_PTP_MODE_GRANDMASTER;
+    snprintf(cfg.ptp_phc, sizeof(cfg.ptp_phc), "/etc/shadow");
+    assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
+}
+
+static void test_validate_grandmaster_rejects_out_of_range_interval(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.ptp_enable = true;
+    cfg.ptp_mode   = DVLEDTX_PTP_MODE_GRANDMASTER;
+    cfg.ptp_phc_interval_ms = 50;
+    assert_int_equal(validate_tx_config(&cfg), -1);
+
+    cfg.ptp_phc_interval_ms = 20000;
+    assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
+}
+
+static void test_validate_grandmaster_accepts_valid_phc(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.ptp_enable = true;
+    cfg.ptp_mode   = DVLEDTX_PTP_MODE_GRANDMASTER;
+    snprintf(cfg.ptp_phc, sizeof(cfg.ptp_phc), "/dev/ptp0");
+    cfg.ptp_phc_interval_ms = 1000;
+    assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
+}
+
+/* "slave" is accepted explicitly, not only as the absent-key default. */
+static void test_parse_ptp_mode_slave_explicit(void **state)
+{
+    (void)state;
+    char *path = write_ptp_config(
+        "\"ptp\": {\"enable\":true,\"mode\":\"slave\"},");
+    assert_non_null(path);
+
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_int_equal(cfg.ptp_mode, DVLEDTX_PTP_MODE_SLAVE);
+    dvledtx_config_free(&cfg);
+}
+
+/* A negative interval is clamped to 0 ("use the default") rather than being
+ * carried through to the validator as a nonsense value. */
+static void test_parse_ptp_negative_interval_clamped_to_zero(void **state)
+{
+    (void)state;
+    char *path = write_ptp_config(
+        "\"ptp\": {\"enable\":true,\"mode\":\"grandmaster\","
+        "\"phc_interval_ms\":-500},");
+    assert_non_null(path);
+
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_int_equal(cfg.ptp_phc_interval_ms, 0);
+    dvledtx_config_free(&cfg);
+}
+
+/* An empty phc reference is legal: the module auto-selects the host's only
+ * PHC, so validation must not demand an explicit device. */
+static void test_validate_grandmaster_accepts_empty_phc_for_autoselect(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.ptp_enable = true;
+    cfg.ptp_mode   = DVLEDTX_PTP_MODE_GRANDMASTER;
+    cfg.ptp_phc[0] = '\0';
+    cfg.ptp_phc_interval_ms = 0;
+    assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
+}
+
+/* 100..10000 inclusive, or 0. The edges are where an off-by-one would hide. */
+static void test_validate_grandmaster_interval_boundaries(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.ptp_enable = true;
+    cfg.ptp_mode   = DVLEDTX_PTP_MODE_GRANDMASTER;
+    snprintf(cfg.ptp_phc, sizeof(cfg.ptp_phc), "enp4s0");
+
+    cfg.ptp_phc_interval_ms = 100;
+    assert_int_equal(validate_tx_config(&cfg), 0);
+    cfg.ptp_phc_interval_ms = 10000;
+    assert_int_equal(validate_tx_config(&cfg), 0);
+
+    cfg.ptp_phc_interval_ms = 99;
+    assert_int_equal(validate_tx_config(&cfg), -1);
+    cfg.ptp_phc_interval_ms = 10001;
+    assert_int_equal(validate_tx_config(&cfg), -1);
+    dvledtx_config_free(&cfg);
+}
+
+/* The PHC checks are grandmaster-only. In slave mode the fields are unused,
+ * so stale values left in the config must not fail an otherwise valid run. */
+static void test_validate_slave_mode_ignores_phc_fields(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+    cfg.ptp_enable = true;
+    cfg.ptp_mode   = DVLEDTX_PTP_MODE_SLAVE;
+    snprintf(cfg.ptp_phc, sizeof(cfg.ptp_phc), "/etc/shadow");
+    cfg.ptp_phc_interval_ms = 999999;
+    assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
+}
+
+/* Interface names are bounded by IFNAMSIZ (16 incl. NUL), so 15 characters is
+ * the longest acceptable name. */
+static void test_ptp_clock_device_ref_length_boundary(void **state)
+{
+    (void)state;
+    char name[64];
+
+    memset(name, 'a', 15); name[15] = '\0';
+    assert_true(ptp_clock_valid_device_ref(name));
+
+    memset(name, 'a', 16); name[16] = '\0';
+    assert_false(ptp_clock_valid_device_ref(name));
+}
+
+/* Multiple interfaces in grandmaster mode warns but still validates, so the
+ * config keeps working once MTL guards mt_ptp_parse. */
+static void test_validate_grandmaster_multi_nic_warns_but_passes(void **state)
+{
+    (void)state;
+    struct dvledtx_config cfg;
+    fill_valid_config(&cfg);
+
+    cfg.interface_name = realloc(cfg.interface_name, 2 * sizeof(*cfg.interface_name));
+    cfg.interface_sip  = realloc(cfg.interface_sip,  2 * sizeof(*cfg.interface_sip));
+    cfg.interface_dip  = realloc(cfg.interface_dip,  2 * sizeof(*cfg.interface_dip));
+    assert_non_null(cfg.interface_name);
+    assert_non_null(cfg.interface_sip);
+    assert_non_null(cfg.interface_dip);
+    snprintf(cfg.interface_name[1], sizeof(cfg.interface_name[1]), "0000:06:00.1");
+    snprintf(cfg.interface_sip[1],  sizeof(cfg.interface_sip[1]),  "192.168.50.30");
+    snprintf(cfg.interface_dip[1],  sizeof(cfg.interface_dip[1]),  "239.168.85.20");
+    cfg.nic_cap   = 2;
+    cfg.nic_count = 2;
+
+    cfg.ptp_enable = true;
+    cfg.ptp_mode   = DVLEDTX_PTP_MODE_GRANDMASTER;
+    snprintf(cfg.ptp_phc, sizeof(cfg.ptp_phc), "enp4s0");
+    assert_int_equal(validate_tx_config(&cfg), 0);
+    dvledtx_config_free(&cfg);
+}
+
+/* Opening a PHC that does not exist must fail cleanly, and the NULL handle
+ * must then be safe to pass to every other entry point — MTL calls the time
+ * function from the dataplane with whatever priv it was given. */
+static void test_ptp_clock_open_nonexistent_device_fails(void **state)
+{
+    (void)state;
+    struct ptp_clock *clk = ptp_clock_open("/dev/ptp99", 1000);
+    assert_null(clk);
+    ptp_clock_close(clk);
+}
+
+static void test_ptp_clock_null_handle_is_safe(void **state)
+{
+    (void)state;
+    assert_string_equal(ptp_clock_device(NULL), "");
+    assert_int_equal((int)ptp_clock_get_time_ns(NULL), 0);
+    assert_int_equal(ptp_clock_stats(NULL, NULL, NULL, NULL), -1);
+    ptp_clock_close(NULL);
 }
 
 /* ==========================================================================
@@ -2095,6 +2371,23 @@ int main(void)
         cmocka_unit_test(test_parse_ptp_numeric_value_falls_back_to_default),
         cmocka_unit_test(test_parse_ptp_string_value_falls_back_to_default),
         cmocka_unit_test(test_parse_ptp_key_without_colon_keeps_default),
+        cmocka_unit_test(test_parse_ptp_mode_defaults_to_slave),
+        cmocka_unit_test(test_parse_ptp_mode_grandmaster_with_interface),
+        cmocka_unit_test(test_parse_ptp_phc_device_preferred_over_interface),
+        cmocka_unit_test(test_parse_ptp_mode_unknown_is_rejected),
+        cmocka_unit_test(test_ptp_clock_device_ref_validation),
+        cmocka_unit_test(test_validate_grandmaster_rejects_bad_phc_ref),
+        cmocka_unit_test(test_validate_grandmaster_rejects_out_of_range_interval),
+        cmocka_unit_test(test_validate_grandmaster_accepts_valid_phc),
+        cmocka_unit_test(test_parse_ptp_mode_slave_explicit),
+        cmocka_unit_test(test_parse_ptp_negative_interval_clamped_to_zero),
+        cmocka_unit_test(test_validate_grandmaster_accepts_empty_phc_for_autoselect),
+        cmocka_unit_test(test_validate_grandmaster_interval_boundaries),
+        cmocka_unit_test(test_validate_slave_mode_ignores_phc_fields),
+        cmocka_unit_test(test_ptp_clock_device_ref_length_boundary),
+        cmocka_unit_test(test_validate_grandmaster_multi_nic_warns_but_passes),
+        cmocka_unit_test(test_ptp_clock_open_nonexistent_device_fails),
+        cmocka_unit_test(test_ptp_clock_null_handle_is_safe),
         cmocka_unit_test(test_parse_hwaccel_absent_defaults_false),
         cmocka_unit_test(test_parse_hwaccel_true),
         cmocka_unit_test(test_parse_hwaccel_false),

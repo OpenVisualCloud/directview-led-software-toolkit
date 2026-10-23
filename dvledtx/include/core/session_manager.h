@@ -26,6 +26,7 @@
 
 // Forward declarations
 struct dvledtx_context;
+struct ptp_clock;
 
 /*
  * Shared decode context - ONE decoder feeds ALL N TX sessions.
@@ -137,6 +138,9 @@ typedef struct session_manager_s {
   struct shared_decode_ctx* shared_dec;
 
   mtl_handle mtl;   /* MTL library instance — owns all st20p_tx sessions */
+
+  /* PTP grandmaster mode only: local NIC PHC feeding mtl_init_params.ptp_get_time_fn */
+  struct ptp_clock* ptp_clk;
 
   bool running;
 } session_manager_t;

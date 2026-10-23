@@ -134,19 +134,41 @@ int open_ffmpeg_tx(struct st20p_tx_ctx* ctx) {
    * when the installed MTL FFmpeg plugin carries the PTP patch; if it doesn't,
    * av_opt_set_int() returns AVERROR_OPTION_NOT_FOUND, which we treat as a
    * benign "PTP not supported by this build" case so the app works whether or
-   * not the MTL plugin has the PTP patch applied. */
+   * not the MTL plugin has the PTP patch applied.
+   *
+   * Grandmaster mode cannot work here: it needs mtl_init_params.ptp_get_time_fn,
+   * a function pointer with no AVOption equivalent, and the plugin owns the
+   * mtl_init() call on this path. It requires -Denable_mtl_tx=true. */
+  if (ctx->app->ptp_enable && ctx->app->ptp_mode == DVLEDTX_PTP_MODE_GRANDMASTER) {
+    LOG_ERROR("ST20P TX(%d): ptp.mode 'grandmaster' is not supported by the "
+              "mtl_st20p muxer path — rebuild with -Denable_mtl_tx=true", ctx->idx);
+    avformat_free_context(ctx->out_fmt_ctx); ctx->out_fmt_ctx = NULL;
+    return -1;
+  }
   if (ctx->app->ptp_enable) {
     static const char* const ptp_opts[] = {"ptp_enable", "ptp_pi", "ptp_unicast"};
     const int ptp_vals[] = {1, ctx->app->ptp_pi ? 1 : 0, ctx->app->ptp_unicast ? 1 : 0};
+    bool ptp_opts_ok = true;
     for (size_t i = 0; i < FF_ARRAY_ELEMS(ptp_opts); i++) {
       ret = av_opt_set_int(ctx->out_fmt_ctx->priv_data, ptp_opts[i], ptp_vals[i], 0);
       if (ret == AVERROR_OPTION_NOT_FOUND) {
         LOG_INFO("ST20P TX(%d): PTP AVOptions unsupported by installed MTL plugin "
                  "(no PTP patch); continuing without built-in PTP", ctx->idx);
+        ptp_opts_ok = false;
         break;
       }
       if (ret < 0)
         LOG_WARN("ST20P TX(%d): av_opt_set_int %s failed (ret=%d)", ctx->idx, ptp_opts[i], ret);
+    }
+    /* ptp_enable only sets MTL_FLAG_PTP_*; without this the plugin leaves
+     * mtl_init_params.pacing at AUTO and the TX still paces off the TSC. */
+    if (ptp_opts_ok) {
+      ret = av_opt_set(ctx->out_fmt_ctx->priv_data, "pacing_way", "ptp", 0);
+      if (ret == AVERROR_OPTION_NOT_FOUND)
+        LOG_WARN("ST20P TX(%d): mtl_st20p muxer has no pacing_way AVOption; "
+                 "TX will keep TSC pacing despite PTP being enabled", ctx->idx);
+      else if (ret < 0)
+        LOG_WARN("ST20P TX(%d): av_opt_set pacing_way=ptp failed (ret=%d)", ctx->idx, ret);
     }
   }
 

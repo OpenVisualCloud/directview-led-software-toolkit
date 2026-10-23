@@ -13,7 +13,8 @@ tx_test_inc = include_directories('../include', '/usr/local/include/mtl')
 tx_test_c_args = ['-DALLOW_EXPERIMENTAL_API']
 
 tx_test_config_reader = executable('test_config_reader',
-  sources: ['test_config_reader.c', '../src/util/config_reader.c', '../src/util/logger.c'],
+  sources: ['test_config_reader.c', '../src/util/config_reader.c', '../src/util/logger.c',
+            '../src/util/ptp_clock.c'],
   include_directories: tx_test_inc,
   dependencies: tx_test_deps,
   c_args: tx_test_c_args + ['-DFIXTURE_DIR="' + tx_fixture_dir + '"'],
@@ -30,6 +31,19 @@ tx_test_logger = executable('test_logger',
   build_by_default: false
 )
 test('logger', tx_test_logger)
+
+# ptp_clock.c is included directly by the test to reach its static servo
+# functions; clock_gettime is wrapped to make the served time deterministic.
+tx_test_ptp_clock = executable('test_ptp_clock',
+  sources: ['test_ptp_clock.c', '../src/util/logger.c'],
+  include_directories: tx_test_inc,
+  dependencies: [m_dep, pthread_dep, cmocka_dep],
+  c_args: tx_test_c_args,
+  link_args: ['-Wl,--wrap=clock_gettime'],
+  install: false,
+  build_by_default: false
+)
+test('ptp_clock', tx_test_ptp_clock)
 
 tx_test_ffmpeg_decoder = executable('test_ffmpeg_decoder',
   sources: ['test_ffmpeg_decoder.c', '../src/ffmpeg/ffmpeg_decoder.c',
@@ -68,7 +82,7 @@ test('ffmpeg_tx', tx_test_ffmpeg_tx)
 # session_manager.c compiled in; ffmpeg_decoder.c excluded — mocks provided in the test file.
 tx_test_session_manager = executable('test_session_manager',
   sources: ['test_session_manager.c', '../src/core/session_manager.c',
-            '../src/mtl/mtl_tx.c', '../src/util/logger.c'],
+            '../src/mtl/mtl_tx.c', '../src/util/ptp_clock.c', '../src/util/logger.c'],
   include_directories: tx_test_inc,
   dependencies: tx_test_deps + (mtl_dep.found() ? [mtl_dep] : []),
   c_args: tx_test_c_args,
@@ -127,7 +141,8 @@ test('ffmpeg_watchdog', tx_test_ffmpeg_watchdog)
 
 if mtl_dep.found()
   tx_test_mtl = executable('test_mtl_tx',
-    sources: ['test_mtl_tx.c', '../src/mtl/mtl_tx.c', '../src/util/logger.c'],
+    sources: ['test_mtl_tx.c', '../src/mtl/mtl_tx.c', '../src/util/ptp_clock.c',
+              '../src/util/logger.c'],
     include_directories: [tx_test_inc, include_directories('/usr/local/include/mtl')],
     dependencies: tx_test_deps + [mtl_dep],
     c_args: tx_test_c_args + ['-DENABLE_MTL_TX'],
@@ -137,7 +152,8 @@ if mtl_dep.found()
   test('mtl_tx', tx_test_mtl)
 
   tx_test_mtl_stub = executable('test_mtl_tx_stub',
-    sources: ['test_mtl_tx_stub.c', '../src/mtl/mtl_tx.c', '../src/util/logger.c'],
+    sources: ['test_mtl_tx_stub.c', '../src/mtl/mtl_tx.c', '../src/util/ptp_clock.c',
+              '../src/util/logger.c'],
     include_directories: [tx_test_inc, include_directories('/usr/local/include/mtl')],
     dependencies: tx_test_deps + [mtl_dep],
     c_args: tx_test_c_args + ['-DENABLE_MTL_TX'],
