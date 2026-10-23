@@ -30,12 +30,24 @@ inputs:
 runs:
   using: composite
   steps:
-    # The cache holds binaries built against the runner's system libraries, so key it
-    # on the runner image (e.g. ubuntu24) as well; runner.os alone is just "Linux".
+    # Keep CPU diagnostics to compare runner capabilities. New cache entries are
+    # isolated by image revision and architecture; the legacy key is fallback-only
+    # so existing shared caches can still be diagnosed and rebuilt if invalid.
     - name: Resolve runner image
       id: runner-image
       shell: bash
-      run: echo "name=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
+      run: |
+        echo "name=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
+        echo "version=${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+        if command -v lscpu >/dev/null 2>&1; then
+          CPU_INFO=$(LC_ALL=C lscpu)
+          printf '%s\n' "$CPU_INFO" | grep -E '^(Architecture|Model name|Flags|Features):' || true
+          CPU_FEATURES=$(printf '%s\n' "$CPU_INFO" | awk -F: '/^(Architecture|Flags|Features):/ {gsub(/^[[:space:]]+/, "", $2); print $1 ":" $2}' | sha256sum | cut -c1-16)
+        else
+          echo "[WARN] lscpu is unavailable; using machine architecture only for CPU cache identity."
+          CPU_FEATURES=$(uname -m | sha256sum | cut -c1-16)
+        fi
+        echo "cpu-features=$CPU_FEATURES" >> "$GITHUB_OUTPUT"
 
     - name: Restore environment cache
       id: env-cache
@@ -44,10 +56,12 @@ runs:
         path: |
           ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
-        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}
+        key: env-cpu-${{ steps.runner-image.outputs.cpu-features }}-env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}-${{ steps.runner-image.outputs.version }}-${{ runner.arch }}
+        restore-keys: |
+          env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}
 
     - name: Deploy cache to system
-      if: steps.env-cache.outputs.cache-hit == 'true'
+      if: steps.env-cache.outputs.cache-matched-key != ''
       shell: bash
       run: |
         echo "===== Deploying cached deps to system ====="
@@ -58,9 +72,17 @@ runs:
         fi
 
         # Bulk copy the full DESTDIR tree to /
-        sudo cp -rp "$DEPS_DIR/." /
-        sudo ldconfig
-        echo "  Cache deployed. Size: $(du -sh "$DEPS_DIR" | cut -f1)"
+        if sudo cp -rp "$DEPS_DIR/." /; then
+          echo "  Cache files copied to the system."
+        else
+          echo "  [WARN] Cache deployment was incomplete; runtime checks will determine whether to rebuild."
+        fi
+        if sudo ldconfig; then
+          echo "  Dynamic linker cache refreshed."
+        else
+          echo "  [WARN] ldconfig failed after cache deployment; runtime checks will determine whether to rebuild."
+        fi
+        echo "  Cache size: $(du -sh "$DEPS_DIR" 2>/dev/null | cut -f1 || echo unknown)"
 
         # --- Explicit FFmpeg binary copy and restore confirmation ---
         echo ""
@@ -71,20 +93,31 @@ runs:
         # Copy FFmpeg binary explicitly if found in DESTDIR snapshot
         if [ -n "$FFMPEG_SRC_BIN" ]; then
           DEST_BIN="/usr/local/bin/ffmpeg"
-          sudo cp -p "$FFMPEG_SRC_BIN" "$DEST_BIN"
-          echo "  [OK] Copied ffmpeg binary: $FFMPEG_SRC_BIN -> $DEST_BIN"
+          if sudo cp -p "$FFMPEG_SRC_BIN" "$DEST_BIN"; then
+            echo "  [OK] Copied ffmpeg binary: $FFMPEG_SRC_BIN -> $DEST_BIN"
+          else
+            echo "  [WARN] Failed to copy cached ffmpeg binary; build step will attempt a rebuild."
+          fi
         else
           echo "  [WARN] ffmpeg binary not found in cache snapshot ($DEPS_DIR)"
         fi
 
         # Copy FFmpeg shared libraries explicitly
         if [ -n "$FFMPEG_LIB_DIR" ]; then
-          sudo find "$FFMPEG_LIB_DIR" -name "libav*.so*" -o -name "libsw*.so*" | \
-            while read -r SOFILE; do
-              sudo cp -p "$SOFILE" /usr/local/lib/
-              echo "  [OK] Copied $(basename "$SOFILE")"
-            done
-          sudo ldconfig
+          if sudo find "$FFMPEG_LIB_DIR" -type f \( -name "libav*.so*" -o -name "libsw*.so*" \) -print0 | \
+            while IFS= read -r -d '' SOFILE; do
+              if sudo cp -p "$SOFILE" /usr/local/lib/; then
+                echo "  [OK] Copied $(basename "$SOFILE")"
+              else
+                echo "  [WARN] Failed to copy $(basename "$SOFILE"); build step will attempt a rebuild."
+              fi
+            done; then
+            if ! sudo ldconfig; then
+              echo "  [WARN] ldconfig failed after FFmpeg library copy."
+            fi
+          else
+            echo "  [WARN] Failed to restore some cached FFmpeg libraries."
+          fi
         else
           echo "  [WARN] FFmpeg lib dir not found in cache snapshot"
         fi
@@ -110,8 +143,7 @@ runs:
           ALL_OK=0
         fi
         if [ "$ALL_OK" -eq 0 ]; then
-          echo "ERROR: FFmpeg restore incomplete — cache may be corrupt."
-          exit 1
+          echo "  [WARN] FFmpeg restore incomplete — continuing to runtime validation and rebuild."
         fi
 
     - name: Install APT packages
@@ -252,9 +284,23 @@ runs:
       run: |
         echo "===== FFmpeg Setup ====="
         export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}
-        if pkg-config --exists libavformat libavcodec libavutil libavdevice 2>/dev/null; then
-          echo "  [OK] FFmpeg already installed — skipping build (cached)"
-          exit 0
+        FFMPEG_BIN=$(command -v ffmpeg 2>/dev/null || true)
+        if pkg-config --exists libavformat libavcodec libavutil libavdevice 2>/dev/null && [ -n "$FFMPEG_BIN" ]; then
+          echo "  Checking cached FFmpeg runtime: $FFMPEG_BIN"
+          if FFMPEG_VERSION_OUT=$(timeout 10s "$FFMPEG_BIN" -version </dev/null 2>&1); then
+            if printf '%s\n' "$FFMPEG_VERSION_OUT" | grep -q '^ffmpeg version '; then
+              FFMPEG_VERSION_LINE=${FFMPEG_VERSION_OUT%%$'\n'*}
+              echo "  $FFMPEG_VERSION_LINE"
+              echo "  [OK] Cached FFmpeg runtime is healthy — skipping build"
+              exit 0
+            fi
+            echo "  [WARN] Cached ffmpeg -version returned no recognizable version; rebuilding FFmpeg."
+          else
+            FFMPEG_VERSION_STATUS=$?
+            echo "  [WARN] Cached ffmpeg -version failed (status $FFMPEG_VERSION_STATUS); rebuilding FFmpeg."
+          fi
+        else
+          echo "  FFmpeg libraries or binary missing; building FFmpeg from source."
         fi
         echo "  Building FFmpeg $FFMPEG_VERSION with MTL plugin from source..."
         MTL_SOURCE="$RUNNER_TEMP/mtl-source"
@@ -272,6 +318,27 @@ runs:
         sudo make install
         sudo ldconfig
         echo "  FFmpeg installed."
+
+        FFMPEG_BIN=$(command -v ffmpeg 2>/dev/null || true)
+        if [ -z "$FFMPEG_BIN" ]; then
+          echo "ERROR: ffmpeg binary was not found after installation."
+          exit 1
+        fi
+        if FFMPEG_VERSION_OUT=$(timeout 10s "$FFMPEG_BIN" -version </dev/null 2>&1); then
+          :
+        else
+          FFMPEG_VERSION_STATUS=$?
+          echo "ERROR: rebuilt ffmpeg -version failed with status $FFMPEG_VERSION_STATUS."
+          printf '%s\n' "$FFMPEG_VERSION_OUT"
+          exit 1
+        fi
+        if ! printf '%s\n' "$FFMPEG_VERSION_OUT" | grep -q '^ffmpeg version '; then
+          echo "ERROR: rebuilt ffmpeg returned no recognizable version string."
+          printf '%s\n' "$FFMPEG_VERSION_OUT"
+          exit 1
+        fi
+        FFMPEG_VERSION_LINE=${FFMPEG_VERSION_OUT%%$'\n'*}
+        echo "  [OK] Rebuilt FFmpeg runtime: $FFMPEG_VERSION_LINE"
 
     - name: Verify build dependencies
       shell: bash
@@ -302,7 +369,7 @@ runs:
         # Locate the binary first
         FFMPEG_PATH=$(which ffmpeg 2>/dev/null || true)
         if [ -z "$FFMPEG_PATH" ]; then
-          echo "ERROR: ffmpeg binary is not found in PATH."
+          echo "ERROR: ffmpeg not found in PATH (which ffmpeg returned nothing)."
           echo "  PATH=$PATH"
           exit 1
         fi
@@ -311,62 +378,47 @@ runs:
         # Run ffmpeg -version and print full output
         echo "  --- ffmpeg -version output ---"
         if FFMPEG_VERSION_OUT=$(timeout 10s "$FFMPEG_PATH" -version </dev/null 2>&1); then
-          FFMPEG_VER=$(printf '%s\n' "$FFMPEG_VERSION_OUT" | head -1)
-          if [ -n "$FFMPEG_VER" ]; then
-            echo "$FFMPEG_VERSION_OUT"
-            echo "  [OK] ffmpeg version: $FFMPEG_VER"
-          else
-            echo "  [WARN] ffmpeg binary found at $FFMPEG_PATH, but -version returned no output; continuing verification."
-          fi
+          :
         else
           FFMPEG_VERSION_STATUS=$?
-          if [ "$FFMPEG_VERSION_STATUS" -eq 124 ]; then
-            echo "  [WARN] ffmpeg binary found at $FFMPEG_PATH, but -version timed out after 10 seconds; continuing verification."
-          else
-            echo "  [WARN] ffmpeg binary found at $FFMPEG_PATH, but -version failed with status $FFMPEG_VERSION_STATUS; continuing verification."
-          fi
+          echo "ERROR: ffmpeg -version failed with status $FFMPEG_VERSION_STATUS."
+          printf '%s\n' "$FFMPEG_VERSION_OUT"
+          exit 1
         fi
+        echo "$FFMPEG_VERSION_OUT"
+        FFMPEG_VER=$(echo "$FFMPEG_VERSION_OUT" | head -1)
+        if [ -z "$FFMPEG_VER" ]; then
+          echo "ERROR: ffmpeg -version returned no output."
+          exit 1
+        fi
+        echo "  [OK] ffmpeg version: $FFMPEG_VER"
 
         # Check MTL device is registered
         echo "  --- ffmpeg -devices output ---"
         if DEVICES=$(timeout 10s "$FFMPEG_PATH" -devices </dev/null 2>&1); then
-          if [ -n "$DEVICES" ]; then
-            DEVICES_CHECKED=1
-          else
-            DEVICES_CHECKED=0
-            echo "  [WARN] ffmpeg binary found at $FFMPEG_PATH, but -devices returned no output; skipping device registration checks."
-          fi
+          :
         else
           FFMPEG_STATUS=$?
-          DEVICES_CHECKED=0
-          if [ "$FFMPEG_STATUS" -eq 124 ]; then
-            echo "  [WARN] ffmpeg binary found at $FFMPEG_PATH, but -devices timed out after 10 seconds; skipping device registration checks."
-          elif [ "$FFMPEG_STATUS" -eq 132 ]; then
-            echo "  [WARN] ffmpeg binary found at $FFMPEG_PATH, but -devices terminated with SIGILL (status 132); skipping device registration checks."
-          else
-            echo "  [WARN] ffmpeg binary found at $FFMPEG_PATH, but -devices failed with status $FFMPEG_STATUS; skipping device registration checks."
-          fi
+          echo "ERROR: ffmpeg -devices failed with status $FFMPEG_STATUS."
+          printf '%s\n' "$DEVICES"
+          exit 1
         fi
-        if [ "$DEVICES_CHECKED" -eq 1 ]; then
-          echo "$DEVICES"
-          if echo "$DEVICES" | grep -qi "mtl"; then
-            MTL_DEVICES=$(echo "$DEVICES" | grep -i "mtl")
-            echo "  [OK] MTL device(s) registered in FFmpeg avdevices:"
-            echo "$MTL_DEVICES" | sed 's/^/    /'
-          else
-            echo "ERROR: FFmpeg MTL plugin not found after build."
-            exit 1
-          fi
-
-          # Check x11grab device is registered (required for screen-capture input_mode)
-          if echo "$DEVICES" | grep -qi "x11grab"; then
-            echo "  [OK] x11grab device registered in FFmpeg avdevices"
-          else
-            echo "ERROR: FFmpeg x11grab device not found after build."
-            exit 1
-          fi
+        echo "$DEVICES"
+        if echo "$DEVICES" | grep -qi "mtl"; then
+          MTL_DEVICES=$(echo "$DEVICES" | grep -i "mtl")
+          echo "  [OK] MTL device(s) registered in FFmpeg avdevices:"
+          echo "$MTL_DEVICES" | sed 's/^/    /'
         else
-          echo "  [WARN] FFmpeg MTL and x11grab registration could not be verified."
+          echo "ERROR: FFmpeg MTL plugin not found after build."
+          exit 1
+        fi
+
+        # Check x11grab device is registered (required for screen-capture input_mode)
+        if echo "$DEVICES" | grep -qi "x11grab"; then
+          echo "  [OK] x11grab device registered in FFmpeg avdevices"
+        else
+          echo "ERROR: FFmpeg x11grab device not found after build."
+          exit 1
         fi
 
     - name: Report cache size
@@ -383,4 +435,4 @@ runs:
         path: |
           ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
-        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}
+        key: env-cpu-${{ steps.runner-image.outputs.cpu-features }}-env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}-${{ steps.runner-image.outputs.version }}-${{ runner.arch }}
