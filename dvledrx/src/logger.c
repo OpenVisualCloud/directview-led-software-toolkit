@@ -139,6 +139,7 @@ bool logger_path_is_safe(const char* path, char* why, size_t why_len) {
     }
     if (strcmp(real, "/") == 0) break;
     char* s = strrchr(real, '/');
+    if (!s) break;
     if (s == real) s[1] = '\0';
     else *s = '\0';
   }
@@ -177,8 +178,10 @@ static int gzip_file(const char* src, const char* dst) {
     close(in);
     return -1;
   }
-  gzFile gz = gzdopen(out, "wb6");
-  if (!gz) {
+  z_stream zs;
+  memset(&zs, 0, sizeof(zs));
+  /* windowBits 15 + 16 selects the gzip wrapper. */
+  if (deflateInit2(&zs, 6, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
     close(out);
     close(in);
     unlink(tmp);
@@ -186,16 +189,38 @@ static int gzip_file(const char* src, const char* dst) {
   }
 
   int rc = 0;
-  char buf[64 * 1024];
-  ssize_t n;
-  while ((n = read(in, buf, sizeof(buf))) > 0) {
-    if (gzwrite(gz, buf, (unsigned)n) != (int)n) {
+  int flush = Z_NO_FLUSH;
+  unsigned char ibuf[32 * 1024], obuf[32 * 1024];
+  while (rc == 0 && flush != Z_FINISH) {
+    ssize_t n = read(in, ibuf, sizeof(ibuf));
+    if (n < 0) {
       rc = -1;
       break;
     }
+    flush = (n == 0) ? Z_FINISH : Z_NO_FLUSH;
+    zs.next_in = ibuf;
+    zs.avail_in = (uInt)n;
+    do {
+      zs.next_out = obuf;
+      zs.avail_out = sizeof(obuf);
+      if (deflate(&zs, flush) == Z_STREAM_ERROR) {
+        rc = -1;
+        break;
+      }
+      size_t have = sizeof(obuf) - zs.avail_out;
+      for (size_t off = 0; off < have;) {
+        ssize_t w = write(out, obuf + off, have - off);
+        if (w < 0) {
+          if (errno == EINTR) continue;
+          rc = -1;
+          break;
+        }
+        off += (size_t)w;
+      }
+    } while (rc == 0 && zs.avail_out == 0);
   }
-  if (n < 0) rc = -1;
-  if (gzclose(gz) != Z_OK) rc = -1; /* also closes out */
+  deflateEnd(&zs);
+  if (close(out) != 0) rc = -1;
   close(in);
   if (rc == 0 && rename(tmp, dst) != 0) rc = -1;
   if (rc != 0) unlink(tmp);

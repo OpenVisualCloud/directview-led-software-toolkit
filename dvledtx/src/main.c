@@ -340,9 +340,10 @@ int main(int argc, char** argv) {
 cleanup:
   /* Stop and cleanup session manager */
   session_manager_cleanup(&session_manager);
-  dvledtx_context_free(&app);
   LOG_INFO("dvledtx shutdown complete");
 cleanup_logger:
+  /* app was zeroed at start, so this is safe on every exit path */
+  dvledtx_context_free(&app);
   /* Cleanup logger */
   logger_cleanup();
   /* Close log file if opened */

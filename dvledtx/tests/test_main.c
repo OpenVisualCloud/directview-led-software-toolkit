@@ -38,6 +38,7 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <getopt.h>
 #include <arpa/inet.h>
 
@@ -93,6 +94,7 @@ static int  stub_load_and_apply_config_ret   = 0;
 static bool  stub_load_config_set_ips        = true;
 static int   stub_load_config_test_time_s    = 0;
 static bool  stub_load_config_set_exit       = true; /* set app->exit=true immediately */
+static void* stub_loaded_nics                = NULL; /* nics allocated by the load stub */
 
 int peek_config_log_file(const char* f, char* buf, size_t sz)
 {
@@ -115,6 +117,7 @@ int load_and_apply_config(struct dvledtx_context* app, const char* f)
          * infinite transmit loop and hang the whole test binary). */
         dvledtx_context_free(app);
         dvledtx_context_alloc(app, 1, 1);
+        stub_loaded_nics = app->nics;
         if (stub_load_config_set_ips) {
             strncpy(app->nics[0].sip_addr_str, "192.168.50.29", sizeof(app->nics[0].sip_addr_str) - 1);
             strncpy(app->nics[0].dip_addr_str, "239.168.85.20", sizeof(app->nics[0].dip_addr_str) - 1);
@@ -159,6 +162,17 @@ int resolve_ip_addrs(struct dvledtx_context* ctx) {
  * g_dvledtx_signal_exit (from main.c) is visible. */
 static void reset_stubs(void);
 
+/* main.c's dvledtx_context_free() calls are routed here to check nothing leaks. */
+static int  ctx_free_calls      = 0;
+static bool ctx_freed_load_nics = false;
+static void tracked_context_free(struct dvledtx_context* ctx)
+{
+    ctx_free_calls++;
+    if (ctx != NULL && ctx->nics != NULL && ctx->nics == stub_loaded_nics)
+        ctx_freed_load_nics = true;
+    dvledtx_context_free(ctx);
+}
+
 /* ===========================================================================
  * Include production source with main() renamed so our cmocka main() can
  * coexist.  After this point all static symbols from main.c
@@ -167,7 +181,9 @@ static void reset_stubs(void);
  * =========================================================================== */
 
 #define main tx_app_real_main
+#define dvledtx_context_free tracked_context_free
 #include "../src/main.c"
+#undef dvledtx_context_free
 #undef main
 
 static void reset_stubs(void)
@@ -180,6 +196,9 @@ static void reset_stubs(void)
     stub_load_config_set_ips       = true;
     stub_load_config_test_time_s   = 0;
     stub_load_config_set_exit      = true;
+    stub_loaded_nics               = NULL;
+    ctx_free_calls                 = 0;
+    ctx_freed_load_nics            = false;
     g_dvledtx_signal_exit           = 0;
     g_test_exit                    = false;
 }
@@ -322,7 +341,8 @@ static void test_sig_handler_sets_flag_and_apply_propagates(void **state)
 
     /* Simulate a signal and apply */
     dvledtx_sig_handler(SIGINT);
-    assert_int_equal(g_dvledtx_signal_exit, 1);
+    int signal_exit = g_dvledtx_signal_exit;
+    assert_int_equal(signal_exit, 1);
     dvledtx_apply_pending_signal_exit();
     assert_true(session_manager_should_exit());
     assert_true(app.exit);
@@ -359,6 +379,16 @@ static void test_print_help_does_not_crash(void **state)
  * The stubs are reset via reset_stubs() before each test.
  * =========================================================================== */
 
+/* Create an empty owner-only temp file from a mkstemp() template (fails the test on error). */
+static void make_private_tmpfile(char *tmpl)
+{
+    mode_t old_mask = umask(077);
+    int fd = mkstemp(tmpl);
+    umask(old_mask);
+    if (fd < 0) fail_msg("mkstemp(%s) failed", tmpl);
+    close(fd);
+}
+
 /* No config file → print_help + return -1 */
 static void test_main_no_config_returns_minus1(void **state)
 {
@@ -381,6 +411,8 @@ static void test_main_happy_path_exits_immediately(void **state)
     char *argv[] = {"dvledtx", "--config", "test.json", NULL};
     int ret = tx_app_real_main(3, argv);
     assert_int_equal(ret, 0);
+    assert_true(ctx_freed_load_nics);
+    assert_int_equal(ctx_free_calls, 1);
 }
 
 /* Regression test for commit f74a727: avdevice_register_all() must be
@@ -440,6 +472,7 @@ static void test_main_session_init_fails(void **state)
     char *argv[] = {"dvledtx", "--config", "test.json", NULL};
     int ret = tx_app_real_main(3, argv);
     assert_int_equal(ret, -1);
+    assert_true(ctx_freed_load_nics); /* no leak when the config was already loaded */
 }
 
 /* session_manager_start fails → return -1 */
@@ -452,6 +485,7 @@ static void test_main_session_start_fails(void **state)
     char *argv[] = {"dvledtx", "--config", "test.json", NULL};
     int ret = tx_app_real_main(3, argv);
     assert_int_equal(ret, -1);
+    assert_true(ctx_freed_load_nics);
 }
 
 /* resolve_ip_addrs fails (bad IPs injected by stub) → return -1 */
@@ -464,6 +498,7 @@ static void test_main_resolve_ip_fails(void **state)
     char *argv[] = {"dvledtx", "--config", "test.json", NULL};
     int ret = tx_app_real_main(3, argv);
     assert_int_equal(ret, -1);
+    assert_true(ctx_freed_load_nics); /* no leak when the config was already loaded */
 }
 
 /* Log file redirection via peek_config_log_file → exercises the log block */
@@ -473,9 +508,7 @@ static void test_main_with_log_file_redirect(void **state)
     reset_stubs();
     stub_peek_config_log_file_ret = 0;
     char log_path[] = "/tmp/dvledtx_test_log_XXXXXX";
-    int log_fd = mkstemp(log_path);
-    assert_true(log_fd >= 0);
-    close(log_fd);
+    make_private_tmpfile(log_path);
     strncpy(stub_peek_config_log_file_buf, log_path,
             sizeof(stub_peek_config_log_file_buf) - 1);
     stub_load_config_set_exit = true;
@@ -527,12 +560,11 @@ static void run_parse_args_in_child(char **argv, int argc,
 
     /* Parent: drain pipe, then waitpid. */
     close(pipefd[1]);
-    size_t total = 0;
     if (out_buf != NULL && out_size > 0) {
-        out_buf[0] = '\0';
-        ssize_t n;
-        while (total + 1 < out_size &&
-               (n = read(pipefd[0], out_buf + total, out_size - 1 - total)) > 0) {
+        size_t cap = out_size - 1, total = 0;
+        while (total < cap) {
+            ssize_t n = read(pipefd[0], out_buf + total, cap - total);
+            if (n <= 0) break;
             total += (size_t)n;
         }
         out_buf[total] = '\0';
@@ -592,9 +624,7 @@ static void test_main_with_log_env_variable(void **state)
     stub_peek_config_log_file_ret = -1;
     stub_load_config_set_exit = true;
     char env_log_path[] = "/tmp/dvledtx_test_env_log_XXXXXX";
-    int env_fd = mkstemp(env_log_path);
-    assert_true(env_fd >= 0);
-    close(env_fd);
+    make_private_tmpfile(env_log_path);
     setenv("LOG_FILE", env_log_path, 1);
     optind = 1;
     char *argv[] = {"dvledtx", "--config", "test.json", NULL};

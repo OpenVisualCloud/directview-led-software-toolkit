@@ -67,6 +67,7 @@ struct st20p_rx_ctx {
   bool            disp_thread_started;
   pthread_mutex_t disp_lock;
   pthread_cond_t  disp_cond;
+  pthread_mutex_t put_lock;         /* serialises st20p_rx_put_frame() across threads */
   struct st_frame* disp_pending;    /* newest MTL frame awaiting render (owned until put) */
   int             disp_skipped;     /* frames superseded before render (under disp_lock) */
 };

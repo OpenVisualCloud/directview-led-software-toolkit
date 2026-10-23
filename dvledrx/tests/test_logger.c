@@ -8,6 +8,7 @@
 #include "test_common.h"
 
 #include <fcntl.h>
+#include <stdint.h>
 #include <zlib.h>
 
 #include "logger.h"
@@ -83,7 +84,7 @@ static void test_path_is_safe_world_writable_parent(void) {
   REQUIRE(mkdir("open/inner", 0750) == 0);
   CHECK(!logger_path_is_safe("open/app.log", why, sizeof(why)));
   CHECK(!logger_path_is_safe("open/inner/app.log", why, sizeof(why))); /* any ancestor */
-  chmod("open", 0750);
+  REQUIRE(chmod("open", 0750) == 0);
   CHECK(logger_path_is_safe("open/inner/app.log", why, sizeof(why)));
 }
 
@@ -231,7 +232,7 @@ static void test_unwritable_dir_uses_console(void) {
   log_info("t", "console");
   logger_close();
   CHECK(!file_exists("ro/app.log"));
-  chmod("ro", 0750);
+  CHECK(chmod("ro", 0750) == 0);
 }
 
 /* A leftover that cannot be compressed is kept (never overwritten) and the live
@@ -317,6 +318,43 @@ static void test_interrupted_rotation_recovered(void) {
   CHECK(strstr(buf, "left over from a crash") != NULL);
 }
 
+/* Input larger than the archiver's read/write buffers and poorly compressible,
+ * so deflate needs several input chunks and several output flushes. */
+static void test_large_archive_round_trip(void) {
+  enum { LEN = 300 * 1024 };
+  static char src[LEN + 1], out[LEN + 2];
+  uint64_t seed = 12345;
+  for (size_t i = 0; i < LEN; i++) {
+    seed = (seed * 1103515245u + 12345u) % 2147483648u; /* 31-bit LCG, no wraparound */
+    src[i] = (char)(' ' + (seed >> 16) % 95);
+  }
+  src[LEN] = '\0';
+  REQUIRE(write_file("big.log.rotating", src) == 0);
+
+  logger_set_file("big.log", 0);
+  logger_close();
+  CHECK(!file_exists("big.log.rotating"));
+  CHECK(!file_exists("big.log.new.gz.tmp"));
+  REQUIRE(file_exists("big.log.1.gz"));
+  struct stat st;
+  REQUIRE(stat("big.log.1.gz", &st) == 0);
+  CHECK_EQ_INT(st.st_mode & 0777, 0640);
+  CHECK_EQ_INT(read_gz("big.log.1.gz", out, sizeof(out)), LEN);
+  CHECK(memcmp(out, src, LEN) == 0);
+}
+
+/* An empty pending file still becomes a valid (empty) gzip archive. */
+static void test_empty_archive(void) {
+  char buf[16];
+  REQUIRE(write_file("empty.log.rotating", "") == 0);
+  logger_set_file("empty.log", 0);
+  logger_close();
+  CHECK(!file_exists("empty.log.rotating"));
+  REQUIRE(file_exists("empty.log.1.gz"));
+  CHECK(file_size("empty.log.1.gz") > 0); /* gzip header + trailer */
+  CHECK_EQ_INT(read_gz("empty.log.1.gz", buf, sizeof(buf)), 0);
+}
+
 int main(void) {
   scratch_enter("logger");
 
@@ -331,6 +369,8 @@ int main(void) {
   RUN_TEST(test_rotation_creates_gzip_archive);
   RUN_TEST(test_rotation_keeps_max_archives);
   RUN_TEST(test_interrupted_rotation_recovered);
+  RUN_TEST(test_large_archive_round_trip);
+  RUN_TEST(test_empty_archive);
   RUN_TEST(test_debug_level_and_reopen);
   RUN_TEST(test_path_in_root_dir_and_too_long);
   RUN_TEST(test_unwritable_dir_uses_console);

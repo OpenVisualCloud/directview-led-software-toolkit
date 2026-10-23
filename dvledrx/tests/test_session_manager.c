@@ -56,9 +56,10 @@ static void pump(session_manager_t* m, int ms) {
 
 /* Every frame handed out by MTL must come back exactly once, nothing leaked. */
 static void check_frames_balanced(void) {
-  CHECK_EQ_INT(fake_mtl.frames_put, fake_mtl.frames_got);
-  CHECK_EQ_INT(fake_mtl.bad_puts, 0);
-  CHECK_EQ_INT(fake_mtl.leaked, 0);
+  struct fake_mtl_state s = fake_mtl_snapshot();
+  CHECK_EQ_INT(s.frames_put, s.frames_got);
+  CHECK_EQ_INT(s.bad_puts, 0);
+  CHECK_EQ_INT(s.leaked, 0);
 }
 
 /* init + start, run for ms, then stop/cleanup as main() does. */
@@ -132,7 +133,93 @@ static void test_init_params(void) {
   CHECK_EQ_INT(fake_mtl.uninit_calls, 1);
 }
 
-/* Odd NIC names go through the PCI address check without touching sysfs paths. */
+/* A source IP that does not parse stops init before MTL is touched. */
+static void test_init_invalid_sip(void) {
+  struct rx_app_context app;
+  session_manager_t m;
+  REQUIRE(make_app(&app, "{ " IFACE ", \"rx_sessions\": [ { \"crop\": { \"w\": 32, \"h\": 16 } } ] }") == 0);
+  snprintf(app.json_config.interfaces[0].sip, sizeof(app.json_config.interfaces[0].sip), "192.168.50");
+  fake_mtl_reset();
+  CHECK_EQ_INT(session_manager_init(&m, &app), -1);
+  CHECK_EQ_INT(fake_mtl.init_calls, 0);
+  CHECK(m.mtl == NULL);
+  session_manager_cleanup(&m);
+  CHECK_EQ_INT(fake_mtl.uninit_calls, 0);
+}
+
+/* A multicast IP that does not parse fails start before any session is created. */
+static void test_start_invalid_dip(void) {
+  struct rx_app_context app;
+  session_manager_t m;
+  REQUIRE(make_app(&app, "{ " IFACE ", \"rx_sessions\": [ { \"crop\": { \"w\": 32, \"h\": 16 } } ] }") == 0);
+  no_display();
+  fake_mtl_reset();
+  REQUIRE(session_manager_init(&m, &app) == 0);
+  snprintf(app.json_config.interfaces[0].dip, sizeof(app.json_config.interfaces[0].dip), "239.300.1.1");
+  CHECK_EQ_INT(session_manager_start(&m, &app), -1);
+  CHECK_EQ_INT(fake_mtl.create_calls, 0);
+  app.exit = true;
+  session_manager_cleanup(&m);
+  with_display();
+  CHECK_EQ_INT(fake_mtl.free_calls, 0);
+  CHECK_EQ_INT(fake_mtl.uninit_calls, 1);
+}
+
+/* A session whose nic_index matches no interface fails start instead of indexing out of range. */
+static void test_start_unknown_nic_index(void) {
+  struct rx_app_context app;
+  session_manager_t m;
+  REQUIRE(make_app(&app, "{ " IFACE ", \"rx_sessions\": [ { \"crop\": { \"w\": 32, \"h\": 16 } } ] }") == 0);
+  no_display();
+  fake_mtl_reset();
+  REQUIRE(session_manager_init(&m, &app) == 0);
+  app.json_config.rx_sessions[0].nic_index = 9;
+  CHECK_EQ_INT(session_manager_start(&m, &app), -1);
+  CHECK_EQ_INT(fake_mtl.create_calls, 0);
+  app.exit = true;
+  session_manager_cleanup(&m);
+  with_display();
+  CHECK_EQ_INT(fake_mtl.uninit_calls, 1);
+}
+
+/* Second session's interface has a bad multicast IP: the first, already running, is unwound. */
+static void test_start_invalid_dip_second_session_unwinds(void) {
+  struct rx_app_context app;
+  session_manager_t m;
+  REQUIRE(make_app(&app,
+      "{ \"display_mode\": \"per_output\", \"interfaces\": [\n"
+      "    { \"nic_index\": 0, \"name\": \"0000:03:00.0\", \"sip\": \"192.168.50.65\", \"dip\": \"239.1.1.1\" },\n"
+      "    { \"nic_index\": 1, \"name\": \"0000:03:00.1\", \"sip\": \"192.168.50.66\", \"dip\": \"239.1.1.2\" } ],\n"
+      "  \"video\": { \"width\": 64, \"height\": 16 },\n"
+      "  \"rx_sessions\": [ { \"nic_index\": 0, \"udp_port\": 20000, \"crop\": { \"w\": 32, \"h\": 16 } },\n"
+      "                     { \"nic_index\": 1, \"udp_port\": 20002, \"crop\": { \"x\": 32, \"w\": 32, \"h\": 16 } } ] }") == 0);
+  no_display();
+  fake_mtl_reset();
+  REQUIRE(session_manager_init(&m, &app) == 0);
+  snprintf(app.json_config.interfaces[1].dip, sizeof(app.json_config.interfaces[1].dip), "not-an-ip");
+  CHECK_EQ_INT(session_manager_start(&m, &app), -1);
+  CHECK_EQ_INT(fake_mtl.create_calls, 1);
+  sleep_ms(50);
+  app.exit = true;
+  session_manager_cleanup(&m);
+  with_display();
+  CHECK_EQ_INT(fake_mtl.free_calls, 1);
+  CHECK_EQ_INT(fake_mtl.uninit_calls, 1);
+  check_frames_balanced();
+}
+
+/* Display thread is slower than RX: superseded frames are returned by the RX
+ * thread and rendered ones by the display thread, without double puts. */
+static void test_display_thread_returns_superseded_frames(void) {
+  struct rx_app_context app;
+  REQUIRE(make_app(&app, "{ " IFACE ", \"video\": { \"width\": 640, \"height\": 480 },\n"
+                         "  \"rx_sessions\": [ { \"crop\": { \"w\": 640, \"h\": 480 } } ] }") == 0);
+  fake_mtl_reset();
+  session_manager_t seen;
+  CHECK_EQ_INT(run_app(&app, 600, &seen), 0);
+  CHECK(fake_mtl.frames_got > 10);
+  check_frames_balanced();
+}
 static void test_unusual_nic_names(void) {
   const char* names[] = {"03:00.0", "0000:03:00.8", "../../etc", "0000:3:00.0", "0000:03:00.0x", ""};
   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
@@ -162,12 +249,13 @@ static void test_single_session_without_display(void) {
   CHECK_EQ_INT(run_app(&app, 300, &seen), 0);
   with_display();
   CHECK(seen.composite == NULL);
-  CHECK_EQ_INT(fake_mtl.frames_got, 120);
+  struct fake_mtl_state s = fake_mtl_snapshot();
+  CHECK_EQ_INT(s.frames_got, 120);
   check_frames_balanced();
-  CHECK_EQ_INT(fake_mtl.create_calls, 1);
-  CHECK_EQ_INT(fake_mtl.free_calls, 1);
-  CHECK_EQ_INT(fake_mtl.wake_calls, 1);
-  const struct st20p_rx_ops* ops = &fake_mtl.ops[0];
+  CHECK_EQ_INT(s.create_calls, 1);
+  CHECK_EQ_INT(s.free_calls, 1);
+  CHECK_EQ_INT(s.wake_calls, 1);
+  const struct st20p_rx_ops* ops = &s.ops[0];
   CHECK_EQ_STR(ops->name, "st20p_rx_0");
   CHECK_EQ_INT(ops->port.udp_port[MTL_SESSION_PORT_P], 20010);
   CHECK_EQ_INT(ops->port.payload_type, 112);
@@ -369,8 +457,9 @@ static void test_stop_twice(void) {
   no_display();
   fake_mtl_reset();
   REQUIRE(session_manager_init(&m, &app) == 0);
-  REQUIRE(session_manager_start(&m, &app) == 0);
-  CHECK(session_manager_is_running(&m));
+  int rc = session_manager_start(&m, &app);
+  CHECK_EQ_INT(rc, 0);
+  CHECK(rc != 0 || session_manager_is_running(&m));
   app.exit = true;
   session_manager_stop(&m);
   session_manager_stop(&m);
@@ -416,9 +505,14 @@ int main(void) {
   RUN_TEST(test_null_args);
   RUN_TEST(test_init_failure);
   RUN_TEST(test_init_params);
+  RUN_TEST(test_init_invalid_sip);
+  RUN_TEST(test_start_invalid_dip);
+  RUN_TEST(test_start_unknown_nic_index);
+  RUN_TEST(test_start_invalid_dip_second_session_unwinds);
   RUN_TEST(test_unusual_nic_names);
   RUN_TEST(test_single_session_without_display);
   RUN_TEST(test_single_session_window);
+  RUN_TEST(test_display_thread_returns_superseded_frames);
   RUN_TEST(test_session_size_from_video);
   RUN_TEST(test_transport_format_mapping);
   RUN_TEST(test_composite_crops);

@@ -18,6 +18,7 @@
 #include <setjmp.h>
 #include <cmocka.h>
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,19 +30,40 @@
 #include "util/logger.h"
 
 /* --------------------------------------------------------------------------
- * Helper: write a temp file path without creating the file.
- * Returns heap-allocated path; caller must unlink+free.
+ * Helper: path of a not-yet-existing log file inside a fresh private (0700)
+ * directory.  Release with free_tmppath(), which removes both.
  * -------------------------------------------------------------------------- */
 static char *make_tmppath(void)
 {
-    char *path = strdup("/tmp/dvledtx_logger_test_XXXXXX");
-    if (!path) return NULL;
-    int fd = mkstemp(path);
-    if (fd < 0) { free(path); return NULL; }
-    close(fd);
-    /* Remove it so logger_init can create it fresh */
-    unlink(path);
+    char dir[] = "/tmp/dvledtx_logger_test_XXXXXX";
+    if (mkdtemp(dir) == NULL) return NULL;
+    size_t len = strlen(dir) + sizeof("/test.log");
+    char *path = malloc(len);
+    if (!path) { rmdir(dir); return NULL; }
+    snprintf(path, len, "%s/test.log", dir);
     return path;
+}
+
+static void free_tmppath(char *path)
+{
+    unlink(path);
+    char *slash = strrchr(path, '/');
+    if (slash != NULL) {
+        *slash = '\0';
+        rmdir(path);
+    }
+    free(path);
+}
+
+/* Size of an existing file, or -1. */
+static long file_size(const char *path)
+{
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    struct stat st;
+    long sz = fstat(fd, &st) == 0 ? (long)st.st_size : -1;
+    close(fd);
+    return sz;
 }
 
 /* Tear-down: always call cleanup so the internal global state is reset */
@@ -97,11 +119,11 @@ static void test_init_file_logging_creates_file(void **state)
     logger_log(LOG_LEVEL_INFO, __FILE__, __LINE__, __func__, "test file logging");
 
     /* File should now exist */
-    assert_int_equal(access(path, F_OK), 0);
+    long sz = file_size(path);
 
     logger_cleanup();
-    unlink(path);
-    free(path);
+    free_tmppath(path);
+    assert_true(sz >= 0);
 }
 
 static void test_init_file_logging_bad_path_fails(void **state)
@@ -295,15 +317,9 @@ static void test_log_writes_to_file(void **state)
     logger_cleanup();
 
     /* Verify file is non-empty */
-    FILE *f = fopen(path, "r");
-    assert_non_null(f);
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fclose(f);
+    long sz = file_size(path);
+    free_tmppath(path);
     assert_true(sz > 0);
-
-    unlink(path);
-    free(path);
 }
 
 static void test_log_with_timestamp_enabled(void **state)
@@ -362,33 +378,30 @@ static void test_log_rotation_archives_old_log(void **state)
     }
 
     logger_cleanup();
+    /* Reset rotation size to default */
+    logger_set_max_size(0);
 
-    /* The current log file should exist and be small (post-rotation) */
-    struct stat st;
-    assert_int_equal(stat(path, &st), 0);
+    /* The current log file should exist (post-rotation) */
+    long cur_sz = file_size(path);
 
     /* An archived .gz file should exist matching the pattern <path>.*gz */
     char glob_pattern[600];
     snprintf(glob_pattern, sizeof(glob_pattern), "%s.*.gz", path);
     glob_t gl;
     int gret = glob(glob_pattern, 0, NULL, &gl);
+    long gz_sz = (gret == 0 && gl.gl_pathc >= 1) ? file_size(gl.gl_pathv[0]) : -1;
+
+    /* Cleanup: remove all generated files before asserting */
+    if (gret == 0) {
+        for (size_t i = 0; i < gl.gl_pathc; i++)
+            unlink(gl.gl_pathv[i]);
+        globfree(&gl);
+    }
+    free_tmppath(path);
+
+    assert_true(cur_sz >= 0);
     assert_int_equal(gret, 0);
-    assert_true(gl.gl_pathc >= 1);
-
-    /* Archived file should be non-empty */
-    struct stat gz_st;
-    assert_int_equal(stat(gl.gl_pathv[0], &gz_st), 0);
-    assert_true(gz_st.st_size > 0);
-
-    /* Cleanup: remove all generated files */
-    for (size_t i = 0; i < gl.gl_pathc; i++)
-        unlink(gl.gl_pathv[i]);
-    globfree(&gl);
-    unlink(path);
-    free(path);
-
-    /* Reset rotation size to default */
-    logger_set_max_size(0);
+    assert_true(gz_sz > 0); /* archived file is non-empty */
 }
 
 /* ==========================================================================
