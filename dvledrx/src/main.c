@@ -24,7 +24,7 @@
 
 /* Overridden by the build system with the meson project version. */
 #ifndef DVLEDRX_VERSION
-#define DVLEDRX_VERSION "1.0.0"
+#define DVLEDRX_VERSION "1.1.0"
 #endif
 
 /* Map a plain integer fps value to the correct MTL enum.
