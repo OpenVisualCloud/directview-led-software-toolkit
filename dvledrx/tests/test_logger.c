@@ -8,6 +8,7 @@
 #include "test_common.h"
 
 #include <fcntl.h>
+#include <stdint.h>
 #include <zlib.h>
 
 #include "logger.h"
@@ -322,9 +323,9 @@ static void test_interrupted_rotation_recovered(void) {
 static void test_large_archive_round_trip(void) {
   enum { LEN = 300 * 1024 };
   static char src[LEN + 1], out[LEN + 2];
-  unsigned seed = 12345;
+  uint64_t seed = 12345;
   for (size_t i = 0; i < LEN; i++) {
-    seed = seed * 1103515245u + 12345u;
+    seed = (seed * 1103515245u + 12345u) % 2147483648u; /* 31-bit LCG, no wraparound */
     src[i] = (char)(' ' + (seed >> 16) % 95);
   }
   src[LEN] = '\0';

@@ -47,8 +47,11 @@ static char *make_tmppath(void)
 static void free_tmppath(char *path)
 {
     unlink(path);
-    *strrchr(path, '/') = '\0';
-    rmdir(path);
+    char *slash = strrchr(path, '/');
+    if (slash != NULL) {
+        *slash = '\0';
+        rmdir(path);
+    }
     free(path);
 }
 
