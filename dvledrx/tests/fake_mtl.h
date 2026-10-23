@@ -35,3 +35,6 @@ extern struct fake_mtl_state fake_mtl;
 
 /* Clear observations and reload the knobs from the environment. */
 void fake_mtl_reset(void);
+
+/* Copy of fake_mtl taken under the lock the session threads update it with. */
+struct fake_mtl_state fake_mtl_snapshot(void);
