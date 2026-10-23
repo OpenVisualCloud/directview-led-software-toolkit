@@ -30,15 +30,23 @@ inputs:
 runs:
   using: composite
   steps:
-    # The cache holds binaries built against the runner's system libraries, so key it
-    # on the image family, exact image revision, and architecture; runner.os alone is
-    # just "Linux" and ImageOS alone does not distinguish image updates.
+    # The cache holds binaries built against runner system libraries and CPU features,
+    # so key it on image revision, architecture, and the exposed CPU instruction set.
     - name: Resolve runner image
       id: runner-image
       shell: bash
       run: |
         echo "name=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
         echo "version=${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+        if command -v lscpu >/dev/null 2>&1; then
+          CPU_INFO=$(LC_ALL=C lscpu)
+          printf '%s\n' "$CPU_INFO" | grep -E '^(Architecture|Model name|Flags|Features):' || true
+          CPU_FEATURES=$(printf '%s\n' "$CPU_INFO" | awk -F: '/^(Architecture|Flags|Features):/ {gsub(/^[[:space:]]+/, "", $2); print $1 ":" $2}' | sha256sum | cut -c1-16)
+        else
+          echo "[WARN] lscpu is unavailable; using machine architecture only for CPU cache identity."
+          CPU_FEATURES=$(uname -m | sha256sum | cut -c1-16)
+        fi
+        echo "cpu-features=$CPU_FEATURES" >> "$GITHUB_OUTPUT"
 
     - name: Restore environment cache
       id: env-cache
@@ -47,7 +55,7 @@ runs:
         path: |
           ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
-        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}-${{ steps.runner-image.outputs.version }}-${{ runner.arch }}
+        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}-${{ steps.runner-image.outputs.version }}-${{ runner.arch }}-${{ steps.runner-image.outputs.cpu-features }}
 
     - name: Deploy cache to system
       if: steps.env-cache.outputs.cache-hit == 'true'
@@ -406,4 +414,4 @@ runs:
         path: |
           ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
-        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}-${{ steps.runner-image.outputs.version }}-${{ runner.arch }}
+        key: env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}-${{ steps.runner-image.outputs.version }}-${{ runner.arch }}-${{ steps.runner-image.outputs.cpu-features }}
