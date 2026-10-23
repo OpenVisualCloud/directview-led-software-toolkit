@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright 2026 Intel Corporation
 
-project('dvledtx', 'c', version: '1.0.0')
+project('dvled', 'c', version: '1.1.0')
 
 cc = meson.get_compiler('c')
 
