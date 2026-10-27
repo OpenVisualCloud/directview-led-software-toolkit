@@ -25,12 +25,6 @@ struct nic_config {
   uint8_t dip_addr[IP_ADDR_BYTES];    /* destination IP binary */
 };
 
-/* PTP timing role of this transmitter (top-level "ptp" JSON object, "mode"). */
-enum dvledtx_ptp_mode {
-  DVLEDTX_PTP_MODE_SLAVE = 0,   /* lock to an external PTP grandmaster */
-  DVLEDTX_PTP_MODE_GRANDMASTER, /* this host's NIC PHC is the reference clock */
-};
-
 /* Per-session network and crop parameters (populated from JSON tx_sessions[]) */
 struct tx_session_net {
   uint16_t udp_port;
@@ -75,21 +69,11 @@ struct dvledtx_context {
   bool force_dhcp;
   int test_time_s;
 
-  /* PTP hardware timing. Two modes, selected by ptp_mode:
-   *  - SLAVE: MTL's built-in PTP client locks to an external grandmaster.
-   *    Works on both the direct MTL TX pipeline and the FFmpeg mtl_st20p
-   *    muxer path (passed through as AVOptions in ffmpeg_tx.c).
-   *  - GRANDMASTER: this host owns the reference clock. ptp4l serves the
-   *    NIC PHC to the receivers and MTL is fed that same PHC through
-   *    mtl_init_params.ptp_get_time_fn. Direct MTL TX path only, because a
-   *    function pointer cannot be passed through an AVOption.
-   * See MTL_FLAG_PTP_* in mtl_api.h and src/util/ptp_clock.c. */
-  bool ptp_enable;    /* enable hardware PTP timing + PTP-paced TX */
-  int  ptp_mode;      /* enum dvledtx_ptp_mode */
-  bool ptp_pi;        /* use PI controller for built-in PTP (PF only, slave mode) */
-  bool ptp_unicast;   /* use unicast address for PTP_DELAY_REQ message (slave mode) */
-  char ptp_phc[64];         /* grandmaster mode: "/dev/ptpN" or kernel iface name */
-  int  ptp_phc_interval_ms; /* grandmaster mode: PHC resample period (0 = default) */
+  /* PTP hardware timing. When enabled, the time source is detected at start-up
+   * (switch grandmaster, else NIC grandmaster, else system time) — see
+   * include/util/ptp_auto.h. Direct MTL TX path only: the mtl_st20p muxer
+   * owns mtl_init() and cannot take the PHC callback, so it uses system time. */
+  bool ptp_enable;
 
   /* Per-session network + crop config — dynamically allocated, st20p_sessions elements */
   struct tx_session_net* session_net;

@@ -345,6 +345,70 @@ static void test_resolve_device_rejects_garbage(void **state)
     assert_int_not_equal(resolve_device("bad name!", out, sizeof(out)), 0);
 }
 
+/* The PHC reference comes from a config file, so anything that is not a
+ * /dev/ptpN path or a kernel interface name must be refused before open(). */
+static void test_ptp_clock_device_ref_validation(void **state)
+{
+    (void)state;
+    assert_true(ptp_clock_valid_device_ref("/dev/ptp0"));
+    assert_true(ptp_clock_valid_device_ref("/dev/ptp11"));
+    assert_true(ptp_clock_valid_device_ref("enp4s0"));
+    assert_true(ptp_clock_valid_device_ref("eth0.100"));
+
+    assert_false(ptp_clock_valid_device_ref(NULL));
+    assert_false(ptp_clock_valid_device_ref(""));
+    assert_false(ptp_clock_valid_device_ref("/dev/ptp"));
+    assert_false(ptp_clock_valid_device_ref("/dev/ptp0x"));
+    assert_false(ptp_clock_valid_device_ref("/dev/../etc/passwd"));
+    assert_false(ptp_clock_valid_device_ref("../../dev/ptp0"));
+    assert_false(ptp_clock_valid_device_ref("eth0; reboot"));
+}
+
+/* Interface names are bounded by IFNAMSIZ (16 incl. NUL), so 15 characters is
+ * the longest acceptable name. */
+static void test_ptp_clock_device_ref_length_boundary(void **state)
+{
+    (void)state;
+    char name[64];
+
+    memset(name, 'a', 15); name[15] = '\0';
+    assert_true(ptp_clock_valid_device_ref(name));
+
+    memset(name, 'a', 16); name[16] = '\0';
+    assert_false(ptp_clock_valid_device_ref(name));
+}
+
+/* Opening a PHC that does not exist must fail cleanly, and the NULL handle
+ * must then be safe to pass to every other entry point — MTL calls the time
+ * function from the dataplane with whatever priv it was given. */
+static void test_ptp_clock_open_nonexistent_device_fails(void **state)
+{
+    (void)state;
+    struct ptp_clock *clk = ptp_clock_open("/dev/ptp99", 1000);
+    assert_null(clk);
+    ptp_clock_close(clk);
+}
+
+static void test_ptp_clock_null_handle_is_safe(void **state)
+{
+    (void)state;
+    assert_string_equal(ptp_clock_device(NULL), "");
+    assert_int_equal((int)ptp_clock_get_time_ns(NULL), 0);
+    assert_int_equal(ptp_clock_stats(NULL, NULL, NULL, NULL), -1);
+    ptp_clock_close(NULL);
+}
+
+
+/* An interface that is not a valid name, or does not exist, has no PHC. */
+static void test_phc_index_rejects_unknown_interface(void **state)
+{
+    (void)state;
+    assert_int_equal(ptp_clock_phc_index(NULL), -1);
+    assert_int_equal(ptp_clock_phc_index(""), -1);
+    assert_int_equal(ptp_clock_phc_index("eth0; reboot"), -1);
+    assert_int_equal(ptp_clock_phc_index("dvledtx-noif0"), -1);
+}
+
 int main(void)
 {
     const struct CMUnitTest tests[] = {
@@ -361,6 +425,11 @@ int main(void)
         cmocka_unit_test(test_stats_accept_null_out_pointers),
         cmocka_unit_test(test_resolve_device_passes_through_explicit_path),
         cmocka_unit_test(test_resolve_device_rejects_garbage),
+        cmocka_unit_test(test_ptp_clock_device_ref_validation),
+        cmocka_unit_test(test_ptp_clock_device_ref_length_boundary),
+        cmocka_unit_test(test_ptp_clock_open_nonexistent_device_fails),
+        cmocka_unit_test(test_ptp_clock_null_handle_is_safe),
+        cmocka_unit_test(test_phc_index_rejects_unknown_interface),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

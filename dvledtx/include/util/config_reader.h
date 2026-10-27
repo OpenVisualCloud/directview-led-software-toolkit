@@ -47,17 +47,10 @@ struct dvledtx_config {
   /* optional log file path (empty = console only) */
   char log_file[256];
 
-  /* PTP hardware timing, from the optional top-level "ptp" JSON object.
-   * Disabled by default, in which case MTL falls back to TSC-based TX pacing.
-   * ptp_mode selects between slaving to an external grandmaster ("slave",
-   * the default) and acting as the grandmaster off the local NIC PHC
-   * ("grandmaster"). See enum dvledtx_ptp_mode in app_context.h. */
+  /* PTP hardware timing, from "ptp": { "enable": true } in the JSON.
+   * Disabled by default (system time, TSC-based TX pacing). Everything else
+   * is detected automatically — see include/util/ptp_auto.h. */
   bool ptp_enable;
-  int  ptp_mode;
-  bool ptp_pi;
-  bool ptp_unicast;
-  char ptp_phc[64];         /* grandmaster mode: "/dev/ptpN" or kernel iface name */
-  int  ptp_phc_interval_ms; /* grandmaster mode: PHC resample period in ms */
 
   /* tx_sessions array — dynamically allocated */
   int session_count;

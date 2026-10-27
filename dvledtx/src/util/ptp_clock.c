@@ -5,8 +5,8 @@
 /*
  * ptp_clock.c — NIC PTP Hardware Clock (PHC) time source for MTL.
  *
- * See include/util/ptp_clock.h for the role this plays in "grandmaster" PTP
- * mode.
+ * See include/util/ptp_clock.h and include/util/ptp_auto.h for the role this
+ * plays in PTP timing.
  *
  * Model
  * -----
@@ -142,11 +142,11 @@ bool ptp_clock_valid_device_ref(const char* ref) {
   return is_ptp_device_path(ref) || is_iface_name(ref);
 }
 
-/* PHC index backing a kernel network interface, or -1. */
-static int phc_index_for_iface(const char* iface) {
+int ptp_clock_phc_index(const char* iface) {
   struct ethtool_ts_info info;
   struct ifreq ifr;
 
+  if (iface == NULL || !is_iface_name(iface)) return -1;
   memset(&info, 0, sizeof(info));
   memset(&ifr, 0, sizeof(ifr));
   info.cmd = ETHTOOL_GET_TS_INFO;
@@ -187,8 +187,7 @@ static int resolve_device(const char* device, char* out, size_t out_size) {
   if (device == NULL || device[0] == '\0') {
     int idx = phc_index_autodetect();
     if (idx < 0) {
-      LOG_ERROR("PTP clock: cannot auto-select a PHC (zero or multiple present); "
-                "set ptp.phc_device or ptp.phc_interface");
+      LOG_ERROR("PTP clock: cannot auto-select a PHC (zero or multiple present)");
       return -1;
     }
     snprintf(out, out_size, "/dev/ptp%d", idx);
@@ -201,7 +200,7 @@ static int resolve_device(const char* device, char* out, size_t out_size) {
   }
 
   if (is_iface_name(device)) {
-    int idx = phc_index_for_iface(device);
+    int idx = ptp_clock_phc_index(device);
     if (idx < 0) {
       LOG_ERROR("PTP clock: interface '%s' has no PTP hardware clock "
                 "(not present, or bound to a userspace driver)", device);

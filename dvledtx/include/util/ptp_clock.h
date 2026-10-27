@@ -9,12 +9,11 @@
 /*
  * ptp_clock — local NIC PTP Hardware Clock (PHC) time source for MTL.
  *
- * Used for the "grandmaster" PTP mode, where this TX host owns the reference
- * clock instead of slaving to an external grandmaster. ptp4l runs as PTP
- * master on the NIC's kernel interface and disciplines/serves that NIC's PHC
- * to the receivers; dvledtx feeds the very same PHC to MTL through
+ * Used whenever PTP is enabled and ptp_auto (see ptp_auto.h) has a NIC PHC:
+ * ptp4l either locks that PHC to the switch grandmaster or serves it as the
+ * grandmaster, and dvledtx feeds the very same PHC to MTL through
  * mtl_init_params.ptp_get_time_fn so the TX pacing, RTP timestamps and the
- * grandmaster the receivers lock to are all the same clock.
+ * clock the receivers lock to are all the same clock.
  *
  * MTL calls the time function from the dataplane tasklet, far too often for a
  * per-call /dev/ptpN read (~1-2 us each, a driver register access). The module
@@ -29,6 +28,11 @@ struct ptp_clock;
  * kernel interface name. Does not check that the device exists; used to reject
  * config values before they reach open(). */
 bool ptp_clock_valid_device_ref(const char* ref);
+
+/* PHC index ("N" of /dev/ptpN) backing a kernel network interface, from
+ * ETHTOOL_GET_TS_INFO. Returns -1 if the interface does not exist, is not
+ * owned by a kernel driver, or has no PHC. */
+int ptp_clock_phc_index(const char* iface);
 
 /* Open the PHC and start the sampling thread.
  *   device        — "/dev/ptpN", a kernel interface name ("enp4s0"), or "" to
