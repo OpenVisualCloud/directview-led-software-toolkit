@@ -198,9 +198,7 @@ dvledtx uses a JSON config file with the following sections:
 | | `scale_height` | (Optional) Output height after scaling |
 | | `fps` | Frames per second (25, 30, 50, 60) |
 | | `fmt` | Pixel format (see [Supported Formats](#supported-formats)) |
-| **ptp** | `enable` | (Optional) Enable MTL's built-in PTP client and PTP-paced TX. Default `false` (TSC-based pacing). See [PTP Timing](#ptp-timing) |
-| | `pi` | (Optional) Use the PI controller for the built-in PTP client (physical function NICs only). Default `false` |
-| | `unicast` | (Optional) Send `PTP_DELAY_REQ` messages to a unicast address instead of multicast. Default `false` |
+| **ptp** | `enable` | (Optional) Enable hardware PTP timing and PTP-paced TX. Default `false` (system time, TSC-based pacing). The time source is detected automatically; see [PTP Timing](#ptp-timing) |
 | **hwaccel** | `hwaccel` | (Optional) Decode the input stream on the GPU via VA-API. Default `false` (CPU decode). Falls back to the CPU automatically when the GPU cannot decode the stream. See [Hardware Decode (VA-API)](#hardware-decode-va-api) |
 | **tx_sessions[]** | `nic_index` | (Optional) Index into `interfaces[]` selecting which NIC this session uses (default: `0`) |
 | | `udp_port` | UDP port for the session |
@@ -235,35 +233,219 @@ Multiple sessions can be defined in `tx_sessions` to transmit different crop reg
 
 #### PTP Timing
 
-ST 2110 senders normally derive their TX pacing from a PTP (IEEE 1588) clock. dvledtx exposes MTL's built-in PTP client through an optional top-level `ptp` block:
+ST 2110 senders derive their TX pacing and RTP timestamps from a PTP (IEEE 1588) clock. PTP is
+switched on with a single flag; dvledtx works out the rest at start-up:
 
 ```json
 "ptp": {
-  "enable":  true,
-  "pi":      true,
-  "unicast": false
+  "enable": true
 }
 ```
 
-**PTP is disabled by default.** When the block is absent — or `enable` is `false` — MTL falls back to TSC-based pacing, which derives timing from the CPU's invariant timestamp counter and requires no external clock. This is the recommended setting for lab and standalone use.
+**PTP is disabled by default.** When the block is absent — or `enable` is `false` — MTL uses the
+system clock and TSC-based pacing, which derives timing from the CPU's invariant timestamp counter
+and requires no external clock.
 
-Enable PTP only when a **PTP grandmaster is present on the network** (a dedicated appliance or a boundary-clock switch). MTL's built-in PTP client is *slave-only* — it cannot elect itself grandmaster — so with `enable: true` and no grandmaster on the link the TX pacing clock never locks and transmission stalls.
+With PTP enabled, dvledtx picks the first time source that works, in this order:
 
-When enabled, the startup log reports the active settings and the pacing mode chosen by MTL:
+| Priority | Time source | Chosen when |
+|---|---|---|
+| 1 | **Switch grandmaster** | A PTP grandmaster (normally the media switch) is announcing on the media LAN. dvledtx runs `ptp4l` as a slave, which locks the NIC's PTP Hardware Clock (PHC) to it |
+| 2 | **NIC grandmaster** | No grandmaster is announcing. `ptp4l` becomes the grandmaster and serves the NIC's PHC to the receivers |
+| 3 | **System time** | No NIC PHC is reachable through a kernel interface, `linuxptp` is not installed, or `ptp4l` fails to start. Same as PTP disabled |
+
+In cases 1 and 2 dvledtx feeds MTL the **same PHC** that `ptp4l` disciplines or serves, through
+`mtl_init_params.ptp_get_time_fn`, and switches TX pacing to `ST21_TX_PACING_WAY_PTP`. TX pacing, RTP
+timestamps and the clock the receivers lock to are therefore always the same clock. MTL's own
+built-in PTP client is not used.
+
+**How detection works**
+
+1. **Find the PHC.** dvledtx maps each `interfaces[].name` PCI address to a kernel network interface
+   with a PHC, in this order: the port itself if it is kernel-bound, its SR-IOV physical function
+   (PF) if it is a VF, or another port of the same NIC whose IPv4 subnet contains the port's `sip`.
+   The interface must be up and report a PHC in `ethtool -T`.
+2. **Reuse an existing PTP daemon.** If a `ptp4l` or `ts2phc` already steers that PHC — bound to the
+   interface on its command line, or holding `/dev/ptpN` open (an interface from a config file, or
+   another port sharing the same PHC) — dvledtx uses the PHC as-is and starts nothing. A `phc2sys`
+   reading the PHC into the system clock does not count.
+3. **Look for a grandmaster.** dvledtx listens for PTP `Announce` messages on the interface for 4 s,
+   on both L2 (ethertype `0x88F7`) and UDPv4 (port 320). If one arrives, `ptp4l` uses that
+   grandmaster's transport, domain and announce interval. If none arrives, `ptp4l` uses L2 and
+   domain 0, and the PHC is set from the system clock (as TAI) so its timestamps are plausible.
+4. **Run `ptp4l`.** dvledtx starts `ptp4l` itself, with BMCA `priority1`/`priority2` of `250`, so any
+   ordinary grandmaster wins and is followed. With no grandmaster on the LAN, `ptp4l` takes the role.
+   dvledtx waits for `ptp4l` to lock as `SLAVE` (up to 20 s) or become `MASTER` (up to 5 s) before
+   starting MTL. `ptp4l` is configured entirely on its command line, writes no files, logs through
+   dvledtx, and is stopped when dvledtx exits.
+
+Because BMCA keeps running, `ptp4l` **fails over on its own**: if the switch grandmaster disappears
+the NIC takes over as grandmaster, and if one appears later the NIC follows it again. Each change is
+logged (`PTP: following the switch grandmaster` / `PTP: this NIC is now the PTP grandmaster`).
+
+**Prerequisites**
+
+- `linuxptp` installed on the TX host: `sudo apt install linuxptp`. `ptp4l` is looked up only in
+  `/usr/sbin`, `/usr/local/sbin` and `/sbin`, never through `PATH`.
+- The direct MTL TX build: `bash scripts/build.sh -Denable_mtl_tx=true`. The `mtl_st20p` muxer build
+  cannot hand MTL the PHC, so it logs a warning and uses system time.
+- dvledtx running as root (it already must for DPDK), so it can start `ptp4l` and read `/dev/ptpN`.
+- A NIC port **on the media segment** that is bound to the kernel driver and has a PHC. Check with:
+
+  ```bash
+  ethtool -T <iface>
+  ```
+
+  It qualifies if `PTP Hardware Clock:` shows an index (not `none`) and the capabilities list
+  includes both `hardware-transmit` and `hardware-receive`. `hardware-transmit` is what makes the
+  grandmaster role possible — the NIC must timestamp the `Sync` frames it sends. Most Intel (`igb`,
+  `igc`, `ixgbe`, `ice`), Mellanox and Broadcom server NICs qualify; many consumer NICs do not.
+
+**Choose a topology.** A port bound to `vfio-pci` has no netdev and no `/dev/ptpN`, so `ptp4l`
+cannot run on it. Either option below solves that, and dvledtx finds the PHC automatically in both:
+
+| Topology | When to use | Setup |
+|---|---|---|
+| **SR-IOV on the TX NIC** | Only one NIC port is available on the media segment | PF stays in the kernel for `ptp4l`, dvledtx uses the VFs |
+| **Separate PTP port** | A spare port of the same NIC is on the media segment | `ptp4l` runs on the spare port; dvledtx keeps the TX port fully bound to DPDK. The spare port needs an IPv4 address on the same subnet as the TX port's `sip`, which is how dvledtx knows it is on the media LAN |
+
+The second works because MTL never touches the TX port's own clock — it uses whatever
+`ptp_get_time_fn` returns. Receivers and TX pacing then both follow the PTP port's oscillator.
+
+With neither topology (every port bound to DPDK), dvledtx logs a warning and uses system time.
+
+**Setup — SR-IOV topology**
+
+1. Create trusted VFs. This keeps the PF bound to the kernel (so it retains its netdev and PHC),
+   brings it UP, and binds the VFs to `vfio-pci`:
+
+   ```bash
+   sudo bash <mtl>/script/nicctl.sh create_tvf 0000:04:00.0 4   # VF count, default 6
+   sudo bash <mtl>/script/nicctl.sh list 0000:04:00.0           # note the VF BDFs
+   ```
+
+2. Point `interfaces[].name` in the config at the **VF** BDFs (e.g. `0000:04:10.0`) and set
+   `"ptp": { "enable": true }`. See `dvledtx/config/tx_ptp_3session.json`.
+
+3. Start dvledtx as usual. It finds the PF behind the VF and runs `ptp4l` there.
+
+`ptp4l` always uses `network_transport L2` when this NIC is the grandmaster. This is required, not a
+preference: DPDK's `ixgbe` timestamping installs only an ethertype `0x88F7` filter and never
+timestamps PTP carried over UDP, so an MTL receiver could never hardware-timestamp a UDPv4
+grandmaster. When following a switch, `ptp4l` uses whichever transport the switch announces on.
+
+> **In the SR-IOV topology, 3 sessions on a single VF is the practical ceiling.** Two separate
+> limits combine to produce it, and only the first is obvious.
+>
+> *The VF's TX queues.* MTL requests `sessions + 2` TX queues but silently clamps to what the device
+> provides, then fails later with the unhelpful `mt_dev_get_tx_queue(0), fail to find free tx queue`.
+> An Intel E610 VF exposes 4 TX queues however many VFs you create, and MTL reserves one for system
+> traffic — so **3 sessions per VF**. Check the startup log: `MTL init: port[0]=... tx_queues=5` is
+> the request, `dev_config_port(0), tx_q(4 ...)` is what the hardware actually gave.
+>
+> *A NULL dereference in MTL, which stops you using a second VF.* `mt_ptp_init()` allocates a PTP
+> instance only for port 0 unless a port reports offload timestamping, which ixgbe VFs do not — so
+> `impl->ptp[i]` is NULL for ports 1 and up. `cni_rx_handle()` then calls `mt_ptp_parse(ptp, ...)`
+> for ethertype `0x88F7` with no NULL check (the UDP path a few lines below *is* guarded). Because
+> PTP runs on the PF, the NIC's internal switch replicates its L2 multicast to every VF, so the
+> second VF takes a `SIGSEGV` in `mt_ptp_parse` as soon as the first PTP frame lands.
+>
+> This is independent of dvledtx: it reproduces with `ptp.enable: false`, and disappears only when
+> no PTP traffic is on the wire. Until it is fixed upstream, keep `interfaces[]` to a **single VF**
+> and at most 3 sessions. Creating extra VFs is harmless — only *using* a second one crashes.
+>
+> The fix is one line in MTL's `lib/src/mt_cni.c`, mirroring the guard its own UDP path already has:
+>
+> ```c
+> case RTE_ETHER_TYPE_1588:
+>   if (!ptp) break;              /* port has no PTP instance */
+>   ptp_hdr = rte_pktmbuf_mtod_offset(m, struct mt_ptp_header*, hdr_offset);
+>   mt_ptp_parse(ptp, ptp_hdr, vlan, MT_PTP_L2, m->timesync, NULL);
+>   break;
+> ```
+>
+> With that guard in place the ceiling becomes 3 sessions per VF, so 4 VFs give 12.
+>
+> Note this limit applies **only** when PTP forces the SR-IOV topology. Without PTP, dvledtx owns the
+> PF, which has ample queues — 8 sessions on one PF port is known to work.
+
+**Verifying it works**
+
+The start-up log shows each step of the decision:
 
 ```
-[INFO ] PTP enabled: pi_controller=1 unicast_delay_req=0
+[INFO ] PTP enabled: time source is detected at start-up
+[INFO ] PTP: using enp4s0 (SR-IOV PF of 0000:04:10.0), PHC /dev/ptp2
+[INFO ] PTP: no grandmaster announced on enp4s0 within 4000 ms
+[INFO ] PTP: started /usr/sbin/ptp4l on enp4s0 (pid 4242, L2, domain 0, priority1 250)
+[INFO ] ptp4l: port 1 (enp4s0): LISTENING to MASTER on ANNOUNCE_RECEIPT_TIMEOUT_EXPIRES
+[INFO ] PTP: this NIC is now the PTP grandmaster
+[INFO ] PTP: time source is the NIC grandmaster (/dev/ptp2 on enp4s0)
+[INFO ] MTL init: PTP time source is the NIC grandmaster (/dev/ptp2), pacing=ptp
 MTL: ... tv_attach(0), pacing way: ptp
 ```
 
-With PTP disabled the log instead shows:
+With a switch grandmaster present, the same lines read
+`PTP: grandmaster 001122.fffe.334455 is announcing on enp4s0 (L2, domain 0, priority1 128, clockClass 6)`,
+`... UNCALIBRATED to SLAVE on MASTER_CLOCK_SELECTED` and `time source is the switch grandmaster`.
+
+With PTP disabled, or when no PHC can be used, the log instead shows:
 
 ```
-[INFO ] PTP disabled (default TSC-based TX pacing)
+[INFO ] PTP disabled (system time, TSC-based TX pacing)
 MTL: ... tv_attach(0), pacing way: tsc
 ```
 
-> Requires an MTL/FFmpeg build that exposes the `ptp_enable`, `ptp_pi` and `ptp_unicast` AVOptions on the `mtl_st20p` muxer. If they are missing, dvledtx logs a warning and continues without built-in PTP rather than failing.
+On a **receiver**, confirm which clock actually won the election:
+
+```bash
+pmc -u -b 0 'GET PARENT_DATA_SET'
+```
+
+`grandmasterIdentity` must name the same clock as the transmitter: the switch, or — when the NIC is
+the grandmaster — the TX NIC's clock identity, derived from its MAC with `fffe` inserted in the
+middle, e.g. MAC `f8:02:78:24:91:bc` → `f80278.fffe.2491bc`.
+
+dvledtx samples the PHC on a background thread (a `/dev/ptpN` read costs microseconds, far too slow
+for the per-packet pacing path) and serves MTL a frequency-corrected model over
+`CLOCK_MONOTONIC_RAW`. It logs the residual every 30 s:
+
+```
+[INFO ] PTP clock: /dev/ptp2 offset=-53 ns freq=28134 ppb samples=16
+```
+
+A residual that keeps growing, or repeated `stepping local model` warnings, means the PHC is being
+stepped externally — usually a `phc2sys` instance writing to the same clock.
+
+**Other notes**
+
+- Legacy keys from earlier versions (`mode`, `pi`, `unicast`, `phc_device`, `phc_interface`,
+  `phc_interval_ms`) are ignored with a warning, so existing configs keep loading.
+- A grandmaster on a free-running NIC PHC, or a switch grandmaster without GPS, does not carry true
+  time. Receivers only need to agree with the transmitter, which they do; do not use these
+  timestamps as a wall-clock reference.
+
+**The PHC and the system clock are independent.** When the NIC is the grandmaster its PHC
+free-runs — typically tens of ppm, so it drifts seconds per day away from the host's wall clock.
+This is harmless for video (every receiver inherits the same offset) but makes application logs,
+which use the system clock, hard to correlate with RTP timestamps. To tie them together, steer the
+**system clock from the PHC** — the reverse of the usual `phc2sys` direction:
+
+```bash
+sudo phc2sys -s enp4s0 -c CLOCK_REALTIME -O 0 -w -m
+```
+
+**Troubleshooting**
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `PTP: no PTP hardware clock is reachable ...; using system time` | Every port is bound to `vfio-pci`, the PF/spare port is down, or the NIC has no PHC | Use one of the topologies above; verify the kernel port with `ethtool -T` and `ip link` |
+| `PTP: ptp4l not found (install linuxptp)` | `linuxptp` is missing | `sudo apt install linuxptp` |
+| `PTP: ptp4l on X exited during start-up; using system time` | `ptp4l` could not enable hardware timestamping, usually because dvledtx is not running as root | Check the forwarded `ptp4l:` lines just above it; run as root |
+| `PTP: ptp4l ... has not settled after N ms` | `ptp4l` is still locking (switch) or still listening (no switch) | Usually harmless — TX follows the PHC once `ptp4l` settles. Persistent: check the switch's PTP profile and VLAN |
+| The NIC becomes grandmaster although the switch runs PTP | The switch is in transparent-clock mode (sends no `Announce`), uses `priority1` ≥ 250, or PTP is on another VLAN | Configure the switch as a boundary or grandmaster clock with `priority1` below 250 on the media VLAN |
+| `ptp.enable needs the direct MTL TX build` | Built without `-Denable_mtl_tx=true` | Rebuild with the direct MTL TX path |
+| Receivers lock, but video drifts over hours | TX and RX are not actually on the same grandmaster | Re-check `pmc` on every receiver, not just one |
 
 #### Hardware Decode (VA-API)
 

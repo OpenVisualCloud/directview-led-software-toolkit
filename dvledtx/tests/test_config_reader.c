@@ -346,8 +346,8 @@ static void test_parse_screen_capture_keeps_explicit_screen_input(void **state)
 /* ==========================================================================
  * Optional top-level "ptp" object
  *
- * PTP is disabled by default; the block opts in to MTL's built-in PTP client
- * and PTP-paced TX. Any absent key falls back to false.
+ * Only "enable" is read; PTP is disabled by default. Everything else about
+ * the time source is detected at start-up (ptp_auto.c).
  * ========================================================================== */
 
 /* Body shared by the PTP cases — only the "ptp" fragment differs. */
@@ -377,47 +377,10 @@ static void test_parse_ptp_defaults_to_disabled_when_block_absent(void **state)
     unlink(path); free(path);
     assert_int_equal(ret, 0);
     assert_false(cfg.ptp_enable);
-    assert_false(cfg.ptp_pi);
-    assert_false(cfg.ptp_unicast);
     dvledtx_config_free(&cfg);
 }
 
-static void test_parse_ptp_all_true(void **state)
-{
-    (void)state;
-    char *path = write_ptp_config(
-        "\"ptp\": {\"enable\":true,\"pi\":true,\"unicast\":true},");
-    assert_non_null(path);
-
-    struct dvledtx_config cfg;
-    int ret = parse_tx_config(path, &cfg);
-    unlink(path); free(path);
-    assert_int_equal(ret, 0);
-    assert_true(cfg.ptp_enable);
-    assert_true(cfg.ptp_pi);
-    assert_true(cfg.ptp_unicast);
-    dvledtx_config_free(&cfg);
-}
-
-static void test_parse_ptp_all_false(void **state)
-{
-    (void)state;
-    char *path = write_ptp_config(
-        "\"ptp\": {\"enable\":false,\"pi\":false,\"unicast\":false},");
-    assert_non_null(path);
-
-    struct dvledtx_config cfg;
-    int ret = parse_tx_config(path, &cfg);
-    unlink(path); free(path);
-    assert_int_equal(ret, 0);
-    assert_false(cfg.ptp_enable);
-    assert_false(cfg.ptp_pi);
-    assert_false(cfg.ptp_unicast);
-    dvledtx_config_free(&cfg);
-}
-
-/* Each key is independent — enabling PTP alone must not turn on pi/unicast. */
-static void test_parse_ptp_enable_only_leaves_others_false(void **state)
+static void test_parse_ptp_enable_true(void **state)
 {
     (void)state;
     char *path = write_ptp_config("\"ptp\": {\"enable\":true},");
@@ -428,30 +391,24 @@ static void test_parse_ptp_enable_only_leaves_others_false(void **state)
     unlink(path); free(path);
     assert_int_equal(ret, 0);
     assert_true(cfg.ptp_enable);
-    assert_false(cfg.ptp_pi);
-    assert_false(cfg.ptp_unicast);
     dvledtx_config_free(&cfg);
 }
 
-/* Mixed values, and keys deliberately out of declaration order. */
-static void test_parse_ptp_mixed_values_out_of_order(void **state)
+static void test_parse_ptp_enable_false(void **state)
 {
     (void)state;
-    char *path = write_ptp_config(
-        "\"ptp\": {\"unicast\":true,\"enable\":true,\"pi\":false},");
+    char *path = write_ptp_config("\"ptp\": {\"enable\":false},");
     assert_non_null(path);
 
     struct dvledtx_config cfg;
     int ret = parse_tx_config(path, &cfg);
     unlink(path); free(path);
     assert_int_equal(ret, 0);
-    assert_true(cfg.ptp_enable);
-    assert_false(cfg.ptp_pi);
-    assert_true(cfg.ptp_unicast);
+    assert_false(cfg.ptp_enable);
     dvledtx_config_free(&cfg);
 }
 
-/* An empty object is legal and must leave every flag at its default. */
+/* An empty object is legal and must leave PTP at its default. */
 static void test_parse_ptp_empty_object_keeps_defaults(void **state)
 {
     (void)state;
@@ -463,8 +420,41 @@ static void test_parse_ptp_empty_object_keeps_defaults(void **state)
     unlink(path); free(path);
     assert_int_equal(ret, 0);
     assert_false(cfg.ptp_enable);
-    assert_false(cfg.ptp_pi);
-    assert_false(cfg.ptp_unicast);
+    dvledtx_config_free(&cfg);
+}
+
+/* Keys from older releases (mode, pi, unicast, phc_*) are ignored with a
+ * warning — including values the old parser rejected — so existing configs
+ * keep loading and "enable" alone decides. */
+static void test_parse_ptp_legacy_keys_are_ignored(void **state)
+{
+    (void)state;
+    char *path = write_ptp_config(
+        "\"ptp\": {\"mode\":\"master\",\"pi\":true,\"unicast\":true,"
+        "\"phc_device\":\"/etc/shadow\",\"phc_interface\":\"enp4s0\","
+        "\"phc_interval_ms\":-5,\"enable\":true},");
+    assert_non_null(path);
+
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_true(cfg.ptp_enable);
+    dvledtx_config_free(&cfg);
+}
+
+static void test_parse_ptp_legacy_keys_without_enable_stay_disabled(void **state)
+{
+    (void)state;
+    char *path = write_ptp_config(
+        "\"ptp\": {\"mode\":\"grandmaster\",\"phc_interface\":\"enp4s0\"},");
+    assert_non_null(path);
+
+    struct dvledtx_config cfg;
+    int ret = parse_tx_config(path, &cfg);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
+    assert_false(cfg.ptp_enable);
     dvledtx_config_free(&cfg);
 }
 
@@ -472,8 +462,7 @@ static void test_parse_ptp_empty_object_keeps_defaults(void **state)
 static void test_parse_ptp_block_does_not_affect_other_fields(void **state)
 {
     (void)state;
-    char *path = write_ptp_config(
-        "\"ptp\": {\"enable\":true,\"pi\":true,\"unicast\":false},");
+    char *path = write_ptp_config("\"ptp\": {\"enable\":true},");
     assert_non_null(path);
 
     struct dvledtx_config cfg;
@@ -495,7 +484,7 @@ static void test_parse_ptp_block_does_not_affect_other_fields(void **state)
 static void test_parse_ptp_numeric_value_falls_back_to_default(void **state)
 {
     (void)state;
-    char *path = write_ptp_config("\"ptp\": {\"enable\":1,\"pi\":0},");
+    char *path = write_ptp_config("\"ptp\": {\"enable\":1},");
     assert_non_null(path);
 
     struct dvledtx_config cfg;
@@ -503,16 +492,13 @@ static void test_parse_ptp_numeric_value_falls_back_to_default(void **state)
     unlink(path); free(path);
     assert_int_equal(ret, 0);
     assert_false(cfg.ptp_enable);
-    assert_false(cfg.ptp_pi);
-    assert_false(cfg.ptp_unicast);
     dvledtx_config_free(&cfg);
 }
 
 static void test_parse_ptp_string_value_falls_back_to_default(void **state)
 {
     (void)state;
-    char *path = write_ptp_config(
-        "\"ptp\": {\"enable\":\"true\",\"unicast\":\"yes\"},");
+    char *path = write_ptp_config("\"ptp\": {\"enable\":\"true\"},");
     assert_non_null(path);
 
     struct dvledtx_config cfg;
@@ -520,7 +506,6 @@ static void test_parse_ptp_string_value_falls_back_to_default(void **state)
     unlink(path); free(path);
     assert_int_equal(ret, 0);
     assert_false(cfg.ptp_enable);
-    assert_false(cfg.ptp_unicast);
     dvledtx_config_free(&cfg);
 }
 
@@ -1874,25 +1859,9 @@ static void test_load_and_apply_config_fmt_yuv444p(void **state)
     "    \"crop\":{\"x\":0,\"y\":0,\"w\":1920,\"h\":1080}}]" \
     "}"
 
-/* PTP flags must propagate from the parsed config into the app context. */
+/* ptp.enable reaches the app context on the direct MTL TX build; the
+ * mtl_st20p muxer build cannot feed MTL a PHC and falls back to system time. */
 static void test_load_and_apply_config_ptp_enabled(void **state)
-{
-    (void)state;
-    char *path = write_tmpfile(
-        ONE_SESSION_PTP_JSON("{\"enable\":true,\"pi\":true,\"unicast\":true}"));
-    assert_non_null(path);
-    struct dvledtx_context app;
-    memset(&app, 0, sizeof(app));
-    int ret = load_and_apply_config(&app, path);
-    unlink(path); free(path);
-    assert_int_equal(ret, 0);
-    assert_true(app.ptp_enable);
-    assert_true(app.ptp_pi);
-    assert_true(app.ptp_unicast);
-    dvledtx_context_free(&app);
-}
-
-static void test_load_and_apply_config_ptp_enabled_without_pi(void **state)
 {
     (void)state;
     char *path = write_tmpfile(ONE_SESSION_PTP_JSON("{\"enable\":true}"));
@@ -1902,9 +1871,27 @@ static void test_load_and_apply_config_ptp_enabled_without_pi(void **state)
     int ret = load_and_apply_config(&app, path);
     unlink(path); free(path);
     assert_int_equal(ret, 0);
+#ifdef ENABLE_MTL_TX
     assert_true(app.ptp_enable);
-    assert_false(app.ptp_pi);
-    assert_false(app.ptp_unicast);
+#else
+    assert_false(app.ptp_enable);
+#endif
+    dvledtx_context_free(&app);
+}
+
+/* A config written for the old grandmaster mode still loads. */
+static void test_load_and_apply_config_ptp_legacy_grandmaster_block(void **state)
+{
+    (void)state;
+    char *path = write_tmpfile(ONE_SESSION_PTP_JSON(
+        "{\"enable\":true,\"mode\":\"grandmaster\",\"phc_interface\":\"enp4s0\","
+        "\"phc_interval_ms\":1000}"));
+    assert_non_null(path);
+    struct dvledtx_context app;
+    memset(&app, 0, sizeof(app));
+    int ret = load_and_apply_config(&app, path);
+    unlink(path); free(path);
+    assert_int_equal(ret, 0);
     dvledtx_context_free(&app);
 }
 
@@ -1920,8 +1907,6 @@ static void test_load_and_apply_config_ptp_disabled_by_default(void **state)
     unlink(path); free(path);
     assert_int_equal(ret, 0);
     assert_false(app.ptp_enable);
-    assert_false(app.ptp_pi);
-    assert_false(app.ptp_unicast);
     dvledtx_context_free(&app);
 }
 
@@ -2102,11 +2087,11 @@ int main(void)
         cmocka_unit_test(test_parse_screen_capture_defaults_screen_input),
         cmocka_unit_test(test_parse_screen_capture_keeps_explicit_screen_input),
         cmocka_unit_test(test_parse_ptp_defaults_to_disabled_when_block_absent),
-        cmocka_unit_test(test_parse_ptp_all_true),
-        cmocka_unit_test(test_parse_ptp_all_false),
-        cmocka_unit_test(test_parse_ptp_enable_only_leaves_others_false),
-        cmocka_unit_test(test_parse_ptp_mixed_values_out_of_order),
+        cmocka_unit_test(test_parse_ptp_enable_true),
+        cmocka_unit_test(test_parse_ptp_enable_false),
         cmocka_unit_test(test_parse_ptp_empty_object_keeps_defaults),
+        cmocka_unit_test(test_parse_ptp_legacy_keys_are_ignored),
+        cmocka_unit_test(test_parse_ptp_legacy_keys_without_enable_stay_disabled),
         cmocka_unit_test(test_parse_ptp_block_does_not_affect_other_fields),
         cmocka_unit_test(test_parse_ptp_numeric_value_falls_back_to_default),
         cmocka_unit_test(test_parse_ptp_string_value_falls_back_to_default),
@@ -2116,7 +2101,7 @@ int main(void)
         cmocka_unit_test(test_parse_hwaccel_false),
         cmocka_unit_test(test_parse_hwaccel_nested_is_ignored),
         cmocka_unit_test(test_load_and_apply_config_ptp_enabled),
-        cmocka_unit_test(test_load_and_apply_config_ptp_enabled_without_pi),
+        cmocka_unit_test(test_load_and_apply_config_ptp_legacy_grandmaster_block),
         cmocka_unit_test(test_load_and_apply_config_ptp_disabled_by_default),
         cmocka_unit_test(test_parse_session_missing_udp_port_fails),
         cmocka_unit_test(test_parse_session_udp_port_exceeds_65535_fails),

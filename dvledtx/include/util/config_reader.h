@@ -47,12 +47,10 @@ struct dvledtx_config {
   /* optional log file path (empty = console only) */
   char log_file[256];
 
-  /* PTP hardware timing (built-in MTL PTP client), from the optional top-level
-   * "ptp" JSON object. All default to false when the object or a key is absent,
-   * in which case MTL falls back to TSC-based TX pacing. */
+  /* PTP hardware timing, from "ptp": { "enable": true } in the JSON.
+   * Disabled by default (system time, TSC-based TX pacing). Everything else
+   * is detected automatically — see include/util/ptp_auto.h. */
   bool ptp_enable;
-  bool ptp_pi;
-  bool ptp_unicast;
 
   /* tx_sessions array — dynamically allocated */
   int session_count;

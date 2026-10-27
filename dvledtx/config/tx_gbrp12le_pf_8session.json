@@ -20,9 +20,7 @@
     "fmt":    "yuv422p12le"
   },
   "ptp": {
-    "enable":  false,
-    "pi":      false,
-    "unicast": false
+    "enable": false
   },
   "tx_sessions": [
     { "nic_index": 0, "udp_port": 20000, "payload_type": 96, "crop": { "x": 0,    "y": 0,   "w": 384, "h": 540 } },

@@ -428,21 +428,26 @@ int parse_tx_config(const char* config_file, struct dvledtx_config* config) {
         if (hwaccel_val >= 0) config->hwaccel = (hwaccel_val != 0);
     }
 
-    /* PTP hardware timing (built-in MTL PTP client).
-     * Disabled by default: PTP-paced TX requires a PTP grandmaster on the
-     * network, and without one the TX pacing clock never locks. Enable via the
-     * optional top-level "ptp" block. */
-    config->ptp_enable  = false;
-    config->ptp_pi      = false;
-    config->ptp_unicast = false;
+    /* PTP hardware timing — "ptp": { "enable": true }. Disabled by default
+     * (system time, TSC pacing). When enabled, the time source is detected at
+     * start-up (see ptp_auto.h); nothing else is configurable. */
+    config->ptp_enable = false;
     const char* ptp_obj = find_object(json, buf_end, "ptp");
     if (ptp_obj != NULL) {
         const char* ptp_end = find_object_end(ptp_obj, buf_end);
         if (ptp_end == NULL) ptp_end = buf_end;
-        int b;
-        b = extract_json_bool(ptp_obj, ptp_end, "enable");  if (b >= 0) config->ptp_enable  = (b != 0);
-        b = extract_json_bool(ptp_obj, ptp_end, "pi");      if (b >= 0) config->ptp_pi      = (b != 0);
-        b = extract_json_bool(ptp_obj, ptp_end, "unicast"); if (b >= 0) config->ptp_unicast = (b != 0);
+        int b = extract_json_bool(ptp_obj, ptp_end, "enable");
+        if (b >= 0) config->ptp_enable = (b != 0);
+
+        static const char* const legacy_ptp_keys[] = {
+            "mode", "pi", "unicast", "phc_device", "phc_interface", "phc_interval_ms"};
+        for (size_t i = 0; i < sizeof(legacy_ptp_keys) / sizeof(legacy_ptp_keys[0]); i++) {
+            char search_key[32];
+            snprintf(search_key, sizeof(search_key), "\"%s\"", legacy_ptp_keys[i]);
+            if (memmem(ptp_obj, (size_t)(ptp_end - ptp_obj), search_key, strlen(search_key)) != NULL)
+                LOG_WARN("ptp.%s is no longer supported and is ignored; the PTP time "
+                         "source is detected automatically", legacy_ptp_keys[i]);
+        }
     }
 
     /* --- tx_sessions array --- */
@@ -939,15 +944,21 @@ int load_and_apply_config(struct dvledtx_context* app, const char* config_file) 
         app->log_file[sizeof(app->log_file) - 1] = '\0';
     }
 
-    /* PTP hardware timing (built-in MTL PTP client) */
-    app->ptp_enable  = config.ptp_enable;
-    app->ptp_pi      = config.ptp_pi;
-    app->ptp_unicast = config.ptp_unicast;
+    /* PTP hardware timing */
+    app->ptp_enable = config.ptp_enable;
+#ifndef ENABLE_MTL_TX
+    /* On the mtl_st20p muxer path the plugin owns the mtl_init() call and
+     * ptp_get_time_fn has no AVOption equivalent, so the PHC cannot reach MTL. */
+    if (app->ptp_enable) {
+        LOG_WARN("ptp.enable needs the direct MTL TX build (-Denable_mtl_tx=true); "
+                 "using system time");
+        app->ptp_enable = false;
+    }
+#endif
     if (app->ptp_enable)
-        LOG_INFO("PTP enabled: pi_controller=%d unicast_delay_req=%d",
-                 app->ptp_pi, app->ptp_unicast);
+        LOG_INFO("PTP enabled: time source is detected at start-up");
     else
-        LOG_INFO("PTP disabled (default TSC-based TX pacing)");
+        LOG_INFO("PTP disabled (system time, TSC-based TX pacing)");
 
     LOG_INFO("Config loaded: %s (%d NIC(s), %d session(s))",
              config_file, config.nic_count, config.session_count);

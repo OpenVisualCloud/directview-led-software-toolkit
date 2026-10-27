@@ -235,7 +235,7 @@ which implements the standards as published:
 | Authentication of ST 2110-20 senders and receivers | The standard defines no sender or receiver authentication. Provided by controlling which devices can attach to the media segment |
 | Encryption of the video payload | The standard carries the payload in clear RTP. Provided by the physical security of the segment |
 | Integrity and replay protection on the media path | Not defined by the standard. Provided by the physical security of the segment |
-| Authentication of the PTP timing source | IEEE 1588 provides no grandmaster validation. Provided by keeping PTP inside the boundary, and by leaving PTP disabled (default TSC pacing) unless a trusted grandmaster is present |
+| Authentication of the PTP timing source | IEEE 1588 provides no grandmaster validation, and with `ptp.enable` set dvledtx follows whichever grandmaster wins BMCA on the media LAN (or becomes the grandmaster itself if none is announcing). Provided by keeping PTP inside the boundary, and by leaving PTP disabled (default TSC pacing) unless every PTP device on the media LAN is trusted |
 
 **Currently supplied by procedure, and candidates for future releases.** These are provided by
 the operational controls in [Content and Configuration Ingress](#content-and-configuration-ingress)
@@ -258,7 +258,7 @@ controls shown:
 | Risk | Effect | Mitigation |
 |------|--------|------------|
 | Injection of a rogue ST 2110-20 stream | Unauthorised or offensive content displayed on the LED wall | Physically block access to the L2 media VLAN (locked cabinet, disabled unused ports, switch port security / 802.1X); operator visual detection of anomalous wall output |
-| Rogue PTP grandmaster | TX pacing skew and stream disruption | Keep PTP on the air-gapped VLAN; leave PTP disabled (default TSC pacing) unless a trusted grandmaster is present |
+| Rogue PTP grandmaster | TX pacing skew and stream disruption; with PTP enabled, dvledtx's ptp4l (BMCA priority 250) follows any grandmaster that announces a better priority | Keep PTP on the air-gapped VLAN; leave PTP disabled (default TSC pacing) unless every PTP device on the media LAN is trusted |
 | Traffic flooding on the media VLAN | Frame loss and visible artefacts on the wall | Dedicated switch with no other traffic; IGMP snooping and storm control |
 | Passive capture of video | Loss of content confidentiality | The deployment architecture, since the ST 2110-20 path defines no encryption. Confidentiality of the payload depends on controlling physical access to the segment |
 | Substituted video source or configuration file arriving on removable media | Unauthorised content on the wall, or streams redirected to an attacker-chosen destination | Controlled ingress and SHA-256 verification per [Content and Configuration Ingress](#content-and-configuration-ingress); version-controlled configuration |
@@ -340,4 +340,4 @@ means the security model in this document does not hold for the deployment.
 - [ ] Configuration files are under version control with a named author per change.
 - [ ] Removable media used for ingress is dedicated to the deployment and controlled.
 - [ ] A log-export and log-review step exists in the scheduled maintenance procedure.
-- [ ] PTP is disabled unless a trusted grandmaster is present inside the boundary.
+- [ ] PTP is disabled unless every PTP device on the media LAN is trusted (when enabled, dvledtx follows any announcing grandmaster or becomes one).
