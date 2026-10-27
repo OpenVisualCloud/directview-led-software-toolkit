@@ -132,6 +132,7 @@ struct ptp_auto {
   pthread_cond_t   cond;
   enum ptp4l_state state;   /* guarded by lock */
   bool             exited;  /* guarded by lock: ptp4l exited, not yet reaped */
+  bool             running; /* guarded by lock: start-up finished, ptp4l in use */
   bool             stopping;/* guarded by lock */
 };
 
@@ -691,11 +692,11 @@ static void* ptp4l_reader_thread(void* arg) {
 
   pthread_mutex_lock(&pa->lock);
   pa->exited = true;
-  bool stopping = pa->stopping;
+  bool report = pa->running && !pa->stopping;
   pthread_cond_broadcast(&pa->cond);
   pthread_mutex_unlock(&pa->lock);
 
-  if (!stopping)
+  if (report)
     LOG_WARN("PTP: ptp4l on %s exited (%s %d); the NIC PHC is free-running and "
              "receivers have lost their PTP reference",
              pa->iface, si.si_code == CLD_EXITED ? "status" : "signal", si.si_status);
@@ -934,6 +935,10 @@ struct ptp_auto* ptp_auto_start(const struct nic_config* nics, int nic_count) {
   unsigned int wait_ms = (found == 0) ? g_wait_master_ms : g_wait_slave_ms;
   bool exited = false;
   enum ptp4l_state st = ptp4l_wait(pa, want, wait_ms, &exited);
+  pthread_mutex_lock(&pa->lock);
+  exited = pa->exited;
+  pa->running = !exited;
+  pthread_mutex_unlock(&pa->lock);
 
   if (exited) {
     LOG_WARN("PTP: ptp4l on %s exited during start-up; using system time", pa->iface);
