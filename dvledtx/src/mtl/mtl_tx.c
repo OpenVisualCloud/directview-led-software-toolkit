@@ -33,6 +33,7 @@
 #include <inttypes.h>
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 #include <unistd.h>
 
 #ifdef ENABLE_MTL_TX
@@ -257,6 +258,7 @@ int mtl_tx_init(session_manager_t* manager, struct dvledtx_context* app) {
     return -1;
   }
   LOG_INFO("MTL library initialised successfully (%d port(s))", app->nic_count);
+  manager->ptp_watch = app->ptp_enable;
   return 0;
 }
 
@@ -265,6 +267,37 @@ void mtl_tx_uninit(session_manager_t* manager) {
     mtl_uninit(manager->mtl);
     manager->mtl = NULL;
   }
+  manager->ptp_watch = false;
+}
+
+/* A single backward step is normal when the PTP client first locks, so only
+ * consecutive slow samples count; a hardware timesync failure freezes the clock. */
+bool mtl_tx_ptp_watch_update(session_manager_t* manager, uint64_t ptp_ns, uint64_t mono_ns) {
+  if (manager->ptp_last_mono_ns != 0 && mono_ns > manager->ptp_last_mono_ns) {
+    int64_t d_mono = (int64_t)(mono_ns - manager->ptp_last_mono_ns);
+    int64_t d_ptp  = (int64_t)(ptp_ns - manager->ptp_last_ns);
+    if (d_ptp < d_mono / 2)
+      manager->ptp_stall_count++;
+    else
+      manager->ptp_stall_count = 0;
+  }
+  manager->ptp_last_ns      = ptp_ns;
+  manager->ptp_last_mono_ns = mono_ns;
+  return manager->ptp_stall_count >= MTL_TX_PTP_STALL_LIMIT;
+}
+
+bool mtl_tx_ptp_stalled(session_manager_t* manager) {
+  if (manager == NULL || manager->mtl == NULL || manager->ptp_watch == false) return false;
+
+  struct timespec ts;
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return false;
+  uint64_t mono_ns = (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+  uint64_t ptp_ns  = mtl_ptp_read_time(manager->mtl);
+
+  if (mtl_tx_ptp_watch_update(manager, ptp_ns, mono_ns) == false) return false;
+  LOG_ERROR("PTP clock stalled: PTP time %" PRIu64 " ns has not advanced for %d s",
+            ptp_ns, manager->ptp_stall_count);
+  return true;
 }
 
 /* =========================================================================

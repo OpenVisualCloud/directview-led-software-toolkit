@@ -79,6 +79,11 @@ void session_manager_cleanup(session_manager_t* m)
 bool session_manager_is_running(const session_manager_t* m)
     { (void)m; return false; }
 
+static bool stub_ptp_stalled_ret   = false;
+static int  stub_ptp_stalled_calls = 0;
+bool mtl_tx_ptp_stalled(session_manager_t* m)
+    { (void)m; stub_ptp_stalled_calls++; return stub_ptp_stalled_ret; }
+
 /* ===========================================================================
  * Stubs for config_reader functions
  * =========================================================================== */
@@ -201,6 +206,8 @@ static void reset_stubs(void)
     ctx_freed_load_nics            = false;
     g_dvledtx_signal_exit           = 0;
     g_test_exit                    = false;
+    stub_ptp_stalled_ret           = false;
+    stub_ptp_stalled_calls         = 0;
 }
 
 /* ===========================================================================
@@ -448,6 +455,37 @@ static void test_main_test_time_path(void **state)
     char *argv[] = {"dvledtx", "-C", "test.json", NULL};
     int ret = tx_app_real_main(3, argv);
     assert_int_equal(ret, 0);
+}
+
+/* A stalled PTP clock ends the indefinite loop on the first check. */
+static void test_main_ptp_failure_shuts_down(void **state)
+{
+    (void)state;
+    reset_stubs();
+    stub_load_config_set_exit = false;
+    stub_ptp_stalled_ret      = true;
+    optind = 1;
+    char *argv[] = {"dvledtx", "-C", "test.json", NULL};
+    int ret = tx_app_real_main(3, argv);
+    assert_int_equal(ret, -1);
+    assert_int_equal(stub_ptp_stalled_calls, 1);
+    assert_true(g_test_exit);
+}
+
+/* Same for the --test-time loop: it stops early instead of running out. */
+static void test_main_ptp_failure_ends_test_time(void **state)
+{
+    (void)state;
+    reset_stubs();
+    stub_load_config_test_time_s = 30;
+    stub_load_config_set_exit    = false;
+    stub_ptp_stalled_ret         = true;
+    optind = 1;
+    char *argv[] = {"dvledtx", "-C", "test.json", NULL};
+    int ret = tx_app_real_main(3, argv);
+    assert_int_equal(ret, -1);
+    assert_int_equal(stub_ptp_stalled_calls, 1);
+    assert_true(g_test_exit);
 }
 
 /* load_and_apply_config fails → return -1 */
@@ -744,6 +782,8 @@ int main(void)
         cmocka_unit_test(test_main_happy_path_exits_immediately),
         cmocka_unit_test(test_main_registers_avdevice_for_x11grab),
         cmocka_unit_test(test_main_test_time_path),
+        cmocka_unit_test(test_main_ptp_failure_shuts_down),
+        cmocka_unit_test(test_main_ptp_failure_ends_test_time),
         cmocka_unit_test(test_main_config_load_fails),
         cmocka_unit_test(test_main_session_init_fails),
         cmocka_unit_test(test_main_session_start_fails),

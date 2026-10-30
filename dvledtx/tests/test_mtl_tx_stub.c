@@ -32,6 +32,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <libavutil/pixfmt.h>
 #include <libavutil/frame.h>
@@ -65,6 +66,10 @@ int __wrap_st20p_tx_free(st20p_tx_handle handle);
 size_t __wrap_st20p_tx_frame_size(st20p_tx_handle handle);
 struct st_frame* __wrap_st20p_tx_get_frame(st20p_tx_handle handle);
 int __wrap_st20p_tx_put_frame(st20p_tx_handle handle, struct st_frame* frame);
+uint64_t __wrap_mtl_ptp_read_time(mtl_handle mt);
+
+static uint64_t g_ptp_time_ret;    /* value __wrap_mtl_ptp_read_time returns  */
+uint64_t __wrap_mtl_ptp_read_time(mtl_handle mt) { (void)mt; return g_ptp_time_ret; }
 
 mtl_handle __wrap_mtl_init(struct mtl_init_params* p) { (void)p; return g_init_ret; }
 int __wrap_mtl_uninit(mtl_handle mt) { (void)mt; g_uninit_calls++; return 0; }
@@ -94,6 +99,7 @@ static int setup(void **state)
     g_put_frame_ret  = 0;
     g_uninit_calls   = 0;
     g_free_calls     = 0;
+    g_ptp_time_ret   = 0;
     return 0;
 }
 
@@ -210,6 +216,105 @@ static void test_mtl_tx_uninit(void **state)
     /* Second call is a no-op (handle already NULL). */
     mtl_tx_uninit(&mgr);
     assert_int_equal(g_uninit_calls, 1);
+}
+
+/* =========================================================================
+ * PTP clock watchdog
+ * ========================================================================= */
+#define SEC_NS 1000000000ULL
+
+static void test_ptp_watch_armed_only_with_ptp(void **state)
+{
+    (void)state;
+    struct dvledtx_context app;
+    app_init(&app, 1, 1);
+    session_manager_t mgr;
+
+    memset(&mgr, 0, sizeof(mgr));
+    assert_int_equal(mtl_tx_init(&mgr, &app), 0);
+    assert_false(mgr.ptp_watch);
+    mtl_tx_uninit(&mgr);
+
+    app.ptp_enable = true;
+    memset(&mgr, 0, sizeof(mgr));
+    assert_int_equal(mtl_tx_init(&mgr, &app), 0);
+    assert_true(mgr.ptp_watch);
+    mtl_tx_uninit(&mgr);
+    assert_false(mgr.ptp_watch);
+
+    app_free(&app);
+}
+
+/* The failure seen on hardware: PTP time freezes while wall time runs on. */
+static void test_ptp_watch_frozen_clock_trips(void **state)
+{
+    (void)state;
+    session_manager_t mgr;
+    memset(&mgr, 0, sizeof(mgr));
+    const uint64_t frozen = 1000 * SEC_NS;
+
+    assert_false(mtl_tx_ptp_watch_update(&mgr, frozen, 1 * SEC_NS));
+    for (int i = 2; i <= MTL_TX_PTP_STALL_LIMIT; i++)
+        assert_false(mtl_tx_ptp_watch_update(&mgr, frozen, (uint64_t)i * SEC_NS));
+    assert_true(mtl_tx_ptp_watch_update(&mgr, frozen, (MTL_TX_PTP_STALL_LIMIT + 1) * SEC_NS));
+}
+
+/* Locking to a grandmaster may step the clock back once; that must not trip. */
+static void test_ptp_watch_tolerates_single_step(void **state)
+{
+    (void)state;
+    session_manager_t mgr;
+    memset(&mgr, 0, sizeof(mgr));
+    uint64_t ptp = 1000 * SEC_NS;
+
+    for (uint64_t t = 1; t <= 20; t++) {
+        ptp = (t == 5) ? ptp - 47 * SEC_NS : ptp + SEC_NS;
+        assert_false(mtl_tx_ptp_watch_update(&mgr, ptp, t * SEC_NS));
+    }
+    assert_int_equal(mgr.ptp_stall_count, 0);
+}
+
+/* Slow but recovering samples reset the count before the limit. */
+static void test_ptp_watch_recovery_resets_count(void **state)
+{
+    (void)state;
+    session_manager_t mgr;
+    memset(&mgr, 0, sizeof(mgr));
+    uint64_t ptp = 1000 * SEC_NS;
+    uint64_t t = 1;
+
+    assert_false(mtl_tx_ptp_watch_update(&mgr, ptp, t++ * SEC_NS));
+    for (int round = 0; round < 5; round++) {
+        for (int i = 1; i < MTL_TX_PTP_STALL_LIMIT; i++)
+            assert_false(mtl_tx_ptp_watch_update(&mgr, ptp, t++ * SEC_NS));
+        ptp += SEC_NS;
+        assert_false(mtl_tx_ptp_watch_update(&mgr, ptp, t++ * SEC_NS));
+        assert_int_equal(mgr.ptp_stall_count, 0);
+    }
+}
+
+static void test_ptp_stalled_guards_and_reads_mtl(void **state)
+{
+    (void)state;
+    session_manager_t mgr;
+    memset(&mgr, 0, sizeof(mgr));
+
+    assert_false(mtl_tx_ptp_stalled(NULL));
+    mgr.ptp_watch = true;
+    assert_false(mtl_tx_ptp_stalled(&mgr));       /* no MTL instance */
+    mgr.mtl = FAKE_MTL;
+    mgr.ptp_watch = false;
+    assert_false(mtl_tx_ptp_stalled(&mgr));       /* PTP disabled */
+    assert_int_equal(mgr.ptp_stall_count, 0);
+
+    mgr.ptp_watch = true;
+    g_ptp_time_ret = 1000 * SEC_NS;               /* frozen PTP clock */
+    bool stalled = false;
+    for (int i = 0; i <= MTL_TX_PTP_STALL_LIMIT; i++) {
+        usleep(1000);
+        stalled = mtl_tx_ptp_stalled(&mgr);
+    }
+    assert_true(stalled);
 }
 
 /* =========================================================================
@@ -531,6 +636,11 @@ int main(void)
         cmocka_unit_test_setup(test_mtl_tx_init_success, setup),
         cmocka_unit_test_setup(test_mtl_tx_init_failure, setup),
         cmocka_unit_test_setup(test_mtl_tx_uninit, setup),
+        cmocka_unit_test_setup(test_ptp_watch_armed_only_with_ptp, setup),
+        cmocka_unit_test_setup(test_ptp_watch_frozen_clock_trips, setup),
+        cmocka_unit_test_setup(test_ptp_watch_tolerates_single_step, setup),
+        cmocka_unit_test_setup(test_ptp_watch_recovery_resets_count, setup),
+        cmocka_unit_test_setup(test_ptp_stalled_guards_and_reads_mtl, setup),
         cmocka_unit_test_setup(test_session_create_success, setup),
         cmocka_unit_test_setup(test_session_create_defaults_port_and_pt, setup),
         cmocka_unit_test_setup(test_session_create_bad_format, setup),
