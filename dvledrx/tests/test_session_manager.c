@@ -126,9 +126,26 @@ static void test_init_params(void) {
   CHECK_EQ_INT(p->rx_queues_cnt[1], 1 + 2);
   CHECK(p->flags & MTL_FLAG_TASKLET_SLEEP);
   CHECK(p->flags & MTL_FLAG_RX_VIDEO_MIGRATE);
+  CHECK(!(p->flags & MTL_FLAG_PTP_ENABLE)); /* default remains disabled */
   CHECK(!(p->flags & MTL_FLAG_RX_USE_CNI)); /* no VF */
   CHECK(app.mtl == m.mtl && m.mtl != NULL);
   CHECK_EQ_INT(m.st20p_count, 3);
+  session_manager_cleanup(&m);
+  CHECK_EQ_INT(fake_mtl.uninit_calls, 1);
+}
+
+static void test_init_ptp_flags(void) {
+  struct rx_app_context app;
+  session_manager_t m;
+  REQUIRE(make_app(&app,
+      "{ \"ptp\": { \"enable\": true, \"pi\": true, \"unicast\": true }, " IFACE ","
+      "  \"rx_sessions\": [ { \"crop\": { \"w\": 32, \"h\": 16 } } ] }") == 0);
+  fake_mtl_reset();
+  REQUIRE(session_manager_init(&m, &app) == 0);
+  const struct mtl_init_params* p = &fake_mtl.last_init;
+  CHECK(p->flags & MTL_FLAG_PTP_ENABLE);
+  CHECK(p->flags & MTL_FLAG_PTP_PI);
+  CHECK(p->flags & MTL_FLAG_PTP_UNICAST_ADDR);
   session_manager_cleanup(&m);
   CHECK_EQ_INT(fake_mtl.uninit_calls, 1);
 }
@@ -505,6 +522,7 @@ int main(void) {
   RUN_TEST(test_null_args);
   RUN_TEST(test_init_failure);
   RUN_TEST(test_init_params);
+  RUN_TEST(test_init_ptp_flags);
   RUN_TEST(test_init_invalid_sip);
   RUN_TEST(test_start_invalid_dip);
   RUN_TEST(test_start_unknown_nic_index);

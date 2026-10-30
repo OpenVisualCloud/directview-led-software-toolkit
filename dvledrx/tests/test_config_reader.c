@@ -102,6 +102,9 @@ static void test_parse_full_config(void) {
   CHECK_EQ_STR(c.log_file, "rx.log");
   CHECK_EQ_STR(c.log_level, "debug");
   CHECK(c.tasklet_sleep);
+  CHECK(!c.ptp_enable);
+  CHECK(!c.ptp_pi);
+  CHECK(!c.ptp_unicast);
   CHECK_EQ_INT(c.num_rx_sessions, 1);
   CHECK_EQ_INT(c.rx_sessions[0].nic_index, 3);
   CHECK_EQ_INT(c.rx_sessions[0].udp_port, 30000);
@@ -124,10 +127,30 @@ static void test_parse_defaults(void) {
   CHECK_EQ_INT(c.video.fps, 30);
   CHECK_EQ_STR(c.video.fmt, "");
   CHECK(!c.tasklet_sleep);
+  CHECK(!c.ptp_enable);
+  CHECK(!c.ptp_pi);
+  CHECK(!c.ptp_unicast);
   CHECK_EQ_INT(c.rx_sessions[0].nic_index, 0);
   CHECK_EQ_INT(c.rx_sessions[0].udp_port, 20000);
   CHECK_EQ_INT(c.rx_sessions[0].payload_type, 96);
   CHECK_EQ_INT(c.rx_sessions[0].crop.x, 0);
+}
+
+static void test_parse_ptp_config(void) {
+  struct rx_config c;
+  REQUIRE(parse_text(
+      "{ \"ptp\": { \"enable\": true, \"pi\": true, \"unicast\": true },"
+      "  \"rx_sessions\": [ { \"crop\": { \"w\": 16, \"h\": 16 } } ] }", &c) == 0);
+  CHECK(c.ptp_enable);
+  CHECK(c.ptp_pi);
+  CHECK(c.ptp_unicast);
+
+  REQUIRE(parse_text(
+      "{ \"ptp\": {}, \"rx_sessions\": [ { \"crop\": { \"w\": 16, \"h\": 16 } } ] }",
+      &c) == 0);
+  CHECK(!c.ptp_enable);
+  CHECK(!c.ptp_pi);
+  CHECK(!c.ptp_unicast);
 }
 
 static void test_parse_video_size_from_crops(void) {
@@ -468,6 +491,7 @@ int main(int argc, char** argv) {
 
   RUN_TEST(test_parse_full_config);
   RUN_TEST(test_parse_defaults);
+  RUN_TEST(test_parse_ptp_config);
   RUN_TEST(test_parse_video_size_from_crops);
   RUN_TEST(test_parse_displays_and_mirrors);
   RUN_TEST(test_parse_display_mode_not_overridden);

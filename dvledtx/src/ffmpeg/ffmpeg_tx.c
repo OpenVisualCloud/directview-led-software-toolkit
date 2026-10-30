@@ -130,23 +130,51 @@ int open_ffmpeg_tx(struct st20p_tx_ctx* ctx) {
 
   /* PTP hardware timing (built-in MTL PTP client). Only takes effect on the
    * session that actually calls mtl_init() (mtl_dev_get()'s singleton shared
-   * handle) — harmless to set on every session. These AVOptions only exist
-   * when the installed MTL FFmpeg plugin carries the PTP patch; if it doesn't,
-   * av_opt_set_int() returns AVERROR_OPTION_NOT_FOUND, which we treat as a
-   * benign "PTP not supported by this build" case so the app works whether or
-   * not the MTL plugin has the PTP patch applied. */
+   * handle) — harmless to set on every session. Older FFmpeg-MTL patches may
+   * not expose all PTP AVOptions, so detect that case and keep startup
+   * compatible; when supported, select PTP pacing explicitly. */
   if (ctx->app->ptp_enable) {
     static const char* const ptp_opts[] = {"ptp_enable", "ptp_pi", "ptp_unicast"};
     const int ptp_vals[] = {1, ctx->app->ptp_pi ? 1 : 0, ctx->app->ptp_unicast ? 1 : 0};
-    for (size_t i = 0; i < FF_ARRAY_ELEMS(ptp_opts); i++) {
-      ret = av_opt_set_int(ctx->out_fmt_ctx->priv_data, ptp_opts[i], ptp_vals[i], 0);
-      if (ret == AVERROR_OPTION_NOT_FOUND) {
-        LOG_INFO("ST20P TX(%d): PTP AVOptions unsupported by installed MTL plugin "
-                 "(no PTP patch); continuing without built-in PTP", ctx->idx);
+    static const char* const required_opts[] = {
+        "ptp_enable", "ptp_pi", "ptp_unicast", "pacing_way"};
+    const char* missing_opt = NULL;
+    for (size_t i = 0; i < FF_ARRAY_ELEMS(required_opts); i++) {
+      if (av_opt_find(ctx->out_fmt_ctx->priv_data, required_opts[i], NULL, 0, 0) == NULL) {
+        missing_opt = required_opts[i];
         break;
       }
-      if (ret < 0)
-        LOG_WARN("ST20P TX(%d): av_opt_set_int %s failed (ret=%d)", ctx->idx, ptp_opts[i], ret);
+    }
+    if (missing_opt != NULL) {
+      LOG_INFO("ST20P TX(%d): PTP requested but MTL FFmpeg plugin lacks '%s' AVOption; "
+               "continuing without PTP (use a PTP-enabled MTL FFmpeg patch)",
+               ctx->idx, missing_opt);
+    } else {
+      const char* failed_opt = NULL;
+      int failed_ret = 0;
+      for (size_t i = 0; i < FF_ARRAY_ELEMS(ptp_opts); i++) {
+        ret = av_opt_set_int(ctx->out_fmt_ctx->priv_data, ptp_opts[i], ptp_vals[i], 0);
+        if (ret < 0) {
+          failed_opt = ptp_opts[i];
+          failed_ret = ret;
+          break;
+        }
+      }
+      if (ret >= 0) {
+        ret = av_opt_set(ctx->out_fmt_ctx->priv_data, "pacing_way", "ptp", 0);
+        if (ret < 0) {
+          failed_opt = "pacing_way";
+          failed_ret = ret;
+        }
+      }
+      if (failed_opt != NULL) {
+        LOG_ERROR("ST20P TX(%d): MTL plugin PTP option '%s' was advertised but setting it failed "
+                  "(ret=%d)", ctx->idx, failed_opt, failed_ret);
+        avformat_free_context(ctx->out_fmt_ctx);
+        ctx->out_fmt_ctx = NULL;
+        return -1;
+      }
+      LOG_INFO("ST20P TX(%d): MTL built-in PTP client and PTP pacing enabled", ctx->idx);
     }
   }
 
