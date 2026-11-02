@@ -79,6 +79,9 @@ struct rx_config {
     char log_level[16];       /* Optional log level: debug|info|warn|error */
     char display_mode[16];    /* "composite" (default) | "per_output" */
     bool tasklet_sleep;       /* let the MTL scheduler sleep when idle (saves a busy core) */
+    bool ptp_enable;          /* enable MTL's built-in PTP client (default false) */
+    bool ptp_pi;              /* use MTL PTP PI controller (PF only) */
+    bool ptp_unicast;         /* use unicast PTP_DELAY_REQ */
 };
 
 /* Parse JSON configuration file into rx_config.  Returns 0 on success. */

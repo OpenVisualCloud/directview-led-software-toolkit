@@ -35,6 +35,16 @@ static int json_int_get(json_object* obj, const char* key, int fallback) {
     return fallback;
 }
 
+/* Helper: get a boolean from a JSON object (returns fallback on miss/type mismatch). */
+static bool json_bool_get(json_object* obj, const char* key, bool fallback) {
+    json_object* val = NULL;
+    if (json_object_object_get_ex(obj, key, &val) &&
+        json_object_is_type(val, json_type_boolean)) {
+        return json_object_get_boolean(val) != 0;
+    }
+    return fallback;
+}
+
 /* ------------------------------------------------------------------ */
 /* parse_rx_config – read the JSON file and populate struct rx_config. */
 /* ------------------------------------------------------------------ */
@@ -97,6 +107,15 @@ int parse_rx_config(const char* config_file, struct rx_config* config) {
     json_object* sleep_obj = NULL;
     if (json_object_object_get_ex(root, "tasklet_sleep", &sleep_obj))
         config->tasklet_sleep = json_object_get_boolean(sleep_obj);
+
+    /* ---------- optional MTL built-in PTP client ---------- */
+    json_object* ptp = NULL;
+    if (json_object_object_get_ex(root, "ptp", &ptp) &&
+        json_object_is_type(ptp, json_type_object)) {
+        config->ptp_enable = json_bool_get(ptp, "enable", false);
+        config->ptp_pi = json_bool_get(ptp, "pi", false);
+        config->ptp_unicast = json_bool_get(ptp, "unicast", false);
+    }
 
     /* ---------- rx_sessions ---------- */
     json_object* sessions = NULL;

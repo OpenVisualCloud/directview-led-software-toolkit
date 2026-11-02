@@ -22,6 +22,7 @@
 #include "app_context.h"
 #include "util/config_reader.h"
 #include "core/session_manager.h"
+#include "mtl/mtl_tx.h"
 #include "util/logger.h"
 
 #define DVLEDTX_VERSION "1.0.0"
@@ -46,6 +47,15 @@ static void dvledtx_apply_pending_signal_exit(void) {
   if (g_dvledtx_signal_exit == 0) return;
   session_manager_request_exit();
   if (g_app_ptr != NULL) g_app_ptr->exit = true;
+}
+
+/* MTL cannot switch pacing at runtime, so a stalled PTP clock ends the run. */
+static bool dvledtx_check_ptp(session_manager_t* sm, struct dvledtx_context* app) {
+  if (mtl_tx_ptp_stalled(sm) == false) return false;
+  LOG_ERROR("PTP failure: TX pacing has stopped, shutting down and releasing MTL");
+  session_manager_request_exit();
+  app->exit = true;
+  return true;
 }
 
 /* =========================================================================
@@ -167,6 +177,7 @@ int main(int argc, char** argv) {
   struct dvledtx_context app;
   session_manager_t session_manager;
   int ret = 0;
+  bool ptp_failed = false;
   FILE *log_fp = NULL;
   memset(&app, 0, sizeof(app));
 
@@ -319,12 +330,14 @@ int main(int argc, char** argv) {
     LOG_INFO("Transmitting for %d seconds... Press Ctrl+C to stop", app.test_time_s);
     for (int i = 0; i < app.test_time_s && app.exit == false; i++) {
       dvledtx_apply_pending_signal_exit();
+      if (dvledtx_check_ptp(&session_manager, &app)) { ptp_failed = true; break; }
       sleep(1);
     }
   } else {
     LOG_INFO("Transmitting indefinitely... Press Ctrl+C to stop");
     while (app.exit == false) {
       dvledtx_apply_pending_signal_exit();
+      if (dvledtx_check_ptp(&session_manager, &app)) { ptp_failed = true; break; }
       sleep(1);
     }
   }
@@ -335,7 +348,9 @@ int main(int argc, char** argv) {
   /* R-2: Log shutdown reason for audit trail */
   LOG_INFO("Shutdown reason: %s",
            (g_dvledtx_signal_exit != 0) ? "signal (SIGINT/SIGTERM)" :
+           ptp_failed ? "PTP failure" :
            (app.test_time_s > 0 ? "test_time elapsed" : "application exit"));
+  if (ptp_failed) ret = -1;
 
 cleanup:
   /* Stop and cleanup session manager */

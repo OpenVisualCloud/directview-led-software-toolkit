@@ -138,6 +138,12 @@ typedef struct session_manager_s {
 
   mtl_handle mtl;   /* MTL library instance — owns all st20p_tx sessions */
 
+  /* PTP clock watchdog, armed only when MTL was initialised with PTP */
+  bool     ptp_watch;
+  uint64_t ptp_last_ns;
+  uint64_t ptp_last_mono_ns;
+  int      ptp_stall_count;
+
   bool running;
 } session_manager_t;
 
