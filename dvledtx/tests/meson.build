@@ -144,7 +144,8 @@ if mtl_dep.found()
     link_args: ['-Wl,--wrap=mtl_init', '-Wl,--wrap=mtl_uninit',
                 '-Wl,--wrap=mtl_pmd_by_port_name', '-Wl,--wrap=st20p_tx_create',
                 '-Wl,--wrap=st20p_tx_free', '-Wl,--wrap=st20p_tx_frame_size',
-                '-Wl,--wrap=st20p_tx_get_frame', '-Wl,--wrap=st20p_tx_put_frame'],
+                '-Wl,--wrap=st20p_tx_get_frame', '-Wl,--wrap=st20p_tx_put_frame',
+                '-Wl,--wrap=mtl_ptp_read_time'],
     install: false,
     build_by_default: false
   )

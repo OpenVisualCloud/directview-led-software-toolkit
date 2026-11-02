@@ -245,7 +245,7 @@ ST 2110 senders normally derive their TX pacing from a PTP (IEEE 1588) clock. dv
 }
 ```
 
-**PTP is disabled by default.** When the block is absent — or `enable` is `false` — MTL falls back to TSC-based pacing, which derives timing from the CPU's invariant timestamp counter and requires no external clock. This is the recommended setting for lab and standalone use.
+**PTP is disabled by default.** When the block is absent — or `enable` is `false` — TX uses its non-PTP pacing path. When enabled, dvledtx asks MTL's built-in PTP client to synchronize and selects PTP pacing in both direct-MTL and FFmpeg TX paths.
 
 Enable PTP only when a **PTP grandmaster is present on the network** (a dedicated appliance or a boundary-clock switch). MTL's built-in PTP client is *slave-only* — it cannot elect itself grandmaster — so with `enable: true` and no grandmaster on the link the TX pacing clock never locks and transmission stalls.
 
@@ -263,7 +263,11 @@ With PTP disabled the log instead shows:
 MTL: ... tv_attach(0), pacing way: tsc
 ```
 
-> Requires an MTL/FFmpeg build that exposes the `ptp_enable`, `ptp_pi` and `ptp_unicast` AVOptions on the `mtl_st20p` muxer. If they are missing, dvledtx logs a warning and continues without built-in PTP rather than failing.
+The RX app can also opt in to MTL's built-in PTP client with the same top-level `ptp` block; for example, set `enable` to `true` in `dvledrx/config/rx_fullhd_1session.json`. The option is false by default. RX PTP initializes MTL's clock client; it does not schedule frames for presentation or guarantee synchronized physical display scanout.
+
+For FFmpeg TX, the installed `mtl_st20p` muxer must expose the `ptp_enable`, `ptp_pi`, `ptp_unicast` and `pacing_way` AVOptions. If PTP is requested and an option is unavailable, dvledtx logs that PTP is unsupported by the installed plugin and continues without PTP. If the options are advertised but cannot be set, initialization fails rather than silently ignoring a configuration error.
+
+MTL uses NIC hardware timesync/PHC when the selected NIC and driver support it. Some configurations (including VFs) use a software/TSC time source instead. Enabling this option requests MTL's built-in PTP behavior; it does not guarantee hardware clock availability, grandmaster lock, or cross-host display genlock. `MTL_FLAG_ENABLE_HW_TIMESTAMP` is a separate packet-capture/compliance option and is not enabled by this setting.
 
 #### Hardware Decode (VA-API)
 

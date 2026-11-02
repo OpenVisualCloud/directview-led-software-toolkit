@@ -676,6 +676,13 @@ int session_manager_init(session_manager_t* manager, struct rx_app_context* app)
   mtl_params.log_level = MTL_LOG_LEVEL_INFO;
   mtl_params.flags |= MTL_FLAG_DEV_AUTO_START_STOP;
   mtl_params.flags |= MTL_FLAG_RX_VIDEO_MIGRATE;
+  if (cfg->ptp_enable) {
+    mtl_params.flags |= MTL_FLAG_PTP_ENABLE;
+    if (cfg->ptp_pi) mtl_params.flags |= MTL_FLAG_PTP_PI;
+    if (cfg->ptp_unicast) mtl_params.flags |= MTL_FLAG_PTP_UNICAST_ADDR;
+    log_info(LOGGER_TAG, "MTL built-in PTP client enabled (pi=%d unicast=%d)",
+             cfg->ptp_pi, cfg->ptp_unicast);
+  }
   if (cfg->tasklet_sleep) {
     /* Scheduler sleeps when idle; RX sessions cap it at ~128 packet times. */
     mtl_params.flags |= MTL_FLAG_TASKLET_SLEEP;
