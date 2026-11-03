@@ -228,6 +228,20 @@ boundary-clock switch). MTL's built-in PTP client is *slave-only* — it cannot 
 grandmaster — so with `enable: true` and no grandmaster on the link the TX pacing clock never locks
 and transmission stalls.
 
+**PTP stall watchdog (direct-MTL build only).** With `-Denable_mtl_tx=true` and PTP enabled,
+dvledtx samples the PTP clock about once per second. MTL cannot switch pacing at runtime, so if the
+PTP clock advances at less than half real-time speed for 3 consecutive samples, dvledtx stops
+instead of hanging, releases MTL and exits with a non-zero status:
+
+```
+[ERROR] PTP clock stalled: PTP time <ns> ns has not advanced for 3 s
+[ERROR] PTP failure: TX pacing has stopped, shutting down and releasing MTL
+```
+
+A single backward step when the PTP client first locks is normal and does not trigger the
+watchdog. In the default FFmpeg build the MTL plugin owns the PTP clock, there is no watchdog, and a
+lost grandmaster leaves transmission stalled.
+
 The startup log reports the active settings and the pacing mode chosen by MTL:
 
 ```
@@ -640,7 +654,12 @@ correct build: `export LD_LIBRARY_PATH=/path/to/vaapi-ffmpeg/lib`.
 - Blank or wrong frames — the desktop is running Wayland; see
   [Ensuring an X11 Session](#ensuring-an-x11-session).
 
-### PTP enabled but transmission stalls
+### PTP enabled but transmission stalls or exits
 
-No grandmaster is reachable on the link. Either provide a grandmaster or set `ptp.enable` to
-`false`.
+| Build | Symptom |
+|-------|---------|
+| Default (FFmpeg TX path) | Transmission stalls with no error |
+| `-Denable_mtl_tx=true` | dvledtx logs `PTP clock stalled` and `PTP failure: TX pacing has stopped, shutting down and releasing MTL`, then exits with a non-zero status |
+
+The cause is the same in both: no grandmaster is reachable on the link, or it was lost during the
+run. Either provide a grandmaster or set `ptp.enable` to `false`. See [PTP Timing](#ptp-timing).
