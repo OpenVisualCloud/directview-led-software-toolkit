@@ -122,8 +122,14 @@ The steps below match the pinned versions used by CI:
 | DPDK | v26.07 with the MTL patches |
 | FFmpeg | `release/7.0` with the MTL `mtl_st20p` plugin |
 
-The upstream [MTL build guide](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md)
-is the authoritative reference if anything below differs on your system.
+The upstream MTL guides for the pinned commit are the authoritative reference if anything below
+differs on your system:
+[APT packages](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md#111-ubuntudebian),
+[DPDK build and install](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md#2-dpdk-build-and-install),
+[MTL build](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md#3-build-media-transport-library-and-app)
+and [FFmpeg plugin build](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/ecosystem/ffmpeg_plugin/README.md#1-build).
+Supported OS: Ubuntu [22.04](https://releases.ubuntu.com/jammy/) or
+[24.04](https://releases.ubuntu.com/noble/) LTS.
 
 ### 1. System Packages
 
@@ -422,18 +428,29 @@ Application-specific issues are covered in [dvledtx/README.md](dvledtx/README.md
 and [dvledrx/README.md](dvledrx/README.md#troubleshooting). Common issues:
 
 1. **MTL initialization failed**
-   - Check that the PCI address in the config matches your hardware (`lspci | grep Ethernet`,
-     use the `0000:06:00.0` BDF form).
+   - Check that the PCI address in the config matches your hardware:
+     ```bash
+     lspci | grep Ethernet
+     # Example output: 06:00.0 Ethernet controller: Intel Corporation ...
+     # Use BDF format in config: "0000:06:00.0"
+     ```
    - Verify MTL and DPDK are installed:
      ```bash
-     ldconfig -p | grep mtl                 # libmtl.so present
-     pkg-config --modversion mtl            # 26.09.0.REL
-     ls /usr/local/include/mtl/mtl_api.h
-     pkg-config --modversion libdpdk
+     ldconfig -p | grep mtl
+     # Expected: libmtl.so (libc6,x86-64) => /usr/local/lib/x86_64-linux-gnu/libmtl.so
+     pkg-config --modversion mtl            # Expected: 26.09.0.REL
+     ls /usr/local/include/mtl/mtl_api.h    # MTL headers present
+     pkg-config --modversion libdpdk        # DPDK installed
      ```
-   - Verify the NIC is bound to VFIO: `sudo ${mtl_source_code}/script/nicctl.sh list all` or
-     `dpdk-devbind.py --status` (should show `drv=vfio-pci`).
+   - Verify the NIC is bound to VFIO:
+     ```bash
+     sudo ${mtl_source_code}/script/nicctl.sh list all
+     # Or use dpdk-devbind.py:
+     dpdk-devbind.py --status
+     # The target NIC should show "drv=vfio-pci"
+     ```
    - Ensure IOMMU is enabled — see [IOMMU / VFIO Kernel Parameters](#iommu--vfio-kernel-parameters-grub).
+   - Verify the network card is supported (Intel I225, I226, E810 series).
 
 2. **Hugepage allocation failure / transmission issues**
    ```bash

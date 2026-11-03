@@ -51,6 +51,11 @@ From the repository root, after [building](../README.md#build):
 
 # transmit for 60 seconds then exit
 ./build/dvledtx/dvledtx --config dvledtx/config/tx_fullhd_single_session.json --test-time 60
+
+# show version
+./build/dvledtx/dvledtx --version
+# or
+./build/dvledtx/dvledtx -v
 ```
 
 ### Command-Line Options
@@ -69,7 +74,11 @@ dvledtx has two transmit back-ends, chosen at build time with the `enable_mtl_tx
 | Build | TX path | Notes |
 |-------|---------|-------|
 | default (`-Denable_mtl_tx=false`) | FFmpeg `mtl_st20p` muxer (`libavdevice`) | Requires the MTL FFmpeg plugin. Up to 8 NICs via the `p_port`/`r_port` + `p2_port`..`p7_port` AVOptions of the pinned plugin; older plugin revisions only expose `p_port`/`r_port` (max 2 NICs). |
-| `-Denable_mtl_tx=true` | MTL pipeline API (`st20p_tx_get_frame` / `st20p_tx_put_frame`) | Bypasses the FFmpeg muxer. Always supports up to 8 NICs. |
+| `-Denable_mtl_tx=true` | MTL pipeline API (`st20p_tx_get_frame` / `st20p_tx_put_frame`) | Defines `ENABLE_MTL_TX` and bypasses `avformat_write_header` / `av_write_frame`. Always supports up to 8 NICs. |
+
+At the pinned MTL commit the `mtl_st20p` muxer exposes `p_port`/`r_port` plus `p2_port`..`p7_port`
+(and matching `p2_sip`..`p7_sip`), so up to 8 NICs work on the default build with no local
+patching. Older MTL revisions capped `nic_count` at 2 on the FFmpeg TX path.
 
 ```bash
 bash scripts/build.sh -Denable_mtl_tx=true
@@ -94,7 +103,7 @@ dvledtx is configured entirely by a JSON file passed with `--config`. Sample fil
 | | `height` | Source frame height in pixels |
 | | `input_mode` | (Optional) `file` (default) or `screen_capture` |
 | | `tx_url` | Path to the source video file (`input_mode: file`) |
-| | `screen_input` | x11grab source `<display>[+<x>,<y>]` (`input_mode: screen_capture`), e.g. `:0.0+0,0` |
+| | `screen_input` | (Optional) x11grab source `<display>[+<x>,<y>]` (`input_mode: screen_capture`). Default `:0.0+0,0` |
 | **tx_video** | `scale_width` | (Optional) Output width after scaling. See [Video Scaling](#video-scaling). |
 | | `scale_height` | (Optional) Output height after scaling |
 | | `fps` | Frames per second: 25, 30, 50, 60 |
@@ -115,7 +124,7 @@ The config is validated at start-up; on error dvledtx logs the offending field a
 - `interfaces[].name` must be a PCI BDF (`DDDD:BB:DD.F`); `dip` must be multicast.
 - Source and scaled sizes are limited to 3840×2160; `video.width` must be even for YUV formats.
 - `scale_width` and `scale_height` must be set together.
-- `screen_input` is required for `screen_capture`; `tx_url` must exist for `file`.
+- `tx_url` must exist and be readable for `input_mode: file`.
 - Crops must lie inside the source frame — or the **scaled** frame when scaling is set — and
   respect the format's chroma alignment (even `x`/`w` for 4:2:2, even `x`/`y`/`w`/`h` for 4:2:0).
 - `nic_index` must refer to an existing interface; two sessions on the same NIC cannot share a
@@ -162,8 +171,21 @@ into three 640×1080 strips on one NIC:
 ```
 
 To spread sessions across NICs, add entries to `interfaces[]` (up to 8, MTL's port limit) and set
-each session's `nic_index` — see
-[`config/tx_fullhd_multi_nic.json`](config/tx_fullhd_multi_nic.json) for 8 NICs × 1 session.
+each session's `nic_index`. For example, two halves of a 1920×1080 frame on two NICs:
+
+```json
+"interfaces": [
+  { "nic_index": 0, "name": "0000:03:10.0", "sip": "192.168.50.30", "dip": "239.168.85.20" },
+  { "nic_index": 1, "name": "0000:03:10.2", "sip": "192.168.50.29", "dip": "239.168.85.21" }
+],
+"tx_sessions": [
+  { "nic_index": 0, "udp_port": 20000, "payload_type": 96, "crop": { "x": 0,   "y": 0, "w": 960, "h": 1080 } },
+  { "nic_index": 1, "udp_port": 20002, "payload_type": 96, "crop": { "x": 960, "y": 0, "w": 960, "h": 1080 } }
+]
+```
+
+See [`config/tx_2k_2nic.json`](config/tx_2k_2nic.json) (2 NICs) and
+[`config/tx_fullhd_multi_nic.json`](config/tx_fullhd_multi_nic.json) (8 NICs × 1 session).
 
 ### Sample Configurations
 
@@ -275,15 +297,17 @@ Confirm which path was taken from the startup log:
   and `vainfo | grep VAEntrypointVLD`.
 - A DRM render node (e.g. `/dev/dri/renderD128`) must be readable and writable by the user running
   dvledtx. The device is selected automatically; there is no config key to pin a render node.
-- The GPU must support the stream's decode profile — check `vainfo` for a matching `VAProfile*`
-  with `VAEntrypointVLD`.
+- The GPU must support the stream's decode profile — check `vainfo` for a `VAProfileHEVC*` (or
+  matching codec) entry with the `VAEntrypointVLD` entrypoint.
 - **RGB (`gbrp10le` / `gbrp12le`) sources can never use VA-API** — FFmpeg's HEVC decoder only
   offers a VA-API surface for YUV formats. This is a decoder limitation, not a configuration error.
 - This setting affects the **source** decode only and is independent of `tx_video.fmt`.
 
 > **Note on throughput:** hardware decode reduces decode CPU time, but frames must then be
-> downloaded from GPU to system memory, which costs roughly what the decode saved. Treat it as a
-> way to free CPU cycles for other work on the host, not as a throughput optimisation.
+> downloaded from GPU to system memory, which costs roughly what the decode saved. On this pipeline
+> — where MTL pacing and colour conversion dominate — enabling it is not expected to change
+> end-to-end CPU usage or achievable frame rate. Treat it as a way to free CPU cycles for other
+> work on the host, not as a throughput optimisation.
 
 ### Screen Capture
 
@@ -327,10 +351,41 @@ Set `video.input_mode` to `screen_capture` to transmit whatever is rendered on a
 ```
 
 `screen_input` follows FFmpeg's `x11grab` syntax: `<display>[+<x>,<y>]` (e.g. `:99.0+0,0` captures
-display `:99` starting at offset `0,0`). The capture size and frame rate come from
-`video.width`/`height` and `tx_video.fps`. Multiple `tx_sessions` split the capture into regions
-exactly as for file input — see
-[`config/tx_fullhd_screen_capture_multi_session.json`](config/tx_fullhd_screen_capture_multi_session.json).
+display `:99`, matching the [headless virtual display](#screen-capture-on-a-headless-machine),
+starting at offset `0,0`). If omitted it defaults to `:0.0+0,0`. The capture size and frame rate
+come from `video.width`/`height` and `tx_video.fps`.
+
+#### Example: Multi-Session Screen Capture
+
+[`config/tx_fullhd_screen_capture_multi_session.json`](config/tx_fullhd_screen_capture_multi_session.json)
+splits a 1920×1080 screen capture into 3 vertical strips, each transmitted as a separate ST 2110
+session:
+
+```json
+{
+  "interfaces": [
+    { "name": "0000:06:00.0", "sip": "192.168.50.29", "dip": "239.168.85.20" }
+  ],
+  "video": {
+    "width": 1920,
+    "height": 1080,
+    "input_mode": "screen_capture",
+    "screen_input": ":99.0+0,0"
+  },
+  "tx_video": {
+    "fps": 30,
+    "fmt": "yuv422p10le"
+  },
+  "tx_sessions": [
+    { "udp_port": 20000, "payload_type": 96, "crop": { "x": 0,    "y": 0, "w": 640, "h": 1080 } },
+    { "udp_port": 20002, "payload_type": 96, "crop": { "x": 640,  "y": 0, "w": 640, "h": 1080 } },
+    { "udp_port": 20004, "payload_type": 96, "crop": { "x": 1280, "y": 0, "w": 640, "h": 1080 } }
+  ]
+}
+```
+
+Run dvledtx as usual — `x11grab` captures whatever is rendered on the display and transmits it,
+exactly as it would for a physical display:
 
 ```bash
 ./build/dvledtx/dvledtx --config dvledtx/config/tx_fullhd_screen_capture.json
@@ -541,6 +596,8 @@ Log output when scaling is active:
 
 - **Hugepage memory**: all frame buffers are allocated on hugepages.
 - **Minimal copying**: frames are cropped and handed directly to MTL.
+- **Hardware acceleration**: uses MTL's NIC hardware features (pacing, timesync where supported).
+- **Efficient threading**: minimal context switching between decode and transmit.
 - **Bandwidth**: uncompressed video is large — 1080p30 4:2:2 10-bit is ≈1.3 Gb/s per full-frame
   stream; 4:4:4 / 12-bit and higher frame rates scale proportionally. Size NICs accordingly.
 - **Hardware decode** frees CPU but does not raise throughput.
@@ -558,7 +615,7 @@ ffprobe /path/to/video.mp4  # valid video stream
 df -h .                     # enough disk space
 ```
 
-- Make sure the video's resolution matches `video.width`/`height`.
+- Make sure the file matches the config parameters (resolution in `video.width`/`height`).
 - Symlinked config files are rejected for security reasons.
 
 ### Hardware decode falls back to the CPU
