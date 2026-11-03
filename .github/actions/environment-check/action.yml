@@ -14,7 +14,7 @@ inputs:
   mtl-commit:
     description: 'MTL commit ID to build'
     required: false
-    default: '9762c314ed24bd628d3f808b95a94c3aa8525723'
+    default: '7bee24231c864d12da6db2c2ffbfd3986717af5a'
   ffmpeg-version:
     description: 'FFmpeg release branch to build'
     required: false

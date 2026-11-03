@@ -4,7 +4,7 @@
 [![CI](https://github.com/OpenVisualCloud/directview-led-software-toolkit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/OpenVisualCloud/directview-led-software-toolkit/actions/workflows/ci.yml)
 <a href="https://scan.coverity.com/projects/openvisualcloud-directview-led-software-toolkit"><img alt="Coverity Scan Build Status" src="https://scan.coverity.com/projects/33108/badge.svg"/></a>
 [![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20|%2024.04-orange.svg)](https://releases.ubuntu.com/jammy/)
-[![MTL](https://img.shields.io/badge/MTL-v26.09-green.svg)](https://github.com/OpenVisualCloud/Media-Transport-Library/releases/tag/v26.09)
+[![MTL](https://img.shields.io/badge/MTL-v26.01+-green.svg)](https://github.com/OpenVisualCloud/Media-Transport-Library)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/OpenVisualCloud/directview-led-software-toolkit/badge)](https://securityscorecards.dev/viewer/?uri=github.com/OpenVisualCloud/directview-led-software-toolkit)
 
 ## Table of Contents
@@ -114,20 +114,20 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
 - Ubuntu [22.04](https://releases.ubuntu.com/jammy/) or [24.04](https://releases.ubuntu.com/noble/) LTS
 - Receiver build dependencies: `libx11-dev`, `libxext-dev`, `libxrandr-dev`, `libjson-c-dev`, and `zlib1g-dev`.
 - Receiver X11/session unit tests use `xvfb-run`; install `xvfb` and `xauth` to run the full receiver test suite.
-- [Media Transport Library (MTL) v26.09](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md)
+- [Media Transport Library (MTL) v26.01+](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md)
   - Follow these steps
-    - [Install APT packages](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md#111-ubuntudebian)
+    - [Install APT packages](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md#111-ubuntudebian)
     - Clone Media-Transport-Library
       ```
       git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git
       cd Media-Transport-Library
-      git checkout 9762c314ed24bd628d3f808b95a94c3aa8525723
+      git checkout 7bee24231c864d12da6db2c2ffbfd3986717af5a
       cd ..
       export mtl_source_code=${PWD}/Media-Transport-Library
       ```
-    - [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md#2-dpdk-build-and-install)
-    - [Build and install MTL](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md#3-build-media-transport-library-and-app)
-  - [FFmpeg 7.0 with MTL Plugin](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/ecosystem/ffmpeg_plugin/README.md#1-build)
+    - [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md#2-dpdk-build-and-install)
+    - [Build and install MTL](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md#3-build-media-transport-library-and-app)
+  - [FFmpeg 7.0 with MTL Plugin](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/ecosystem/ffmpeg_plugin/README.md#1-build)
   - **Screen capture support (`input_mode: screen_capture`) requires FFmpeg's `x11grab` device.** It is auto-detected and compiled in by FFmpeg's `./configure` script, but only if these packages are installed *before* building FFmpeg:
     ```bash
     sudo apt-get install -y libx11-dev libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev
@@ -149,7 +149,7 @@ FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ff
     vainfo | grep VAEntrypointVLD
     ```
     If either prints nothing, hardware decode is unavailable and dvledtx silently falls back to CPU decode. See [Hardware Decode (VA-API)](#hardware-decode-va-api).
-  - **12-bit formats (`yuv422p12le`, `yuv444p12le`, `gbrp12le`) require both MTL and FFmpeg to be built from the pinned v26.09 commit above.** The plugin sources are copied into FFmpeg's `libavdevice/` and compiled in, so rebuilding MTL alone is not enough — FFmpeg must be rebuilt against the same MTL commit or these formats are rejected at session setup.
+  - **12-bit formats (`yuv422p12le`, `yuv444p12le`, `gbrp12le`) require both MTL and FFmpeg to be built from the pinned commit above.** The plugin sources are copied into FFmpeg's `libavdevice/` and compiled in, so rebuilding MTL alone is not enough — FFmpeg must be rebuilt against the same MTL commit or these formats are rejected at session setup.
   - At the pinned commit the `mtl_st20p` muxer exposes `p_port`/`r_port` plus `p2_port`..`p7_port` (and matching `p2_sip`..`p7_sip`), so up to 8 NICs work with the default (non-`ENABLE_MTL_TX`) build with no local patching. Older MTL revisions exposed only `p_port`/`r_port`, which capped `nic_count` at 2 for the FFmpeg TX path; the `ENABLE_MTL_TX` direct-pipeline build has always supported up to 8 NICs.
 
 ### Build Steps
@@ -175,8 +175,8 @@ The build produces `build/dvledtx/dvledtx` and `build/dvledrx/dvledrx`.
 ### Binding Ethernet Controller to DPDK PMD and Hugepage Setup 
 
 - Ensure VFIO group exists [follow](#vfio-group-setup)
-- [DPDK PMD Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/run.md#3-dpdk-pmd-setup)
-- [Hugepage Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/run.md#4-setup-hugepage)
+- [DPDK PMD Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/run.md#3-dpdk-pmd-setup)
+- [Hugepage Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/run.md#4-setup-hugepage)
 
 ### JSON Configuration
 
