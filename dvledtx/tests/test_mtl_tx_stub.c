@@ -283,12 +283,15 @@ static void test_ptp_watch_recovery_resets_count(void **state)
     uint64_t ptp = 1000 * SEC_NS;
     uint64_t t = 1;
 
-    assert_false(mtl_tx_ptp_watch_update(&mgr, ptp, t++ * SEC_NS));
+    assert_false(mtl_tx_ptp_watch_update(&mgr, ptp, t * SEC_NS));
     for (int round = 0; round < 5; round++) {
-        for (int i = 1; i < MTL_TX_PTP_STALL_LIMIT; i++)
-            assert_false(mtl_tx_ptp_watch_update(&mgr, ptp, t++ * SEC_NS));
+        for (int i = 1; i < MTL_TX_PTP_STALL_LIMIT; i++) {
+            t++;
+            assert_false(mtl_tx_ptp_watch_update(&mgr, ptp, t * SEC_NS));
+        }
         ptp += SEC_NS;
-        assert_false(mtl_tx_ptp_watch_update(&mgr, ptp, t++ * SEC_NS));
+        t++;
+        assert_false(mtl_tx_ptp_watch_update(&mgr, ptp, t * SEC_NS));
         assert_int_equal(mgr.ptp_stall_count, 0);
     }
 }
