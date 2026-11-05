@@ -7,14 +7,10 @@ name: 'Environment Setup'
 description: 'Install and verify all required libraries and tools on the runner'
 
 inputs:
-  dpdk-version:
-    description: 'DPDK version to build'
-    required: false
-    default: '26.07'
   mtl-commit:
-    description: 'MTL commit ID to build'
+    description: 'MTL commit ID to build; the DPDK version comes from its versions.env'
     required: false
-    default: '9762c314ed24bd628d3f808b95a94c3aa8525723'
+    default: '7bee24231c864d12da6db2c2ffbfd3986717af5a'
   ffmpeg-version:
     description: 'FFmpeg release branch to build'
     required: false
@@ -49,6 +45,28 @@ runs:
         fi
         echo "cpu-features=$CPU_FEATURES" >> "$GITHUB_OUTPUT"
 
+    - name: Resolve DPDK version from MTL versions.env
+      id: dpdk-version
+      shell: bash
+      env:
+        MTL_COMMIT: ${{ inputs.mtl-commit }}
+      run: |
+        echo "===== DPDK Version ====="
+        if ! [[ "$MTL_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]; then
+          echo "ERROR: mtl-commit must be a full 40-character commit ID, got '$MTL_COMMIT'."
+          exit 1
+        fi
+        VERSIONS_URL="https://raw.githubusercontent.com/OpenVisualCloud/Media-Transport-Library/${MTL_COMMIT}/versions.env"
+        VERSIONS_ENV=$(curl -fsSL --retry 3 "$VERSIONS_URL")
+        # Parsed instead of sourced, so nothing from the downloaded file is executed.
+        DPDK_VERSION=$(printf '%s\n' "$VERSIONS_ENV" | tr -d '\r' | sed -n 's/^DPDK_VER=//p' | head -1)
+        if ! [[ "$DPDK_VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+          echo "ERROR: no valid DPDK_VER in $VERSIONS_URL (got '$DPDK_VERSION')."
+          exit 1
+        fi
+        echo "  DPDK $DPDK_VERSION (from MTL $MTL_COMMIT versions.env)"
+        echo "version=$DPDK_VERSION" >> "$GITHUB_OUTPUT"
+
     - name: Restore environment cache
       id: env-cache
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -56,9 +74,9 @@ runs:
         path: |
           ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
-        key: env-cpu-${{ steps.runner-image.outputs.cpu-features }}-env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}-${{ steps.runner-image.outputs.version }}-${{ runner.arch }}
+        key: env-cpu-${{ steps.runner-image.outputs.cpu-features }}-env-dpdk-${{ steps.dpdk-version.outputs.version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}-${{ steps.runner-image.outputs.version }}-${{ runner.arch }}
         restore-keys: |
-          env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}
+          env-dpdk-${{ steps.dpdk-version.outputs.version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}
 
     - name: Deploy cache to system
       if: steps.env-cache.outputs.cache-matched-key != ''
@@ -203,7 +221,7 @@ runs:
     - name: Build and install DPDK
       shell: bash
       env:
-        DPDK_VERSION: ${{ inputs.dpdk-version }}
+        DPDK_VERSION: ${{ steps.dpdk-version.outputs.version }}
         MTL_COMMIT: ${{ inputs.mtl-commit }}
       run: |
         echo "===== DPDK Setup ====="
@@ -435,4 +453,4 @@ runs:
         path: |
           ${{ runner.temp }}/dvledtx-deps
           ${{ runner.temp }}/mtl-source
-        key: env-cpu-${{ steps.runner-image.outputs.cpu-features }}-env-dpdk-${{ inputs.dpdk-version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}-${{ steps.runner-image.outputs.version }}-${{ runner.arch }}
+        key: env-cpu-${{ steps.runner-image.outputs.cpu-features }}-env-dpdk-${{ steps.dpdk-version.outputs.version }}-mtl-${{ inputs.mtl-commit }}-ffmpeg-${{ inputs.ffmpeg-version }}-v${{ inputs.env-cache-version }}-${{ runner.os }}-${{ steps.runner-image.outputs.name }}-${{ steps.runner-image.outputs.version }}-${{ runner.arch }}
