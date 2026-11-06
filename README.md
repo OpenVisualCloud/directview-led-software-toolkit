@@ -53,7 +53,7 @@ contains two applications:
 
 ### Architecture
 
-![dvledtx Architecture](docs/architecture.png)
+![Direct View LED Software Toolkit architecture: dvledtx transmitter and dvledrx receiver stacks](docs/architecture.png)
 
 ### System Requirements
 
