@@ -307,7 +307,7 @@ Confirm which path was taken from the startup log:
 **Requirements and limitations**
 
 - FFmpeg must be built with `--enable-vaapi` and the VA-API runtime installed (see the
-  [install steps](../README.md#3-toolkit-packages)). Verify with `ffmpeg -hwaccels | grep vaapi`
+  [install steps](../README.md#va-api-hardware-decode-packages-optional)). Verify with `ffmpeg -hwaccels | grep vaapi`
   and `vainfo | grep VAEntrypointVLD`.
 - A DRM render node (e.g. `/dev/dri/renderD128`) must be readable and writable by the user running
   dvledtx. The device is selected automatically; there is no config key to pin a render node.
@@ -331,7 +331,7 @@ Set `video.input_mode` to `screen_capture` to transmit whatever is rendered on a
 **Requirements**
 
 - FFmpeg built with the `x11grab` device — the `libxcb*` packages must be installed **before**
-  configuring FFmpeg (see the [install steps](../README.md#3-toolkit-packages)). Verify with
+  configuring FFmpeg (see the [install steps](../README.md#screen-capture-packages)). Verify with
   `ffmpeg -devices | grep x11grab`; otherwise screen capture fails at runtime with
   `x11grab input format not found`.
 - An **X11 (Xorg)** display — `x11grab` does not work against Wayland. See
@@ -547,7 +547,7 @@ dvledtx includes a built-in logger with configurable output targets.
 | `gbrp12le` | 4:4:4 | 12-bit | RGB |
 
 12-bit formats require MTL and FFmpeg built from the pinned commit (see the
-[install steps](../README.md#2-ffmpeg-with-the-mtl-plugin)).
+[install steps](../README.md#ffmpeg-with-the-mtl-plugin)).
 
 ### Frame Rates (`tx_video.fps`)
 

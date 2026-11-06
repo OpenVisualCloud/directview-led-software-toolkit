@@ -15,16 +15,18 @@
   - [Deployment Security Model](#deployment-security-model)
 - [Documentation Map](#documentation-map)
 - [Notices](#notices)
-- [Install](#install)
-  - [1. MTL and DPDK](#1-mtl-and-dpdk)
-  - [2. FFmpeg with the MTL Plugin](#2-ffmpeg-with-the-mtl-plugin)
-  - [3. Toolkit Packages](#3-toolkit-packages)
-  - [4. Verify the Installation](#4-verify-the-installation)
+- [Common Installation: MTL and DPDK](#common-installation-mtl-and-dpdk)
+- [Dependencies for dvledtx (TX)](#dependencies-for-dvledtx-tx)
+  - [Screen Capture Packages](#screen-capture-packages)
+  - [VA-API Hardware Decode Packages (Optional)](#va-api-hardware-decode-packages-optional)
+  - [FFmpeg with the MTL Plugin](#ffmpeg-with-the-mtl-plugin)
+- [Dependencies for dvledrx (RX)](#dependencies-for-dvledrx-rx)
+- [Verify the Installation](#verify-the-installation)
+- [Build](#build)
 - [Host Setup](#host-setup)
   - [IOMMU / VFIO Kernel Parameters (GRUB)](#iommu--vfio-kernel-parameters-grub)
   - [VFIO Group Setup](#vfio-group-setup)
   - [Bind NICs to DPDK and Configure Hugepages](#bind-nics-to-dpdk-and-configure-hugepages)
-- [Build](#build)
 - [Run](#run)
   - [Command-Line Options](#command-line-options)
   - [Run the Transmitter (dvledtx)](#run-the-transmitter-dvledtx)
@@ -96,7 +98,13 @@ validation checklist.
 
 | Topic | Document |
 |-------|----------|
-| Install, build, host setup and quick start (TX and RX) | This README |
+| Common installation (TX and RX) | [Common Installation: MTL and DPDK](#common-installation-mtl-and-dpdk) |
+| TX dependencies: screen capture, VA-API, FFmpeg with the MTL plugin | [Dependencies for dvledtx (TX)](#dependencies-for-dvledtx-tx) |
+| RX dependencies | [Dependencies for dvledrx (RX)](#dependencies-for-dvledrx-rx) |
+| Verify the installation | [Verify the Installation](#verify-the-installation) |
+| Build both applications | [Build](#build) |
+| Host setup (TX and RX) | [Host Setup](#host-setup) |
+| Run (TX and RX) | [Run](#run) |
 | Transmitter: JSON configuration, formats, scaling, PTP, VA-API decode, screen capture, logging | [dvledtx/README.md](dvledtx/README.md) |
 | Receiver: JSON configuration, display modes, multi-monitor walls, PTP, logging | [dvledrx/README.md](dvledrx/README.md) |
 | Deployment assumptions and security model | [docs/assumptions.md](docs/assumptions.md) |
@@ -111,22 +119,18 @@ You are solely responsible for determining if your use of FFmpeg requires any ad
 Intel is not responsible for obtaining any such licenses, nor liable for any licensing fees due, in
 connection with your use of FFmpeg.
 
-## Install
+## Common Installation: MTL and DPDK
 
-Both applications build on the Media Transport Library (MTL), DPDK and FFmpeg with the MTL plugin.
-Install those by following MTL's own guides at the pinned commit, then add the few extra packages
-that dvledtx and dvledrx need.
+Both applications are built on the Media Transport Library (MTL) and DPDK. Install them on every
+TX and RX host by following MTL's own guides at the pinned commit.
 
 | Dependency | Version | Source |
 |------------|---------|--------|
 | Media Transport Library | MTL 26.01+, commit [`7bee2423`](https://github.com/OpenVisualCloud/Media-Transport-Library/tree/7bee24231c864d12da6db2c2ffbfd3986717af5a) (`26.01.0.DEV`) | [MTL build guide](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md) |
 | DPDK | 26.03 (`DPDK_VER`) with the MTL patches | [`versions.env`](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/versions.env) at the pinned commit |
-| FFmpeg | 7.0 (`FFMPEG_VERSION`) with the MTL plugin | [`versions.env`](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/versions.env) at the pinned commit |
 
 These are the versions CI builds against. Supported OS: Ubuntu
 [22.04](https://releases.ubuntu.com/jammy/) and [24.04](https://releases.ubuntu.com/noble/) LTS.
-
-### 1. MTL and DPDK
 
 Clone MTL at the pinned commit:
 
@@ -148,62 +152,119 @@ Then follow the MTL build guide at that commit:
 > `${mtl_source_code}/patches/dpdk/26.03/` patches. The example commands in the guide at this
 > commit still show 25.11.
 
-### 2. FFmpeg with the MTL Plugin
+## Dependencies for dvledtx (TX)
 
-Install the [dvledtx packages](#3-toolkit-packages) first, then follow the
-[MTL FFmpeg plugin build guide](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/ecosystem/ffmpeg_plugin/README.md#1-build)
-at the pinned commit. FFmpeg's `./configure` only picks up optional features whose packages are
+dvledtx decodes and transmits through FFmpeg with the MTL plugin. Install the packages below
+**before** building FFmpeg: FFmpeg's `./configure` only enables optional features whose packages are
 already installed.
 
-- **Screen capture** (dvledtx `input_mode: screen_capture`) needs FFmpeg's `x11grab` device, which
-  is only compiled in when the `libxcb*` packages are installed before `./configure`.
-- **Hardware decode** (dvledtx `"hwaccel": true`) needs `--enable-vaapi` added to the plugin
-  guide's `./configure` line.
+### Screen Capture Packages
+
+Needed for `input_mode: screen_capture`. FFmpeg's `x11grab` device is only compiled in when these
+packages are present.
+
+```bash
+sudo apt-get install -y libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev
+```
+
+### VA-API Hardware Decode Packages (Optional)
+
+Needed only for `"hwaccel": true`. Also add `--enable-vaapi` to FFmpeg's `./configure` line.
+
+```bash
+sudo apt-get install -y libva-dev vainfo intel-media-va-driver-non-free
+```
+
+### FFmpeg with the MTL Plugin
+
+Follow the
+[MTL FFmpeg plugin build guide](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/ecosystem/ffmpeg_plugin/README.md#1-build)
+at the pinned commit. It builds FFmpeg 7.0 (`FFMPEG_VERSION` in
+[`versions.env`](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/versions.env)).
+
 - **12-bit formats** (`yuv422p12le`, `yuv444p12le`, `gbrp12le`) need MTL **and** FFmpeg built from
   the same pinned commit. The plugin sources are compiled into FFmpeg's `libavdevice`, so
   rebuilding MTL alone is not enough.
 - **Up to 8 NICs** on the default dvledtx FFmpeg TX path rely on the `p2_port`..`p7_port`
   AVOptions present in the plugin at the pinned commit.
 
-### 3. Toolkit Packages
+| Packages | Used for |
+|----------|----------|
+| `libxcb1-dev`, `libxcb-shm0-dev`, `libxcb-xfixes0-dev` | FFmpeg `x11grab`, for `input_mode: screen_capture` |
+| `libva-dev`, `vainfo`, `intel-media-va-driver-non-free` (optional) | VA-API hardware decode, for `"hwaccel": true` |
+| FFmpeg 7.0 with the MTL plugin | Decoding, scaling and ST 2110-20 transmission |
 
-These packages are needed on top of the MTL and FFmpeg prerequisites.
+## Dependencies for dvledrx (RX)
 
-**dvledtx**
-
-```bash
-# Screen capture (FFmpeg x11grab), install before configuring FFmpeg
-sudo apt-get install -y libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev
-# Optional: VA-API hardware decode, install before configuring FFmpeg
-sudo apt-get install -y libva-dev vainfo intel-media-va-driver-non-free
-```
-
-**dvledrx**
+dvledrx receives directly through MTL and renders with X11; it does not use FFmpeg.
 
 ```bash
 sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev zlib1g-dev
 ```
 
-| Application | Packages | Used for |
-|-------------|----------|----------|
-| dvledtx | `libxcb1-dev`, `libxcb-shm0-dev`, `libxcb-xfixes0-dev` | FFmpeg `x11grab`, for `input_mode: screen_capture` |
-| dvledtx (optional) | `libva-dev`, `vainfo`, `intel-media-va-driver-non-free` | VA-API hardware decode, for `"hwaccel": true` |
-| dvledrx | `libx11-dev`, `libxext-dev`, `libxrandr-dev` | X11 rendering, MIT-SHM and XRandR output placement |
-| dvledrx | `zlib1g-dev` | Log file compression |
+| Packages | Used for |
+|----------|----------|
+| `libx11-dev`, `libxext-dev`, `libxrandr-dev` | X11 rendering, MIT-SHM and XRandR output placement |
+| `zlib1g-dev` | Log file compression |
 
 dvledrx also uses `libjson-c-dev`, which is already installed with the MTL prerequisites.
 
-### 4. Verify the Installation
+> **Note:** [`scripts/build.sh`](scripts/build.sh) builds both applications from one Meson project,
+> which checks for the FFmpeg libraries. To build on an RX-only host, FFmpeg must still be
+> installed. The MTL plugin and the optional TX packages are not needed.
+
+## Verify the Installation
 
 ```bash
+# Common: MTL and DPDK
 pkg-config --modversion libdpdk          # expected: 26.03.x
 pkg-config --modversion mtl              # expected: 26.01.0.DEV
 ls /usr/local/include/mtl/mtl_api.h      # MTL headers present
 ldconfig -p | grep libmtl                # libmtl.so => /usr/local/lib/x86_64-linux-gnu/libmtl.so
+
+# dvledtx: FFmpeg with the MTL plugin
 pkg-config --modversion libavformat      # FFmpeg 7.0 (libavformat 61.x)
 ffmpeg -hide_banner -muxers  | grep mtl_st20p   # MTL plugin present
-ffmpeg -hide_banner -devices | grep x11grab     # dvledtx screen capture
-ffmpeg -hide_banner -hwaccels | grep vaapi      # optional: dvledtx hardware decode
+ffmpeg -hide_banner -devices | grep x11grab     # screen capture
+ffmpeg -hide_banner -hwaccels | grep vaapi      # optional: hardware decode
+
+# dvledrx: X11 libraries
+pkg-config --modversion x11 xext xrandr
+```
+
+## Build
+
+With the dependencies installed, clone the repository and build both applications:
+
+```bash
+git clone https://github.com/OpenVisualCloud/directview-led-software-toolkit
+cd directview-led-software-toolkit
+bash scripts/build.sh
+```
+
+The script wipes and recreates `build/`, then produces:
+
+| Binary | Path |
+|--------|------|
+| Transmitter | `build/dvledtx/dvledtx` |
+| Receiver | `build/dvledrx/dvledrx` |
+
+Extra Meson options are passed straight through. The only project option selects the dvledtx TX
+path (it does not affect dvledrx):
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `enable_mtl_tx` | `false` | `false`: transmit through FFmpeg's `mtl_st20p` muxer. `true`: transmit with MTL's pipeline API (`st20p_tx_*`) directly. |
+
+```bash
+bash scripts/build.sh -Denable_mtl_tx=true
+```
+
+Manual equivalent:
+
+```bash
+meson setup build [-Denable_mtl_tx=true]
+ninja -C build
 ```
 
 ## Host Setup
@@ -269,41 +330,6 @@ dpdk-devbind.py --status       # target NIC/VFs should show drv=vfio-pci
 # Allocate hugepages
 sudo sysctl -w vm.nr_hugepages=2048
 grep Huge /proc/meminfo
-```
-
-## Build
-
-With the dependencies installed, clone the repository and build both applications:
-
-```bash
-git clone https://github.com/OpenVisualCloud/directview-led-software-toolkit
-cd directview-led-software-toolkit
-bash scripts/build.sh
-```
-
-The script wipes and recreates `build/`, then produces:
-
-| Binary | Path |
-|--------|------|
-| Transmitter | `build/dvledtx/dvledtx` |
-| Receiver | `build/dvledrx/dvledrx` |
-
-Extra Meson options are passed straight through. The only project option selects the dvledtx TX
-path (it does not affect dvledrx):
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `enable_mtl_tx` | `false` | `false`: transmit through FFmpeg's `mtl_st20p` muxer. `true`: transmit with MTL's pipeline API (`st20p_tx_*`) directly. |
-
-```bash
-bash scripts/build.sh -Denable_mtl_tx=true
-```
-
-Manual equivalent:
-
-```bash
-meson setup build [-Denable_mtl_tx=true]
-ninja -C build
 ```
 
 ## Run
@@ -408,7 +434,7 @@ and [dvledrx/README.md](dvledrx/README.md#troubleshooting). Common issues:
      # Use BDF format in config: "0000:06:00.0"
      ```
    - Check MTL, DPDK and FFmpeg are installed at the expected versions — see
-     [Verify the Installation](#4-verify-the-installation).
+     [Verify the Installation](#verify-the-installation).
    - Verify the NIC is bound to VFIO:
      ```bash
      sudo ${mtl_source_code}/script/nicctl.sh list all
