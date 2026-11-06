@@ -27,6 +27,7 @@
   - [IOMMU / VFIO Kernel Parameters (GRUB)](#iommu--vfio-kernel-parameters-grub)
   - [VFIO Group Setup](#vfio-group-setup)
   - [Bind NICs to DPDK and Configure Hugepages](#bind-nics-to-dpdk-and-configure-hugepages)
+  - [Locked-Memory Limit (Non-Root Run)](#locked-memory-limit-non-root-run)
 - [Run](#run)
   - [Command-Line Options](#command-line-options)
   - [Run the Transmitter (dvledtx)](#run-the-transmitter-dvledtx)
@@ -322,15 +323,46 @@ Quick reference:
 # Find the NIC PCI address (use the BDF form "0000:06:00.0" in the JSON configs)
 lspci | grep Ethernet
 
-# Bind a PF to vfio-pci, or create VFs on it
+# Either bind a PF to vfio-pci (TX or RX)
 sudo ${mtl_source_code}/script/nicctl.sh bind_pmd 0000:06:00.0
-sudo ${mtl_source_code}/script/nicctl.sh create_vf 0000:06:00.0   # alternative: VFs
+
+# Or use VFs:
+#   TX host: plain VFs are enough
+sudo ${mtl_source_code}/script/nicctl.sh create_vf 0000:06:00.0
+#   RX host: trusted VFs plus a promiscuous PF (see dvledrx/README.md, Virtual Functions)
+sudo ${mtl_source_code}/script/nicctl.sh create_tvf 0000:06:00.0 <num_vfs>
+sudo ip link set <pf_iface> promisc on
+
 dpdk-devbind.py --status       # target NIC/VFs should show drv=vfio-pci
 
 # Allocate hugepages
 sudo sysctl -w vm.nr_hugepages=2048
 grep Huge /proc/meminfo
 ```
+
+VF settings, PF promiscuous mode and hugepages are lost at reboot. Re-apply them at every boot,
+for example from a startup script or systemd unit. For RX VF details see
+[dvledrx — Virtual Functions](dvledrx/README.md#virtual-functions-vfs).
+
+### Locked-Memory Limit (Non-Root Run)
+
+The applications run as a normal user, so DPDK needs a high enough locked-memory limit
+(`RLIMIT_MEMLOCK`). If it is too low, start-up fails with:
+
+```text
+EAL: Cannot set up DMA remapping, error 12 (Cannot allocate memory)
+```
+
+Raise the limit as described in the
+[MTL run guide: notes for non-root run](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/run.md#821-rlimit_memlock),
+for example by adding these lines to `/etc/security/limits.conf` and rebooting:
+
+```text
+<user>    hard   memlock           unlimited
+<user>    soft   memlock           unlimited
+```
+
+Check with `ulimit -l`; it should print `unlimited`.
 
 ## Run
 

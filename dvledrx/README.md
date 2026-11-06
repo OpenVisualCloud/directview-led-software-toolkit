@@ -318,18 +318,34 @@ Supported frame rates: 25, 30, 50 and 60 fps. Maximum frame size is 4K
 
 ## Virtual Functions (VFs)
 
-When an interface is an SR-IOV VF, multicast only reaches it if the parent PF is in promiscuous
-mode and the VF is trusted with spoof checking off. Set this up during
+When an interface is an SR-IOV VF, dvledrx puts the VF into promiscuous mode so it can receive
+multicast. NICs such as ixgbe only allow this when the VF is **trusted** and the parent PF is
+already **promiscuous**. Set this up during
 [host setup](../README.md#bind-nics-to-dpdk-and-configure-hugepages):
 
 ```bash
-sudo ${mtl_source_code}/script/nicctl.sh create_tvf <PF BDF>   # trusted VFs, PF brought up
-sudo ip link set <PF netdev> promisc on
+# Create trusted VFs, bind them to vfio-pci and bring the PF up
+sudo ${mtl_source_code}/script/nicctl.sh create_tvf <pf_bdf> <num_vfs>
+# Put the parent PF into promiscuous mode (not done by create_tvf)
+sudo ip link set <pf_iface> promisc on
 ```
 
-dvledrx also tries to apply these settings at start-up (`ip link …`). If it lacks the privileges,
-it logs `VF setup: ... failed (need root/CAP_NET_ADMIN?)` and continues; this is harmless when the
-host setup above was done.
+- `<pf_bdf>` is the PF's PCI address (e.g. `0000:03:00.0`); `<num_vfs>` defaults to 6.
+  `create_tvf` removes any existing VFs on that PF before creating new ones.
+- `<pf_iface>` is the PF's kernel interface name, e.g. from `ls /sys/bus/pci/devices/<pf_bdf>/net/`.
+- Both settings are lost when the system reboots or the PF driver reloads. Run them at every boot,
+  for example from a startup script or systemd unit.
+
+dvledrx also tries to apply these settings itself at start-up with `ip link` (PF promiscuous on,
+VF trust on, VF spoof checking off, PF link up). It does not raise its own privileges:
+
+- **As a normal user**, the commands fail, nothing changes, and dvledrx logs
+  `VF setup: ... failed (need root/CAP_NET_ADMIN?)` and continues. This is harmless when the host
+  setup above was done.
+- **Under `sudo`**, the settings are applied immediately and are **not** reverted when dvledrx
+  exits; they stay until reboot or PF driver reload.
+
+dvledtx does not need this setup: it only transmits and never requests promiscuous mode.
 
 ## Troubleshooting
 
@@ -344,5 +360,7 @@ Common install/host issues (MTL init, hugepages, VFIO) are in the
 | `rv_slot_by_tmstamp` errors on every packet | `video.fps` does not match the sender's frame rate. |
 | `No active monitor matches HDMI-1 ...` | Output name is wrong or the monitor is off — check `xrandr --listmonitors`. |
 | `VF setup: ... failed (need root/CAP_NET_ADMIN?)` | Expected for a regular user. If nothing is received, do the [VF host setup](#virtual-functions-vfs). |
+| Receiver on a VF gets no video, or the kernel logs `Enabling VF promisc requires PF in promisc` | The VF is not trusted or the PF is not promiscuous. Run `sudo ${mtl_source_code}/script/nicctl.sh create_tvf <pf_bdf> <num_vfs>`, then `sudo ip link set <pf_iface> promisc on`. Both are lost at reboot or PF driver reload, so run them at every boot (startup script or systemd unit). See [Virtual Functions](#virtual-functions-vfs). |
+| `EAL: ... DMA remapping failed, error 12 (Cannot allocate memory)` | The locked-memory limit is too low for a non-root run; see [Host Setup](../README.md#locked-memory-limit-non-root-run). |
 | `log_file '...' rejected: ... world-writable` | Use a private directory for the log file (not `/tmp`). |
 | `Config file ... is invalid` | The preceding log line names the field; see [Validation Rules](#validation-rules). |
