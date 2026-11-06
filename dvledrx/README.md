@@ -73,16 +73,7 @@ dvledrx renders with Xlib (MIT-SHM when available), so it needs:
   `DISPLAY environment variable not set` and runs without a window.
 - XRandR for per-output placement (`xrandr --listmonitors` shows the output names to use).
 
-When running as root via `sudo`, allow root to connect and preserve the environment:
-
-```bash
-export DISPLAY=:0
-xhost +si:localuser:root
-sudo -E ./build/dvledrx/dvledrx --config <file>
-```
-
-dvledrx hands its shared-memory segments to the invoking user (`SUDO_UID`) so a rootless Xorg can
-attach to them.
+Run dvledrx as the user who owns the X11 session.
 
 ## JSON Configuration
 
@@ -103,7 +94,7 @@ dvledrx is configured entirely by a JSON file passed with `--config`. Sample fil
 | | `dip` / `DIP` | Multicast group to join (the transmitter's `dip`) |
 | **video** | `width` | (Optional) Full frame width. Default: bounding box of all crops. |
 | | `height` | (Optional) Full frame height. Default: bounding box of all crops. |
-| | `fps` | (Optional) 24, 25, 29 (29.97), 30, 50, 59 (59.94) or 60. Default `30`. |
+| | `fps` | (Optional) 25, 30, 50 or 60. Default `30`. |
 | | `fmt` | (Optional) Pixel format (see [Supported Formats](#supported-formats)). Default `yuv422p10le`. |
 | **ptp** | `enable` | (Optional) Enable MTL's built-in PTP client. Default `false`. See [PTP](#ptp). |
 | | `pi` | (Optional) Use the PI controller (physical-function NICs only). Default `false` |
@@ -136,14 +127,15 @@ The config is validated at start-up; on error dvledrx logs the offending field a
 
 ### Example: Single Session
 
-[`config/rx_fullhd_1session.json`](config/rx_fullhd_1session.json):
+Based on [`config/rx_fullhd_1session.json`](config/rx_fullhd_1session.json), with `nic_index`
+shown explicitly:
 
 ```json
 {
   "log_file": "RxApp.log",
   "log_level": "info",
   "interfaces": [
-    { "name": "0000:03:00.1", "SIP": "192.168.50.65", "DIP": "239.168.85.20" }
+    { "nic_index": 0, "name": "0000:03:00.1", "SIP": "192.168.50.65", "DIP": "239.168.85.20" }
   ],
   "video": {
     "width": 960, "height": 1080,
@@ -152,10 +144,13 @@ The config is validated at start-up; on error dvledrx logs the offending field a
   },
   "ptp": { "enable": false, "pi": false, "unicast": false },
   "rx_sessions": [
-    { "udp_port": 20000, "payload_type": 96, "crop": { "x": 0, "y": 0, "w": 960, "h": 1080 } }
+    { "nic_index": 0, "udp_port": 20000, "payload_type": 96, "crop": { "x": 0, "y": 0, "w": 960, "h": 1080 } }
   ]
 }
 ```
+
+`rx_sessions[].nic_index` selects the interface whose `nic_index` matches. Both default to `0`
+when omitted, so single-NIC configs can leave them out.
 
 The multicast `DIP`, `udp_port`, `payload_type`, `fmt`, `fps` and crop size must match the
 transmitter — see the [end-to-end table](../README.md#end-to-end-example).
@@ -307,7 +302,7 @@ idle (capped at roughly 128 packet times for RX sessions), saving a core at a sm
 | `gbrp12le` | 4:4:4 | 12-bit | RGB | 36 |
 | `yuv420` | 4:2:0 | 8-bit | YUV | 12 |
 
-Frame rates: 24, 25, 29 (29.97), 30, 50, 59 (59.94) and 60 fps. Maximum frame size is 4K
+Supported frame rates: 25, 30, 50 and 60 fps. Maximum frame size is 4K
 (3840×2160, or 2160×3840 in portrait).
 
 ## Multi-NIC and Bandwidth
@@ -323,11 +318,18 @@ Frame rates: 24, 25, 29 (29.97), 30, 50, 59 (59.94) and 60 fps. Maximum frame si
 
 ## Virtual Functions (VFs)
 
-When an interface is an SR-IOV VF, dvledrx prepares its parent PF so multicast reaches the VF:
-it enables PF promiscuous mode, sets the VF to `trust on` and `spoofchk off`, and brings the PF
-link up (`ip link …`). This needs root or `CAP_NET_ADMIN`; without it a warning is logged
-(`VF setup: ... failed (need root/CAP_NET_ADMIN?)`) and reception may not work. Alternatively
-create trusted VFs up front with `nicctl.sh create_tvf <PF BDF>`.
+When an interface is an SR-IOV VF, multicast only reaches it if the parent PF is in promiscuous
+mode and the VF is trusted with spoof checking off. Set this up during
+[host setup](../README.md#bind-nics-to-dpdk-and-configure-hugepages):
+
+```bash
+sudo ${mtl_source_code}/script/nicctl.sh create_tvf <PF BDF>   # trusted VFs, PF brought up
+sudo ip link set <PF netdev> promisc on
+```
+
+dvledrx also tries to apply these settings at start-up (`ip link …`). If it lacks the privileges,
+it logs `VF setup: ... failed (need root/CAP_NET_ADMIN?)` and continues; this is harmless when the
+host setup above was done.
 
 ## Troubleshooting
 
@@ -336,11 +338,11 @@ Common install/host issues (MTL init, hugepages, VFIO) are in the
 
 | Symptom | Cause / Fix |
 |---------|-------------|
-| `DISPLAY environment variable not set` | `export DISPLAY=:0` (or the right display). Under `sudo`, use `sudo -E`. |
-| `Cannot open X11 display ':0'` | Xorg not running, or no permission — run `xhost +si:localuser:root` when using `sudo`. |
+| `DISPLAY environment variable not set` | `export DISPLAY=:0` (or the right display). |
+| `Cannot open X11 display ':0'` | Xorg not running, or dvledrx is not running as the user who owns the X11 session. |
 | Black window, nothing received | Check the multicast `dip`, `udp_port`, `payload_type`, `fmt`, `fps` and crop size match the transmitter (see the [end-to-end table](../README.md#end-to-end-example)). |
 | `rv_slot_by_tmstamp` errors on every packet | `video.fps` does not match the sender's frame rate. |
 | `No active monitor matches HDMI-1 ...` | Output name is wrong or the monitor is off — check `xrandr --listmonitors`. |
-| `VF setup: ... failed (need root/CAP_NET_ADMIN?)` | Run as root, or pre-create trusted VFs (`nicctl.sh create_tvf`). |
+| `VF setup: ... failed (need root/CAP_NET_ADMIN?)` | Expected for a regular user. If nothing is received, do the [VF host setup](#virtual-functions-vfs). |
 | `log_file '...' rejected: ... world-writable` | Use a private directory for the log file (not `/tmp`). |
 | `Config file ... is invalid` | The preceding log line names the field; see [Validation Rules](#validation-rules). |

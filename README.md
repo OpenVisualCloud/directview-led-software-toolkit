@@ -4,7 +4,7 @@
 [![CI](https://github.com/OpenVisualCloud/directview-led-software-toolkit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/OpenVisualCloud/directview-led-software-toolkit/actions/workflows/ci.yml)
 <a href="https://scan.coverity.com/projects/openvisualcloud-directview-led-software-toolkit"><img alt="Coverity Scan Build Status" src="https://scan.coverity.com/projects/33108/badge.svg"/></a>
 [![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20|%2024.04-orange.svg)](https://releases.ubuntu.com/jammy/)
-[![MTL](https://img.shields.io/badge/MTL-v26.09-green.svg)](https://github.com/OpenVisualCloud/Media-Transport-Library/releases/tag/v26.09)
+[![MTL](https://img.shields.io/badge/MTL-v26.01+-green.svg)](https://github.com/OpenVisualCloud/Media-Transport-Library)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/OpenVisualCloud/directview-led-software-toolkit/badge)](https://securityscorecards.dev/viewer/?uri=github.com/OpenVisualCloud/directview-led-software-toolkit)
 
 ## Table of Contents
@@ -16,9 +16,9 @@
 - [Documentation Map](#documentation-map)
 - [Notices](#notices)
 - [Install](#install)
-  - [1. System Packages](#1-system-packages)
-  - [2. Media Transport Library (MTL) and DPDK](#2-media-transport-library-mtl-and-dpdk)
-  - [3. FFmpeg with the MTL Plugin](#3-ffmpeg-with-the-mtl-plugin)
+  - [1. MTL and DPDK](#1-mtl-and-dpdk)
+  - [2. FFmpeg with the MTL Plugin](#2-ffmpeg-with-the-mtl-plugin)
+  - [3. Toolkit Packages](#3-toolkit-packages)
   - [4. Verify the Installation](#4-verify-the-installation)
 - [Host Setup](#host-setup)
   - [IOMMU / VFIO Kernel Parameters (GRUB)](#iommu--vfio-kernel-parameters-grub)
@@ -59,9 +59,9 @@ contains two applications:
 
 | Component | Requirement |
 |-----------|-------------|
-| **OS** | Validated on Ubuntu 22.04 LTS; should work on Ubuntu 24.04 and higher |
-| **CPU** | Intel 12th Generation (Alder Lake) or above |
-| **NIC** | Intel Ethernet Controller I225 or above (I225, I226, E810 series) |
+| **OS** | Ubuntu 22.04 LTS and Ubuntu 24.04 LTS |
+| **CPU** | Intel 12th Gen Core processors or above, including Intel Core Ultra Series 3 |
+| **NIC** | Intel Ethernet Controller I225 or above (I225, I226, E610 and E810 series) |
 | **Memory** | Hugepages configured (typically 2 GB+) |
 | **Kernel** | IOMMU and VFIO support enabled |
 | **Display (RX only)** | An X11 (Xorg) session; Wayland is not supported |
@@ -113,116 +113,97 @@ connection with your use of FFmpeg.
 
 ## Install
 
-Both applications share one set of dependencies: DPDK, MTL and FFmpeg 7.0 with the MTL plugin.
-The steps below match the pinned versions used by CI:
+Both applications build on the Media Transport Library (MTL), DPDK and FFmpeg with the MTL plugin.
+Install those by following MTL's own guides at the pinned commit, then add the few extra packages
+that dvledtx and dvledrx need.
 
-| Dependency | Version |
-|------------|---------|
-| Media Transport Library | commit [`9762c314`](https://github.com/OpenVisualCloud/Media-Transport-Library/tree/9762c314ed24bd628d3f808b95a94c3aa8525723) (v26.09) |
-| DPDK | v26.07 with the MTL patches |
-| FFmpeg | `release/7.0` with the MTL `mtl_st20p` plugin |
+| Dependency | Version | Source |
+|------------|---------|--------|
+| Media Transport Library | MTL 26.01+, commit [`7bee2423`](https://github.com/OpenVisualCloud/Media-Transport-Library/tree/7bee24231c864d12da6db2c2ffbfd3986717af5a) (`26.01.0.DEV`) | [MTL build guide](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md) |
+| DPDK | 26.03 (`DPDK_VER`) with the MTL patches | [`versions.env`](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/versions.env) at the pinned commit |
+| FFmpeg | 7.0 (`FFMPEG_VERSION`) with the MTL plugin | [`versions.env`](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/versions.env) at the pinned commit |
 
-The upstream MTL guides for the pinned commit are the authoritative reference if anything below
-differs on your system:
-[APT packages](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md#111-ubuntudebian),
-[DPDK build and install](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md#2-dpdk-build-and-install),
-[MTL build](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md#3-build-media-transport-library-and-app)
-and [FFmpeg plugin build](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/ecosystem/ffmpeg_plugin/README.md#1-build).
-Supported OS: Ubuntu [22.04](https://releases.ubuntu.com/jammy/) or
-[24.04](https://releases.ubuntu.com/noble/) LTS.
+These are the versions CI builds against. Supported OS: Ubuntu
+[22.04](https://releases.ubuntu.com/jammy/) and [24.04](https://releases.ubuntu.com/noble/) LTS.
 
-### 1. System Packages
+### 1. MTL and DPDK
+
+Clone MTL at the pinned commit:
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y git gcc meson python3 python3-pip pkg-config nasm wget patch unzip \
-  libnuma-dev libjson-c-dev libpcap-dev libssl-dev libgtest-dev systemtap-sdt-dev \
-  llvm clang flex byacc \
-  libx11-dev libxext-dev libxrandr-dev zlib1g-dev \
-  libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev
-pip install pyelftools ninja
+git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git
+cd Media-Transport-Library
+git checkout 7bee24231c864d12da6db2c2ffbfd3986717af5a
+export mtl_source_code=${PWD}
+cd ..
 ```
 
-| Packages | Needed by |
-|----------|-----------|
-| `libnuma-dev`, `libpcap-dev`, `libssl-dev`, `pyelftools`, … | DPDK / MTL |
-| `nasm` | FFmpeg and DPDK assembly |
-| `libx11-dev`, `libxext-dev`, `libxrandr-dev`, `libjson-c-dev`, `zlib1g-dev` | dvledrx (X11 rendering, JSON config, log compression) |
-| `libxcb1-dev`, `libxcb-shm0-dev`, `libxcb-xfixes0-dev` | FFmpeg `x11grab` — dvledtx screen capture (must be installed **before** configuring FFmpeg) |
+Then follow the MTL build guide at that commit:
 
-Optional, for dvledtx hardware decode (`"hwaccel": true`) — install before configuring FFmpeg:
+- [Install the build dependencies](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md#111-ubuntudebian)
+- [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md#2-dpdk-build-and-install)
+- [Build and install MTL](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md#3-build-media-transport-library-and-app)
+
+> **DPDK version:** use the `DPDK_VER` from `versions.env` (26.03) and the matching
+> `${mtl_source_code}/patches/dpdk/26.03/` patches. The example commands in the guide at this
+> commit still show 25.11.
+
+### 2. FFmpeg with the MTL Plugin
+
+Install the [dvledtx packages](#3-toolkit-packages) first, then follow the
+[MTL FFmpeg plugin build guide](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/ecosystem/ffmpeg_plugin/README.md#1-build)
+at the pinned commit. FFmpeg's `./configure` only picks up optional features whose packages are
+already installed.
+
+- **Screen capture** (dvledtx `input_mode: screen_capture`) needs FFmpeg's `x11grab` device, which
+  is only compiled in when the `libxcb*` packages are installed before `./configure`.
+- **Hardware decode** (dvledtx `"hwaccel": true`) needs `--enable-vaapi` added to the plugin
+  guide's `./configure` line.
+- **12-bit formats** (`yuv422p12le`, `yuv444p12le`, `gbrp12le`) need MTL **and** FFmpeg built from
+  the same pinned commit. The plugin sources are compiled into FFmpeg's `libavdevice`, so
+  rebuilding MTL alone is not enough.
+- **Up to 8 NICs** on the default dvledtx FFmpeg TX path rely on the `p2_port`..`p7_port`
+  AVOptions present in the plugin at the pinned commit.
+
+### 3. Toolkit Packages
+
+These packages are needed on top of the MTL and FFmpeg prerequisites.
+
+**dvledtx**
 
 ```bash
+# Screen capture (FFmpeg x11grab), install before configuring FFmpeg
+sudo apt-get install -y libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev
+# Optional: VA-API hardware decode, install before configuring FFmpeg
 sudo apt-get install -y libva-dev vainfo intel-media-va-driver-non-free
 ```
 
-> On Ubuntu 24.04+ `pip install` may fail with `externally-managed-environment`; see
-> [Troubleshooting](#troubleshooting).
-
-### 2. Media Transport Library (MTL) and DPDK
+**dvledrx**
 
 ```bash
-# Clone MTL at the pinned commit
-git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git
-cd Media-Transport-Library
-git checkout 9762c314ed24bd628d3f808b95a94c3aa8525723
-export mtl_source_code=${PWD}
-cd ..
-
-# Build and install DPDK with the MTL patches
-git clone https://github.com/DPDK/dpdk.git
-cd dpdk
-git checkout v26.07
-git switch -c v26.07
-git apply ${mtl_source_code}/patches/dpdk/26.07/*.patch
-meson setup build
-ninja -C build
-sudo ninja install -C build
-cd ..
-
-# Build and install MTL
-cd ${mtl_source_code}
-./build.sh
-sudo ldconfig
-cd ..
+sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev zlib1g-dev
 ```
 
-### 3. FFmpeg with the MTL Plugin
+| Application | Packages | Used for |
+|-------------|----------|----------|
+| dvledtx | `libxcb1-dev`, `libxcb-shm0-dev`, `libxcb-xfixes0-dev` | FFmpeg `x11grab`, for `input_mode: screen_capture` |
+| dvledtx (optional) | `libva-dev`, `vainfo`, `intel-media-va-driver-non-free` | VA-API hardware decode, for `"hwaccel": true` |
+| dvledrx | `libx11-dev`, `libxext-dev`, `libxrandr-dev` | X11 rendering, MIT-SHM and XRandR output placement |
+| dvledrx | `zlib1g-dev` | Log file compression |
 
-```bash
-git clone https://github.com/FFmpeg/FFmpeg.git
-cd FFmpeg
-git checkout release/7.0
-git apply ${mtl_source_code}/ecosystem/ffmpeg_plugin/7.0/*.patch
-cp ${mtl_source_code}/ecosystem/ffmpeg_plugin/mtl_*.c libavdevice/
-cp ${mtl_source_code}/ecosystem/ffmpeg_plugin/mtl_*.h libavdevice/
-./configure --enable-shared --disable-static --enable-pic --enable-mtl
-#   add --enable-vaapi for dvledtx hardware decode
-make -j "$(nproc)"
-sudo make install
-sudo ldconfig
-cd ..
-```
-
-Important notes:
-
-- **12-bit formats** (`yuv422p12le`, `yuv444p12le`, `gbrp12le`) require MTL **and** FFmpeg to be
-  built from the same pinned commit. The plugin sources are compiled into FFmpeg's `libavdevice`,
-  so rebuilding MTL alone is not enough.
-- **Up to 8 NICs** on the default dvledtx FFmpeg TX path rely on the `p2_port`..`p7_port`
-  AVOptions present in the plugin at the pinned commit.
-- **Screen capture** (dvledtx `input_mode: screen_capture`) needs FFmpeg's `x11grab` device, which
-  is only compiled in when the `libxcb*` packages above were installed before `./configure`.
+dvledrx also uses `libjson-c-dev`, which is already installed with the MTL prerequisites.
 
 ### 4. Verify the Installation
 
 ```bash
-pkg-config --modversion libdpdk          # DPDK
-pkg-config --modversion mtl              # expected: 26.09.0.REL
+pkg-config --modversion libdpdk          # expected: 26.03.x
+pkg-config --modversion mtl              # expected: 26.01.0.DEV
+ls /usr/local/include/mtl/mtl_api.h      # MTL headers present
+ldconfig -p | grep libmtl                # libmtl.so => /usr/local/lib/x86_64-linux-gnu/libmtl.so
 pkg-config --modversion libavformat      # FFmpeg 7.0 (libavformat 61.x)
 ffmpeg -hide_banner -muxers  | grep mtl_st20p   # MTL plugin present
-ffmpeg -hide_banner -devices | grep x11grab     # optional: screen capture
-ffmpeg -hide_banner -hwaccels | grep vaapi      # optional: hardware decode
+ffmpeg -hide_banner -devices | grep x11grab     # dvledtx screen capture
+ffmpeg -hide_banner -hwaccels | grep vaapi      # optional: dvledtx hardware decode
 ```
 
 ## Host Setup
@@ -271,8 +252,8 @@ id -nG $USER                  # verify
 
 Follow the MTL run guide for the pinned commit:
 
-- [DPDK PMD setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/run.md#3-dpdk-pmd-setup) — bind the NIC (or create and bind VFs) to `vfio-pci`.
-- [Hugepage setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/run.md#4-setup-hugepage).
+- [DPDK PMD setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/run.md#3-dpdk-pmd-setup) — bind the NIC (or create and bind VFs) to `vfio-pci`.
+- [Hugepage setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/run.md#4-setup-hugepage).
 
 Quick reference:
 
@@ -359,14 +340,6 @@ export DISPLAY=:0
 ./build/dvledrx/dvledrx --config dvledrx/config/rx_fullhd_1session.json
 ```
 
-When running with `sudo`, keep the X11 environment and allow root to connect to the display:
-
-```bash
-export DISPLAY=:0
-xhost +si:localuser:root
-sudo -E ./build/dvledrx/dvledrx --config dvledrx/config/rx_fullhd_1session.json
-```
-
 Configuration reference:
 [dvledrx/README.md — JSON Configuration](dvledrx/README.md#json-configuration).
 
@@ -404,8 +377,8 @@ Press `Ctrl+C` (or send `SIGTERM`) for a clean shutdown; `--test-time` stops aut
 a dvledrx window also stops the receiver. If an application becomes unresponsive:
 
 ```bash
-sudo pkill -9 -f dvledtx
-sudo pkill -9 -f dvledrx
+pkill -9 -f dvledtx
+pkill -9 -f dvledrx
 ```
 
 ## Running Unit Tests
@@ -434,14 +407,8 @@ and [dvledrx/README.md](dvledrx/README.md#troubleshooting). Common issues:
      # Example output: 06:00.0 Ethernet controller: Intel Corporation ...
      # Use BDF format in config: "0000:06:00.0"
      ```
-   - Verify MTL and DPDK are installed:
-     ```bash
-     ldconfig -p | grep mtl
-     # Expected: libmtl.so (libc6,x86-64) => /usr/local/lib/x86_64-linux-gnu/libmtl.so
-     pkg-config --modversion mtl            # Expected: 26.09.0.REL
-     ls /usr/local/include/mtl/mtl_api.h    # MTL headers present
-     pkg-config --modversion libdpdk        # DPDK installed
-     ```
+   - Check MTL, DPDK and FFmpeg are installed at the expected versions — see
+     [Verify the Installation](#4-verify-the-installation).
    - Verify the NIC is bound to VFIO:
      ```bash
      sudo ${mtl_source_code}/script/nicctl.sh list all
@@ -450,7 +417,7 @@ and [dvledrx/README.md](dvledrx/README.md#troubleshooting). Common issues:
      # The target NIC should show "drv=vfio-pci"
      ```
    - Ensure IOMMU is enabled — see [IOMMU / VFIO Kernel Parameters](#iommu--vfio-kernel-parameters-grub).
-   - Verify the network card is supported (Intel I225, I226, E810 series).
+   - Verify the network card is supported (Intel I225, I226, E610, E810 series).
 
 2. **Hugepage allocation failure / transmission issues**
    ```bash
@@ -464,10 +431,10 @@ and [dvledrx/README.md](dvledrx/README.md#troubleshooting). Common issues:
    - Ensure the user is in the `vfio` group — see [VFIO Group Setup](#vfio-group-setup).
    - Check `ls -la /dev/vfio/` — group should be `vfio` with rw permissions.
 
-4. **`pip install` fails with `externally-managed-environment`** (Ubuntu 24.04+, PEP 668)
-   ```bash
-   pip install --break-system-packages meson ninja pyelftools
-   ```
+4. **`pip install` fails with `externally-managed-environment`** (Ubuntu 24.04, PEP 668)
+   - See the note in the
+     [MTL build guide](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md#111-ubuntudebian),
+     or install with `pip install --break-system-packages <package>`.
 
 5. **FFmpeg `./configure` fails with `nasm/yasm not found or too old`**
    ```bash

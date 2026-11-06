@@ -307,7 +307,7 @@ Confirm which path was taken from the startup log:
 **Requirements and limitations**
 
 - FFmpeg must be built with `--enable-vaapi` and the VA-API runtime installed (see the
-  [install steps](../README.md#1-system-packages)). Verify with `ffmpeg -hwaccels | grep vaapi`
+  [install steps](../README.md#3-toolkit-packages)). Verify with `ffmpeg -hwaccels | grep vaapi`
   and `vainfo | grep VAEntrypointVLD`.
 - A DRM render node (e.g. `/dev/dri/renderD128`) must be readable and writable by the user running
   dvledtx. The device is selected automatically; there is no config key to pin a render node.
@@ -331,7 +331,7 @@ Set `video.input_mode` to `screen_capture` to transmit whatever is rendered on a
 **Requirements**
 
 - FFmpeg built with the `x11grab` device — the `libxcb*` packages must be installed **before**
-  configuring FFmpeg (see the [install steps](../README.md#1-system-packages)). Verify with
+  configuring FFmpeg (see the [install steps](../README.md#3-toolkit-packages)). Verify with
   `ffmpeg -devices | grep x11grab`; otherwise screen capture fails at runtime with
   `x11grab input format not found`.
 - An **X11 (Xorg)** display — `x11grab` does not work against Wayland. See
@@ -407,7 +407,7 @@ exactly as it would for a physical display:
 
 #### Ensuring an X11 Session
 
-Ubuntu 22.04+ defaults GDM logins to **Wayland**, which makes `screen_capture` fail (or capture a
+Ubuntu 22.04 and 24.04 default GDM logins to **Wayland**, which makes `screen_capture` fail (or capture a
 blank/incorrect frame) on a machine capturing its own physical desktop. Make sure the session is
 X11:
 
@@ -479,10 +479,9 @@ physical input devices, so a local keyboard and mouse work on the virtual displa
    sudo Xorg :99 -config /tmp/xorg-dummy.conf -noreset &
    ```
 
-4. **Allow root access and start a GNOME session** (software GL is required without a GPU;
+4. **Start a GNOME session** (software GL is required without a GPU;
    `PULSE_SERVER` routes audio to the physical device):
    ```bash
-   DISPLAY=:99 xhost +local:root
    mkdir -p /tmp/gnome99-runtime && chmod 700 /tmp/gnome99-runtime
    DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 XDG_SESSION_TYPE=x11 \
      XDG_RUNTIME_DIR=/tmp/gnome99-runtime \
@@ -548,7 +547,7 @@ dvledtx includes a built-in logger with configurable output targets.
 | `gbrp12le` | 4:4:4 | 12-bit | RGB |
 
 12-bit formats require MTL and FFmpeg built from the pinned commit (see the
-[install steps](../README.md#3-ffmpeg-with-the-mtl-plugin)).
+[install steps](../README.md#2-ffmpeg-with-the-mtl-plugin)).
 
 ### Frame Rates (`tx_video.fps`)
 
