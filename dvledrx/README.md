@@ -339,12 +339,6 @@ sudo ip link set <pf_iface> promisc on
 dvledrx also tries to apply these settings itself at start-up with `ip link` (PF promiscuous on,
 VF trust on, VF spoof checking off, PF link up). It does not raise its own privileges:
 
-- **As a normal user**, the commands fail, nothing changes, and dvledrx logs
-  `VF setup: ... failed (need root/CAP_NET_ADMIN?)` and continues. This is harmless when the host
-  setup above was done.
-- **Under `sudo`**, the settings are applied immediately and are **not** reverted when dvledrx
-  exits; they stay until reboot or PF driver reload.
-
 dvledtx does not need this setup: it only transmits and never requests promiscuous mode.
 
 ## Troubleshooting
