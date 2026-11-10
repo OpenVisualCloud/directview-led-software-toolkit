@@ -1,32 +1,39 @@
-﻿# Direct View LED Software Toolkit
+# Direct View LED Software Toolkit
 
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
 [![CI](https://github.com/OpenVisualCloud/directview-led-software-toolkit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/OpenVisualCloud/directview-led-software-toolkit/actions/workflows/ci.yml)
 <a href="https://scan.coverity.com/projects/openvisualcloud-directview-led-software-toolkit"><img alt="Coverity Scan Build Status" src="https://scan.coverity.com/projects/33108/badge.svg"/></a>
 [![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20|%2024.04-orange.svg)](https://releases.ubuntu.com/jammy/)
-[![MTL](https://img.shields.io/badge/MTL-v26.09-green.svg)](https://github.com/OpenVisualCloud/Media-Transport-Library/releases/tag/v26.09)
+[![MTL](https://img.shields.io/badge/MTL-v26.01+-green.svg)](https://github.com/OpenVisualCloud/Media-Transport-Library)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/OpenVisualCloud/directview-led-software-toolkit/badge)](https://securityscorecards.dev/viewer/?uri=github.com/OpenVisualCloud/directview-led-software-toolkit)
 
 ## Table of Contents
 
 - [Overview](#overview)
+  - [Architecture](#architecture)
+  - [System Requirements](#system-requirements)
   - [Deployment Security Model](#deployment-security-model)
+- [Documentation Map](#documentation-map)
 - [Notices](#notices)
-- [Features](#features)
-- [Building](#building)
-  - [Prerequisites](#prerequisites)
-  - [Build Steps](#build-steps)
-- [Usage](#usage)
-  - [Binding Ethernet Controller to DPDK PMD and Hugepage Setup](#binding-ethernet-controller-to-dpdk-pmd-and-hugepage-setup)
-  - [JSON Configuration](#json-configuration)
-    - [PTP Timing](#ptp-timing)
-    - [Hardware Decode (VA-API)](#hardware-decode-va-api)
-    - [Ensuring an X11 session (required for screen capture)](#ensuring-an-x11-session-required-for-screen-capture)
-    - [Screen capture on a headless machine (no physical monitor)](#screen-capture-on-a-headless-machine-no-physical-monitor)
-- [Logging](#logging)
-- [Command-Line Options](#command-line-options)
-- [Supported Formats](#supported-formats)
-- [Performance Considerations](#performance-considerations)
+- [Common Installation: MTL and DPDK](#common-installation-mtl-and-dpdk)
+- [Dependencies for dvledtx (TX)](#dependencies-for-dvledtx-tx)
+  - [Screen Capture Packages](#screen-capture-packages)
+  - [VA-API Hardware Decode Packages (Optional)](#va-api-hardware-decode-packages-optional)
+  - [FFmpeg with the MTL Plugin](#ffmpeg-with-the-mtl-plugin)
+- [Dependencies for dvledrx (RX)](#dependencies-for-dvledrx-rx)
+- [Verify the Installation](#verify-the-installation)
+- [Build](#build)
+- [Host Setup](#host-setup)
+  - [IOMMU / VFIO Kernel Parameters (GRUB)](#iommu--vfio-kernel-parameters-grub)
+  - [VFIO Group Setup](#vfio-group-setup)
+  - [Bind NICs to DPDK and Configure Hugepages](#bind-nics-to-dpdk-and-configure-hugepages)
+  - [Locked-Memory Limit (Non-Root Run)](#locked-memory-limit-non-root-run)
+- [Run](#run)
+  - [Command-Line Options](#command-line-options)
+  - [Run the Transmitter (dvledtx)](#run-the-transmitter-dvledtx)
+  - [Run the Receiver (dvledrx)](#run-the-receiver-dvledrx)
+  - [End-to-End Example](#end-to-end-example)
+  - [Stopping the Applications](#stopping-the-applications)
 - [Running Unit Tests](#running-unit-tests)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
@@ -34,127 +41,201 @@
 
 ## Overview
 
-Direct View LED Software Toolkit is a simplified, standalone transmitter application using FFmpeg APIs and Media Transport Library (MTL) plugin.
+The Direct View LED Software Toolkit drives direct-view LED walls with uncompressed video over IP
+using SMPTE ST 2110-20. It is built on FFmpeg and the
+[Media Transport Library (MTL)](https://github.com/OpenVisualCloud/Media-Transport-Library) and
+contains two applications:
 
-### What It Does
+| Application | Role | Details |
+|-------------|------|---------|
+| **dvledtx** | Transmitter. Decodes a video file (or captures an X11 screen), optionally scales it, splits it into crop regions and sends each region as an independent ST 2110-20 stream. | [dvledtx/README.md](dvledtx/README.md) |
+| **dvledrx** | Receiver. Receives one or more ST 2110-20 streams and renders them on X11 displays — one window, a composite of all streams, or one window per physical output (HDMI/DP). | [dvledrx/README.md](dvledrx/README.md) |
 
-dvledtx reads a video source file (e.g., MP4), decodes it using FFmpeg, and transmits uncompressed video frames over an IP network using the SMPTE ST 2110-20 standard. Multiple crop regions of the same source video can be transmitted simultaneously as independent RTP streams — enabling tiled LED wall configurations where each panel receives its own portion of the frame.
-
-### Use Case
-
-- **LED Video Walls**: Drive multiple LED panels from a single source, each panel receiving a cropped region of the full frame.
+**Use case — LED video walls:** drive multiple LED panels from a single source, with each panel
+(or LED controller) receiving its own cropped portion of the frame.
 
 ### Architecture
 
-![dvledtx Architecture](docs/architecture.png)
+![Direct View LED Software Toolkit architecture: dvledtx transmitter and dvledrx receiver stacks](docs/architecture.png)
 
 ### System Requirements
 
 | Component | Requirement |
 |-----------|-------------|
-| **OS** | Validated on Ubuntu 22.04 LTS; should work on Ubuntu 24.04 and higher |
-| **CPU** | Intel 12th Generation (Alder Lake) or above |
-| **NIC** | Intel Ethernet Controller I225 or above |
-| **Memory** | Hugepages configured (typically 2GB+) |
+| **OS** | Ubuntu 22.04 LTS and Ubuntu 24.04 LTS |
+| **CPU** | Intel 12th Gen Core processors or above, including Intel Core Ultra Series 3 |
+| **NIC** | Intel Ethernet Controller I225 or above (I225, I226, E610 and E810 series) |
+| **Memory** | Hugepages configured (typically 2 GB+) |
 | **Kernel** | IOMMU and VFIO support enabled |
+| **Display (RX only)** | An X11 (Xorg) session; Wayland is not supported |
 
 ### Deployment Security Model
 
 dvledtx and dvledrx follow a layered security model. The applications validate and bound their
 inputs — including configuration parsing, log file destinations, decoder behaviour and resource
 limits — and are covered by static analysis, AFL/libFuzzer fuzzing and dependency CVE tracking in
-CI. Transport-level
-security is a separate layer: SMPTE ST 2110-20 and the PTP timing it depends on do not define
-authentication, encryption or integrity protection, which is a property of the standards common
-to all ST 2110 equipment. The deployment architecture supplies that layer.
+CI. Transport-level security is a separate layer: SMPTE ST 2110-20 and the PTP timing it depends
+on do not define authentication, encryption or integrity protection, which is a property of the
+standards common to all ST 2110 equipment. The deployment architecture supplies that layer.
 
-> **We recommend that all hosts in a dvledtx deployment are air-gapped.** The TX host, a
-> dedicated L2 switch and the receivers sit inside a locked cabinet with no network path to any
-> other network and no in-band administrative access — no SSH, no management NIC, no remote
-> console, BMC disabled — with administration by physical KVM inside the cabinet. Because
-> "isolated" and "restricted" are used loosely, note that a VLAN on a shared switch, a firewall
-> or a jump host does not meet this definition.
+> **We recommend that all hosts in a deployment are air-gapped.** The TX host, a dedicated L2
+> switch and the receivers sit inside a locked cabinet with no network path to any other network
+> and no in-band administrative access — no SSH, no management NIC, no remote console, BMC
+> disabled — with administration by physical KVM inside the cabinet. Because "isolated" and
+> "restricted" are used loosely, note that a VLAN on a shared switch, a firewall or a jump host
+> does not meet this definition.
 
 We also recommend hardening the dedicated switch, since its configuration carries the boundary:
 disable and blackhole every unused port, enable port security (802.1X or sticky MAC) with a
 shutdown violation action, disable dynamic trunking, and enable IGMP snooping, storm control,
-BPDU guard and DHCP snooping. The full list is in the assumptions document.
+BPDU guard and DHCP snooping.
 
 See **[Deployment Assumptions and Security Model](docs/assumptions.md)** for the trust boundary,
-the deployment assumptions, switch hardening recommendations, controlled ingress of
-configuration and video content, the controls the toolkit implements, the residual risk, and a
-commissioning validation checklist.
+deployment assumptions, switch hardening recommendations, controlled ingress of configuration and
+video content, the controls the toolkit implements, the residual risk, and a commissioning
+validation checklist.
+
+## Documentation Map
+
+| Topic | Document |
+|-------|----------|
+| Common installation (TX and RX) | [Common Installation: MTL and DPDK](#common-installation-mtl-and-dpdk) |
+| TX dependencies: screen capture, VA-API, FFmpeg with the MTL plugin | [Dependencies for dvledtx (TX)](#dependencies-for-dvledtx-tx) |
+| RX dependencies | [Dependencies for dvledrx (RX)](#dependencies-for-dvledrx-rx) |
+| Verify the installation | [Verify the Installation](#verify-the-installation) |
+| Build both applications | [Build](#build) |
+| Host setup (TX and RX) | [Host Setup](#host-setup) |
+| Run (TX and RX) | [Run](#run) |
+| Transmitter: JSON configuration, formats, scaling, PTP, VA-API decode, screen capture, logging | [dvledtx/README.md](dvledtx/README.md) |
+| Receiver: JSON configuration, display modes, multi-monitor walls, PTP, logging | [dvledrx/README.md](dvledrx/README.md) |
+| Deployment assumptions and security model | [docs/assumptions.md](docs/assumptions.md) |
+| Reporting security issues | [Security.md](Security.md) |
 
 ## Notices
 
 ### FFmpeg
 
-FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ffmpeg.org/legal.html. You are solely responsible for determining if your use of FFmpeg requires any additional licenses. Intel is not responsible for obtaining any such licenses, nor liable for any licensing fees due, in connection with your use of FFmpeg.
+FFmpeg is an open source project licensed under LGPL and GPL. See https://www.ffmpeg.org/legal.html.
+You are solely responsible for determining if your use of FFmpeg requires any additional licenses.
+Intel is not responsible for obtaining any such licenses, nor liable for any licensing fees due, in
+connection with your use of FFmpeg.
 
-## Features
+## Common Installation: MTL and DPDK
 
-- **ST20P Video Transmission**: Uncompressed video over SMPTE ST 2110-20
-- **Multi-session Support**: Multiple concurrent video streams
-- **JSON Configuration**: Per-session crop and network settings via JSON config
-- **Optional Hardware Decode**: VA-API GPU decode of the input stream, with automatic CPU fallback
-- **Memory Efficient**: Uses hugepages for optimal performance
+Both applications are built on the Media Transport Library (MTL) and DPDK. Install them on every
+TX and RX host by following MTL's own guides at the pinned commit.
 
-## Building
+| Dependency | Version | Source |
+|------------|---------|--------|
+| Media Transport Library | MTL 26.01+, commit [`7bee2423`](https://github.com/OpenVisualCloud/Media-Transport-Library/tree/7bee24231c864d12da6db2c2ffbfd3986717af5a) (`26.01.0.DEV`) | [MTL build guide](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md) |
+| DPDK | 26.03 (`DPDK_VER`) with the MTL patches | [`versions.env`](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/versions.env) at the pinned commit |
 
-### Prerequisites
+These are the versions CI builds against. Supported OS: Ubuntu
+[22.04](https://releases.ubuntu.com/jammy/) and [24.04](https://releases.ubuntu.com/noble/) LTS.
 
-#### Hardware Requirements
-- Intel 12th Generation CPU or above 
-- Intel Ethernet Controller I225 or above
+Clone MTL at the pinned commit:
 
-#### Software Requirements
+```bash
+git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git
+cd Media-Transport-Library
+git checkout 7bee24231c864d12da6db2c2ffbfd3986717af5a
+export mtl_source_code=${PWD}
+cd ..
+```
 
-> **Note:** This toolkit has been validated against **Ubuntu 22.04 LTS** but should work on Ubuntu 24.04 LTS and higher versions.
+Then follow the MTL build guide at that commit:
 
-- Ubuntu [22.04](https://releases.ubuntu.com/jammy/) or [24.04](https://releases.ubuntu.com/noble/) LTS
-- Receiver build dependencies: `libx11-dev`, `libxext-dev`, `libxrandr-dev`, `libjson-c-dev`, and `zlib1g-dev`.
-- Receiver X11/session unit tests use `xvfb-run`; install `xvfb` and `xauth` to run the full receiver test suite.
-- [Media Transport Library (MTL) v26.09](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md)
-  - Follow these steps
-    - [Install APT packages](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md#111-ubuntudebian)
-    - Clone Media-Transport-Library
-      ```
-      git clone https://github.com/OpenVisualCloud/Media-Transport-Library.git
-      cd Media-Transport-Library
-      git checkout 9762c314ed24bd628d3f808b95a94c3aa8525723
-      cd ..
-      export mtl_source_code=${PWD}/Media-Transport-Library
-      ```
-    - [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md#2-dpdk-build-and-install)
-    - [Build and install MTL](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/build.md#3-build-media-transport-library-and-app)
-  - [FFmpeg 7.0 with MTL Plugin](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/ecosystem/ffmpeg_plugin/README.md#1-build)
-  - **Screen capture support (`input_mode: screen_capture`) requires FFmpeg's `x11grab` device.** It is auto-detected and compiled in by FFmpeg's `./configure` script, but only if these packages are installed *before* building FFmpeg:
-    ```bash
-    sudo apt-get install -y libx11-dev libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev
-    ```
-    After building, verify support with:
-    ```bash
-    ffmpeg -devices | grep x11grab
-    ```
-    If this prints nothing, FFmpeg needs to be reconfigured/rebuilt after installing the packages above — screen capture will otherwise fail at runtime with `x11grab input format not found`.
-  - **`x11grab` only works against an X11 (Xorg) display, not Wayland** — see [Ensuring an X11 session](#ensuring-an-x11-session-required-for-screen-capture) below if you're capturing from a machine's own physical desktop session.
-  - **Headless machines (no physical monitor)** additionally need a virtual display to capture from. This is an optional, environment-specific setup — not a dependency of dvledtx — so it is documented as an example in [Screen capture on a headless machine](#screen-capture-on-a-headless-machine-no-physical-monitor) below.
-  - **Hardware decode (`hwaccel: true`) requires FFmpeg to be configured with `--enable-vaapi`** and the VA-API runtime installed:
-    ```bash
-    sudo apt-get install -y libva-dev vainfo intel-media-va-driver-non-free
-    ```
-    After building, verify support with:
-    ```bash
-    ffmpeg -hwaccels | grep vaapi
-    vainfo | grep VAEntrypointVLD
-    ```
-    If either prints nothing, hardware decode is unavailable and dvledtx silently falls back to CPU decode. See [Hardware Decode (VA-API)](#hardware-decode-va-api).
-  - **12-bit formats (`yuv422p12le`, `yuv444p12le`, `gbrp12le`) require both MTL and FFmpeg to be built from the pinned v26.09 commit above.** The plugin sources are copied into FFmpeg's `libavdevice/` and compiled in, so rebuilding MTL alone is not enough — FFmpeg must be rebuilt against the same MTL commit or these formats are rejected at session setup.
-  - At the pinned commit the `mtl_st20p` muxer exposes `p_port`/`r_port` plus `p2_port`..`p7_port` (and matching `p2_sip`..`p7_sip`), so up to 8 NICs work with the default (non-`ENABLE_MTL_TX`) build with no local patching. Older MTL revisions exposed only `p_port`/`r_port`, which capped `nic_count` at 2 for the FFmpeg TX path; the `ENABLE_MTL_TX` direct-pipeline build has always supported up to 8 NICs.
+- [Install the build dependencies](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md#111-ubuntudebian)
+- [Build and install DPDK](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md#2-dpdk-build-and-install)
+- [Build and install MTL](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md#3-build-media-transport-library-and-app)
 
-### Build Steps
+> **DPDK version:** use the `DPDK_VER` from `versions.env` (26.03) and the matching
+> `${mtl_source_code}/patches/dpdk/26.03/` patches. The example commands in the guide at this
+> commit still show 25.11.
 
-Once all dependencies are installed, clone this repository and run the build script:
+## Dependencies for dvledtx (TX)
+
+dvledtx decodes and transmits through FFmpeg with the MTL plugin. Install the packages below
+**before** building FFmpeg: FFmpeg's `./configure` only enables optional features whose packages are
+already installed.
+
+### Screen Capture Packages
+
+Needed for `input_mode: screen_capture`. FFmpeg's `x11grab` device is only compiled in when these
+packages are present.
+
+```bash
+sudo apt-get install -y libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev
+```
+
+### VA-API Hardware Decode Packages (Optional)
+
+Needed only for `"hwaccel": true`. Also add `--enable-vaapi` to FFmpeg's `./configure` line.
+
+```bash
+sudo apt-get install -y libva-dev vainfo intel-media-va-driver-non-free
+```
+
+### FFmpeg with the MTL Plugin
+
+Follow the
+[MTL FFmpeg plugin build guide](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/ecosystem/ffmpeg_plugin/README.md#1-build)
+at the pinned commit. It builds FFmpeg 7.0 (`FFMPEG_VERSION` in
+[`versions.env`](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/versions.env)).
+
+- **12-bit formats** (`yuv422p12le`, `yuv444p12le`, `gbrp12le`) need MTL **and** FFmpeg built from
+  the same pinned commit. The plugin sources are compiled into FFmpeg's `libavdevice`, so
+  rebuilding MTL alone is not enough.
+- **Up to 8 NICs** on the default dvledtx FFmpeg TX path rely on the `p2_port`..`p7_port`
+  AVOptions present in the plugin at the pinned commit.
+
+| Packages | Used for |
+|----------|----------|
+| `libxcb1-dev`, `libxcb-shm0-dev`, `libxcb-xfixes0-dev` | FFmpeg `x11grab`, for `input_mode: screen_capture` |
+| `libva-dev`, `vainfo`, `intel-media-va-driver-non-free` (optional) | VA-API hardware decode, for `"hwaccel": true` |
+| FFmpeg 7.0 with the MTL plugin | Decoding, scaling and ST 2110-20 transmission |
+
+## Dependencies for dvledrx (RX)
+
+dvledrx receives directly through MTL and renders with X11; it does not use FFmpeg.
+
+```bash
+sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev zlib1g-dev
+```
+
+| Packages | Used for |
+|----------|----------|
+| `libx11-dev`, `libxext-dev`, `libxrandr-dev` | X11 rendering, MIT-SHM and XRandR output placement |
+| `zlib1g-dev` | Log file compression |
+
+dvledrx also uses `libjson-c-dev`, which is already installed with the MTL prerequisites.
+
+> **Note:** [`scripts/build.sh`](scripts/build.sh) builds both applications from one Meson project,
+> which checks for the FFmpeg libraries. To build on an RX-only host, FFmpeg must still be
+> installed. The MTL plugin and the optional TX packages are not needed.
+
+## Verify the Installation
+
+```bash
+# Common: MTL and DPDK
+pkg-config --modversion libdpdk          # expected: 26.03.x
+pkg-config --modversion mtl              # expected: 26.01.0.DEV
+ls /usr/local/include/mtl/mtl_api.h      # MTL headers present
+ldconfig -p | grep libmtl                # libmtl.so => /usr/local/lib/x86_64-linux-gnu/libmtl.so
+
+# dvledtx: FFmpeg with the MTL plugin
+pkg-config --modversion libavformat      # FFmpeg 7.0 (libavformat 61.x)
+ffmpeg -hide_banner -muxers  | grep mtl_st20p   # MTL plugin present
+ffmpeg -hide_banner -devices | grep x11grab     # screen capture
+ffmpeg -hide_banner -hwaccels | grep vaapi      # optional: hardware decode
+
+# dvledrx: X11 libraries
+pkg-config --modversion x11 xext xrandr
+```
+
+## Build
+
+With the dependencies installed, clone the repository and build both applications:
 
 ```bash
 git clone https://github.com/OpenVisualCloud/directview-led-software-toolkit
@@ -162,663 +243,274 @@ cd directview-led-software-toolkit
 bash scripts/build.sh
 ```
 
-To build with MTL TX support enabled:
+The script wipes and recreates `build/`, then produces:
+
+| Binary | Path |
+|--------|------|
+| Transmitter | `build/dvledtx/dvledtx` |
+| Receiver | `build/dvledrx/dvledrx` |
+
+Extra Meson options are passed straight through. The only project option selects the dvledtx TX
+path (it does not affect dvledrx):
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `enable_mtl_tx` | `false` | `false`: transmit through FFmpeg's `mtl_st20p` muxer. `true`: transmit with MTL's pipeline API (`st20p_tx_*`) directly. |
 
 ```bash
 bash scripts/build.sh -Denable_mtl_tx=true
 ```
 
-The build produces `build/dvledtx/dvledtx` and `build/dvledrx/dvledrx`.
-
-## Usage
-
-### Binding Ethernet Controller to DPDK PMD and Hugepage Setup 
-
-- Ensure VFIO group exists [follow](#vfio-group-setup)
-- [DPDK PMD Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/run.md#3-dpdk-pmd-setup)
-- [Hugepage Setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/9762c314ed24bd628d3f808b95a94c3aa8525723/doc/run.md#4-setup-hugepage)
-
-### JSON Configuration
-
-dvledtx uses a JSON config file with the following sections:
-
-| Section | Field | Description |
-|---------|-------|-------------|
-| **log_file** | `log_file` | (Optional) Path/name of the log output file (e.g. `dvledtx.log`). If omitted, logging goes to console only. |
-| **interfaces[]** | `nic_index` | (Optional) Must equal this entry's position in the `interfaces[]` array (0, 1, 2, ...); parsing fails if it doesn't match. Informational/self-documenting only — interfaces are always resolved by array position. |
-| | `name` | PCI BDF address of the NIC (e.g. `0000:06:00.0`) |
-| | `sip` | Source IP address |
-| | `dip` | Destination multicast IP address |
-| **video** | `width` | Source frame width in pixels |
-| | `height` | Source frame height in pixels |
-| | `input_mode` | (Optional) Video input mode: `file` (default) or `screen_capture` |
-| | `tx_url` | Path to the source video file (used when `input_mode=file`) |
-| | `screen_input` | (Optional) x11grab source string for screen capture (used when `input_mode=screen_capture`, default `:0.0+0,0`) |
-| **tx_video** | `scale_width` | (Optional) Output width after scaling |
-| | `scale_height` | (Optional) Output height after scaling |
-| | `fps` | Frames per second (25, 30, 50, 60) |
-| | `fmt` | Pixel format (see [Supported Formats](#supported-formats)) |
-| **ptp** | `enable` | (Optional) Enable MTL's built-in PTP client and PTP-paced TX. Default `false` (TSC-based pacing). See [PTP Timing](#ptp-timing) |
-| | `pi` | (Optional) Use the PI controller for the built-in PTP client (physical function NICs only). Default `false` |
-| | `unicast` | (Optional) Send `PTP_DELAY_REQ` messages to a unicast address instead of multicast. Default `false` |
-| **hwaccel** | `hwaccel` | (Optional) Decode the input stream on the GPU via VA-API. Default `false` (CPU decode). Falls back to the CPU automatically when the GPU cannot decode the stream. See [Hardware Decode (VA-API)](#hardware-decode-va-api) |
-| **tx_sessions[]** | `nic_index` | (Optional) Index into `interfaces[]` selecting which NIC this session uses (default: `0`) |
-| | `udp_port` | UDP port for the session |
-| | `payload_type` | (Optional) RTP payload type — defaults to `96` if not present |
-| | `crop` | Region to transmit: `x`, `y`, `w`, `h` in pixels |
-
-#### Example: MP4 file input (`dvledtx/config/tx_fullhd_single_session.json`)
-```json
-{
-  "log_file": "dvledtx.log",
-  "interfaces": [
-    { "nic_index": 0, "name": "0000:03:10.0", "sip": "192.168.50.30", "dip": "239.168.85.20" },
-    { "nic_index": 1, "name": "0000:03:10.2", "sip": "192.168.50.29", "dip": "239.168.85.21" }
-  ],
-  "video": {
-    "width": 1920, "height": 1080,
-    "tx_url": "bbb_sunflower_1080p_30fps_normal.mp4"
-  },
-  "tx_video": {
-    "scale_width": 1920, "scale_height": 1080,
-    "fps": 30,
-    "fmt": "yuv422p10le"
-  },
-  "tx_sessions": [
-    { "nic_index": 0, "udp_port": 20000, "payload_type": 96, "crop": { "x": 0,   "y": 0, "w": 960, "h": 1080 } },
-    { "nic_index": 1, "udp_port": 20002, "payload_type": 96, "crop": { "x": 960, "y": 0, "w": 960, "h": 1080 } }
-  ]
-}
-```
-
-Multiple sessions can be defined in `tx_sessions` to transmit different crop regions of the same video simultaneously (see `dvledtx/config/tx_fullhd_multi_session.json`).
-
-#### PTP Timing
-
-ST 2110 senders normally derive their TX pacing from a PTP (IEEE 1588) clock. dvledtx exposes MTL's built-in PTP client through an optional top-level `ptp` block:
-
-```json
-"ptp": {
-  "enable":  true,
-  "pi":      true,
-  "unicast": false
-}
-```
-
-**PTP is disabled by default.** When the block is absent — or `enable` is `false` — MTL falls back to TSC-based pacing, which derives timing from the CPU's invariant timestamp counter and requires no external clock. This is the recommended setting for lab and standalone use.
-
-Enable PTP only when a **PTP grandmaster is present on the network** (a dedicated appliance or a boundary-clock switch). MTL's built-in PTP client is *slave-only* — it cannot elect itself grandmaster — so with `enable: true` and no grandmaster on the link the TX pacing clock never locks and transmission stalls.
-
-When enabled, the startup log reports the active settings and the pacing mode chosen by MTL:
-
-```
-[INFO ] PTP enabled: pi_controller=1 unicast_delay_req=0
-MTL: ... tv_attach(0), pacing way: ptp
-```
-
-With PTP disabled the log instead shows:
-
-```
-[INFO ] PTP disabled (default TSC-based TX pacing)
-MTL: ... tv_attach(0), pacing way: tsc
-```
-
-> Requires an MTL/FFmpeg build that exposes the `ptp_enable`, `ptp_pi` and `ptp_unicast` AVOptions on the `mtl_st20p` muxer. If they are missing, dvledtx logs a warning and continues without built-in PTP rather than failing.
-
-#### Hardware Decode (VA-API)
-
-By default dvledtx decodes the input stream on the CPU. An optional top-level `hwaccel` flag offloads
-the compressed-bitstream decode to the GPU's fixed-function video engine via VA-API:
-
-```json
-"hwaccel": true
-```
-
-| Value | Behaviour |
-|-------|-----------|
-| absent / `false` | CPU decode (default) |
-| `true` | Try VA-API; fall back to the CPU if it is unavailable |
-
-**`hwaccel: true` never fails the run.** If FFmpeg was built without VA-API, no render node is
-accessible, the codec rejects the hardware context, or the decoder cannot produce a GPU surface for
-the stream, dvledtx logs a warning and continues on the CPU. Repeated GPU-to-system-memory transfer
-failures mid-stream also trigger a reopen on the CPU rather than stalling transmission. Only the
-decode stage is offloaded — decoded frames are downloaded to system memory so the existing
-scale/crop/TX path is unchanged. MTL transmits from its own DMA buffers, so there is no GPU-to-NIC
-zero-copy path to keep frames on the device for.
-
-Confirm which path was taken from the startup log:
-
-```
-[INFO ] ST20P TX(0): opened 'clip.mp4' Codec=hevc 1920x1080 yuv444p12le -> 1920x1080 yuv422p10le (hwaccel=vaapi)
-```
-
-> **Read `(hwaccel=vaapi)` carefully.** It is printed when the VA-API *device* opens, which happens
-> before the decoder negotiates a surface format. It does **not** by itself prove the GPU is
-> decoding. The reliable fallback indicator is this warning, logged once negotiation fails:
->
-> ```
-> [WARN ] Hardware decode: vaapi surface unavailable for this stream, decoding on CPU
-> ```
-
-**Requirements and limitations**
-
-- FFmpeg must be built with `--enable-vaapi`, and a DRM render node (e.g. `/dev/dri/renderD128`)
-  must be readable and writable by the user running dvledtx. The device is selected automatically;
-  there is no config key to pin a specific render node.
-- The GPU must support the stream's decode profile. Check with `vainfo` — look for a
-  `VAProfileHEVC*` entry with the `VAEntrypointVLD` entrypoint.
-- **RGB (`gbrp10le` / `gbrp12le`) sources can never use VA-API.** FFmpeg's HEVC decoder only offers
-  a VA-API surface for YUV pixel formats, so an RGB source always takes the CPU fallback regardless
-  of what the GPU supports. This is a decoder limitation, not a configuration error.
-- This setting affects the **source** pixel format only. It is independent of `tx_video.fmt`, which
-  controls the format placed on the wire.
-
-> **Note on throughput:** hardware decode reduces decode CPU time, but the frames must then be
-> downloaded from GPU to system memory, which costs roughly what the decode saved. On this pipeline
-> — where MTL pacing and colour conversion dominate — enabling it is not expected to change
-> end-to-end CPU usage or achievable frame rate. Treat it as a way to free CPU cycles for other
-> work on the host, not as a throughput optimisation.
-
-
-#### Ensuring an X11 session (required for screen capture)
-
-`x11grab` can only capture from a native X11 (Xorg) display — it does not work against a Wayland compositor. This mainly affects **machines with a physical monitor** logging into their own desktop session: current Ubuntu releases (22.04 and later) default new GDM logins to a **Wayland** session, which causes `screen_capture` to fail (or silently capture a blank/incorrect frame) even though FFmpeg was built correctly with `x11grab` support.
-
-> The [headless setup below](#screen-capture-on-a-headless-machine-no-physical-monitor) is unaffected by this — it starts a real Xorg server directly (`Xorg :99 ...`) and forces the desktop session running on top of it with `XDG_SESSION_TYPE=x11`, so no GDM/Wayland session is ever involved.
-
-To capture from a machine's own physical display, make sure that desktop session is running X11, not Wayland:
-
-- **Per-login (manual)**: at the GDM login screen, click the gear icon next to the password field and choose **"Ubuntu on Xorg"** instead of the default **"Ubuntu"** (Wayland) before signing in.
-- **System-wide (automatic)**: disable Wayland in GDM so every login defaults to X11 — edit `/etc/gdm3/custom.conf` and uncomment/set `WaylandEnable=false` under the `[daemon]` section, or apply it directly:
-  ```bash
-  sudo cp /etc/gdm3/custom.conf /etc/gdm3/custom.conf.bak
-  sudo sed -i 's/^#\?WaylandEnable=.*/WaylandEnable=false/' /etc/gdm3/custom.conf
-  grep -q '^WaylandEnable=false' /etc/gdm3/custom.conf || \
-    sudo sed -i '/^\[daemon\]/a WaylandEnable=false' /etc/gdm3/custom.conf
-  sudo systemctl restart gdm3   # or: sudo reboot
-  ```
-  Restarting `gdm3` logs out the current session — save your work first. After logging back in, verify the session type:
-  ```bash
-  echo $XDG_SESSION_TYPE   # should print: x11
-  ```
-
-#### Screen capture on a headless machine (no physical monitor)
-
-`x11grab` needs a real X11 display to attach to — it does not work against a raw framebuffer or DRM device. On a machine with no monitor connected, create a virtual display using Xorg with the `dummy` video driver and run a desktop session on it so there's actual content to capture. Unlike Xvfb, a real Xorg server claims physical input devices — your keyboard and mouse work directly on the virtual display.
-
-> The packages below are **not dvledtx dependencies** — they are only needed to construct a virtual display on a headless host. The following is an example of one way to set this up on Ubuntu; adapt it to your environment as needed.
-
-1. **Install the virtual-display packages** (once), along with the `x11grab`-enabled FFmpeg build. As an example, on Ubuntu:
-   ```bash
-   sudo apt-get install -y xserver-xorg-video-dummy ubuntu-desktop
-   ```
-
-2. **Create an Xorg config** for the dummy driver:
-   ```bash
-   sudo tee /tmp/xorg-dummy.conf > /dev/null << 'EOF'
-   Section "Device"
-       Identifier "dummy"
-       Driver "dummy"
-       VideoRam 256000
-   EndSection
-
-   Section "Monitor"
-       Identifier "monitor"
-       HorizSync 28.0-80.0
-       VertRefresh 48.0-75.0
-       Modeline "1920x1080" 148.50 1920 2008 2052 2200 1080 1084 1089 1125 +hsync +vsync
-   EndSection
-
-   Section "Screen"
-       Identifier "screen"
-       Device "dummy"
-       Monitor "monitor"
-       DefaultDepth 24
-       SubSection "Display"
-           Depth 24
-           Modes "1920x1080"
-       EndSubSection
-   EndSection
-
-   Section "ServerLayout"
-       Identifier "layout"
-       Screen "screen"
-       Option "AllowEmptyInput" "false"
-   EndSection
-   EOF
-   ```
-
-3. **Start Xorg** on display `:99`:
-   ```bash
-   sudo Xorg :99 -config /tmp/xorg-dummy.conf -noreset &
-   ```
-
-4. **Allow root access** and **start a GNOME desktop session** (software GL rendering is required since there is no GPU; `PULSE_SERVER` routes audio to the physical audio device):
-   ```bash
-   DISPLAY=:99 xhost +local:root
-   mkdir -p /tmp/gnome99-runtime && chmod 700 /tmp/gnome99-runtime
-   DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 XDG_SESSION_TYPE=x11 \
-     XDG_RUNTIME_DIR=/tmp/gnome99-runtime \
-     PULSE_SERVER=unix:/run/user/$(id -u)/pulse/native \
-     dbus-run-session -- gnome-session --session=ubuntu &
-   ```
-
-5. **Verify** the display is working (give GNOME a few seconds to start):
-   ```bash
-   DISPLAY=:99 ffmpeg -f x11grab -video_size 1920x1080 -i :99.0+0,0 -frames:v 1 -update 1 /tmp/check.png
-   ```
-
-Your physical keyboard and mouse now control the virtual display directly.
-
-> **Audio:** If audio is not working (e.g. PulseAudio only has a `null` sink), load your physical audio device manually:
-> ```bash
-> # List available ALSA devices
-> aplay -l
-> # Load the desired device (e.g. USB headset on card 1)
-> pactl load-module module-alsa-sink device=hw:1,0 sink_name=plantronics sink_properties=device.description="Plantronics_Headset"
-> pactl set-default-sink plantronics
-> ```
->
-> Applications launched on the virtual display (e.g. Chrome) must also have `PULSE_SERVER` set:
-> ```bash
-> DISPLAY=:99 PULSE_SERVER=unix:/run/user/$(id -u)/pulse/native google-chrome &
-> ```
-
-#### Example: screen-capture input (`dvledtx/config/tx_fullhd_screen_capture.json`)
-
-```json
-{
-  "interfaces": [
-    { "name": "0000:06:00.0", "sip": "192.168.50.29", "dip": "239.168.85.20" }
-  ],
-  "video": {
-    "width": 1920,
-    "height": 1080,
-    "input_mode": "screen_capture",
-    "screen_input": ":99.0+0,0"
-  },
-  "tx_video": {
-    "fps": 30,
-    "fmt": "yuv422p10le"
-  },
-  "tx_sessions": [
-    { "udp_port": 20000, "crop": { "x": 0, "y": 0, "w": 1920, "h": 1080 } }
-  ]
-}
-```
-
-#### Example: multi-session screen capture (`dvledtx/config/tx_fullhd_screen_capture_multi_session.json`)
-
-Splits a 1920×1080 screen capture into 3 vertical strips, each transmitted as a separate ST2110 session:
-
-```json
-{
-  "interfaces": [
-    { "name": "0000:06:00.0", "sip": "192.168.50.29", "dip": "239.168.85.20" }
-  ],
-  "video": {
-    "width": 1920,
-    "height": 1080,
-    "input_mode": "screen_capture",
-    "screen_input": ":99.0+0,0"
-  },
-  "tx_video": {
-    "fps": 30,
-    "fmt": "yuv422p10le"
-  },
-  "tx_sessions": [
-    { "udp_port": 20000, "payload_type": 96, "crop": { "x": 0,    "y": 0, "w": 640, "h": 1080 } },
-    { "udp_port": 20002, "payload_type": 96, "crop": { "x": 640,  "y": 0, "w": 640, "h": 1080 } },
-    { "udp_port": 20004, "payload_type": 96, "crop": { "x": 1280, "y": 0, "w": 640, "h": 1080 } }
-  ]
-}
-```
-
-`screen_input` follows FFmpeg's `x11grab` URL syntax: `<display>[+<x>,<y>]` (e.g. `:99.0+0,0` captures display `:99`, matching the virtual display created above, starting at offset `0,0`). The capture resolution/framerate are taken from the `width`/`height`/`fps` fields above.
-
-Run dvledtx as usual — `x11grab` will capture whatever is rendered on the display (desktop, windows, applications) and transmit it, exactly as it would for a physical display:
-```bash
-./build/dvledtx/dvledtx --config dvledtx/config/tx_fullhd_screen_capture.json
-```
-
-**Tear down** the virtual display when done:
-```bash
-pkill -f "gnome-session --session=ubuntu"
-sudo pkill -f "Xorg :99"
-```
-
-`interfaces[]` supports up to 8 NICs (MTL's port limit); each `tx_sessions[]` entry picks its NIC via `nic_index` (see `dvledtx/config/tx_fullhd_multi_nic.json` for an 8-NIC/8-session example). Using more than 2 NICs with the default FFmpeg TX path requires the `p2_port`..`p7_port` AVOptions described above, which are present at the pinned MTL commit.
-
-## Logging
-
-dvledtx includes a built-in logger with configurable output targets and log levels.
-
-### Log File
-
-Specify a log file in the JSON config with the top-level `log_file` field:
-
-```json
-{
-  "log_file": "dvledtx.log",
-  ...
-}
-```
-
-When `log_file` is set, log output is written to that file in addition to the console. If the field is omitted, output goes to the console only.
-
-### Log Levels
-
-| Level | Description |
-|-------|-------------|
-| `ERROR` | Critical failures only |
-| `WARN` | Non-fatal warnings |
-| `INFO` | General operational messages (default) |
-| `DEBUG` | Verbose diagnostic output |
-
-### Examples
-
-#### Using JSON Configuration (recommended)
-```bash
-./build/dvledtx/dvledtx --config dvledtx/config/tx_fullhd_single_session.json
-```
-
-## Command-Line Options
-
-| Option | Description |
-|--------|-------------|
-| `-C, --config <file>` | JSON config file (required) |
-| `-v, --version` | Show version and exit |
-| `--help` | Show help message |
-
-#### Show Version
-```bash
-./build/dvledtx/dvledtx --version
-# or
-./build/dvledtx/dvledtx -v
-```
-
-## Supported Formats
-
-### Video Formats
-
-| Format | Chroma | Bit Depth | Color Space |
-|--------|--------|-----------|-------------|
-| `yuv422p10le` | 4:2:2 | 10-bit | YUV |
-| `yuv420` | 4:2:0 | 8-bit | YUV |
-| `yuv444p10le` | 4:4:4 | 10-bit | YUV |
-| `gbrp10le` | 4:4:4 | 10-bit | RGB |
-| `yuv422p12le` | 4:2:2 | 12-bit | YUV |
-| `yuv444p12le` | 4:4:4 | 12-bit | YUV |
-| `gbrp12le` | 4:4:4 | 12-bit | RGB |
-
-### Frame Rates
-- 25 fps
-- 30 fps
-- 50 fps
-- 60 fps
-
-### Resolutions
-
-| Resolution | Dimensions | Description |
-|------------|------------|-------------|
-| **1080p** (Full HD) | 1920x1080 | Standard HD resolution |
-| **2K** (QHD) | 2560x1440 | Quad HD / 2K resolution |
-| **4K** (UHD) | 3840x2160 | Ultra HD / 4K resolution |
-
-> **Note:** Maximum supported resolution is 3840x2160. Width must be even for YUV format alignment.
-
-### Video Scaling
-
-dvledtx supports upscaling and downscaling via optional `scale_width` and `scale_height` fields in the video configuration block. When set, the decoded source video is scaled to the specified dimensions before crop regions are applied.
-
-| Feature | Description |
-|---------|-------------|
-| **Upscale** | Scale smaller source (e.g. 1080p) to larger output (e.g. 4K) |
-| **Downscale** | Scale larger source (e.g. 4K) to smaller output (e.g. 1080p) |
-| **Single session** | Full scaled frame transmitted as one stream |
-| **Multi-session** | Crop regions applied to scaled frame for tiled LED walls |
-| **Max output** | 3840x2160 (4K UHD) |
-
-Example — upscale 1080p source to 4K output:
-```json
-{
-  "video": {
-    "width": 1920, "height": 1080,
-    "tx_url": "source_1080p.mp4"
-  },
-  "tx_video": {
-    "scale_width": 3840, "scale_height": 2160,
-    "fps": 30, "fmt": "yuv422p10le"
-  },
-  "tx_sessions": [
-    { "udp_port": 20000, "payload_type": 96, "crop": { "x": 0, "y": 0, "w": 3840, "h": 2160 } }
-  ]
-}
-```
-
-Log output when scaling is active:
-```
-[INFO ] Video: 1920x1080 -> scale 3840x2160 30fps yuv422p10le  tx_url=source_1080p.mp4
-[INFO ]   Session 0: udp_port=20000 pt=96 crop=[0,0 3840x2160]
-```
-
-> **Note:** When `scale_width`/`scale_height` are set, crop bounds are validated against the scaled dimensions, not the source dimensions. Both fields must be specified together, and the scaled dimensions must satisfy the pixel format's chroma-alignment constraints (e.g. `yuv420` requires even width and height; `yuv422*` requires even width).
-
-## Performance Considerations
-
-### Optimization Features
-- **Hugepage Memory**: All buffers allocated on hugepages
-- **Zero-copy Design**: Minimal memory copying
-- **Hardware Acceleration**: Uses MTL's hardware features
-- **Efficient Threading**: Minimal context switching
-
-### Running Unit Tests
-
-Install dependencies if not present
-```
-sudo apt install libcmocka-dev
-pip install gcovr
-```
-
-To build and run both the transmitter and receiver unit tests with coverage:
+Manual equivalent:
 
 ```bash
-bash scripts/test.sh
+meson setup build [-Denable_mtl_tx=true]
+ninja -C build
 ```
 
-To run tests without generating a coverage report:
+## Host Setup
 
-```bash
-bash scripts/test.sh --no-coverage
-```
-
-## Troubleshooting
-
-### Hardware decode falls back to the CPU
-
-With `"hwaccel": true` the log shows `(hwaccel=none)`, or shows `(hwaccel=vaapi)`
-followed by `Hardware decode: vaapi surface unavailable for this stream, decoding on CPU`. The run
-continues on the CPU — this is by design, never a fatal error. Work through the causes in order:
-
-| Log message | Cause | Fix |
-|-------------|-------|-----|
-| `decoder '<name>' has no VA-API configuration` | FFmpeg built without `--enable-vaapi`, or the codec has no VA-API support | Rebuild FFmpeg with `--enable-vaapi`; verify with `ffmpeg -hwaccels \| grep vaapi` |
-| `cannot open VA-API device` | No render node, or no permission on it | Check `/dev/dri/renderD128` exists and add the user to the `render` group |
-| `surface unavailable for this stream, decoding on CPU` | GPU cannot decode this profile, **or** the source is RGB | Check `vainfo` for a matching `VAProfile*` with `VAEntrypointVLD`; note RGB (`gbrp*`) sources can never use VA-API |
-
-If a system-wide FFmpeg without VA-API shadows a locally built one, the binary loads the wrong
-libraries and `ffmpeg -hwaccels` prints an empty list. Point the loader at the correct build:
-
-```bash
-export LD_LIBRARY_PATH=/path/to/vaapi-ffmpeg/lib
-```
+These steps are required on **both** the TX and RX hosts. They only need to be done once
+(hugepages and NIC binding must be repeated after each reboot unless made persistent).
 
 ### IOMMU / VFIO Kernel Parameters (GRUB)
 
-MTL requires IOMMU and VFIO kernel parameters to be set. If MTL fails to initialize or VFIO devices are not accessible, check that the following parameters are present in `/etc/default/grub`:
+MTL requires IOMMU and VFIO. Ensure these parameters are present in `GRUB_CMDLINE_LINUX_DEFAULT`
+in `/etc/default/grub`:
 
 ```
 intel_iommu=on iommu=pt pcie_aspm=off pcie_port_pm=off vfio-pci.disable_idle_d3=1
 ```
 
-To add them manually:
+For example:
 
-1. Open `/etc/default/grub` in a text editor:
-   ```bash
-   sudo nano /etc/default/grub
-   ```
+```bash
+sudo nano /etc/default/grub
+# GRUB_CMDLINE_LINUX_DEFAULT="quiet splash intel_iommu=on iommu=pt pcie_aspm=off pcie_port_pm=off vfio-pci.disable_idle_d3=1"
+sudo update-grub
+sudo reboot
+```
 
-2. Append the missing parameters to `GRUB_CMDLINE_LINUX_DEFAULT`, for example:
-   ```
-   GRUB_CMDLINE_LINUX_DEFAULT="quiet splash intel_iommu=on iommu=pt pcie_aspm=off pcie_port_pm=off vfio-pci.disable_idle_d3=1"
-   ```
+Verify after reboot:
 
-3. Update GRUB and reboot:
-   ```bash
-   sudo update-grub
-   sudo reboot
-   ```
-
-> **Note:** A reboot is required for the IOMMU/VFIO parameters to take effect.
+```bash
+cat /proc/cmdline | grep intel_iommu
+dmesg | grep -i iommu    # should show "DMAR: IOMMU enabled"
+```
 
 ### VFIO Group Setup
 
-MTL uses VFIO to access the NIC. The current user must belong to the `vfio` group.
-
-1. Create the `vfio` group if it does not exist:
-   ```bash
-   sudo groupadd vfio
-   ```
-
-2. Add your user to the group:
-   ```bash
-   sudo usermod -aG vfio $USER
-   ```
-
-3. Apply the group membership without logging out:
-   ```bash
-   newgrp vfio
-   ```
-
-   Or log out and back in for the change to take effect permanently.
-
-4. Verify group membership:
-   ```bash
-   id -nG $USER
-   ```
-
-### Killing the Application
-
-If `dvledtx` becomes unresponsive or needs to be force-stopped:
+MTL accesses the NIC through VFIO; the user running the applications must belong to the `vfio`
+group:
 
 ```bash
-sudo pkill -9 -f dvledtx
+sudo groupadd vfio            # if it does not already exist
+sudo usermod -aG vfio $USER
+newgrp vfio                   # or log out and back in
+id -nG $USER                  # verify
 ```
 
-### Common Issues
+### Bind NICs to DPDK and Configure Hugepages
 
-1. **MTL Initialization Failed**
-   - Check network port PCI address matches your hardware:
+Follow the MTL run guide for the pinned commit:
+
+- [DPDK PMD setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/run.md#3-dpdk-pmd-setup) — bind the NIC (or create and bind VFs) to `vfio-pci`.
+- [Hugepage setup](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/run.md#4-setup-hugepage).
+
+Quick reference:
+
+```bash
+# Find the NIC PCI address (use the BDF form "0000:06:00.0" in the JSON configs)
+lspci | grep Ethernet
+
+# Either bind a PF to vfio-pci (TX or RX)
+sudo ${mtl_source_code}/script/nicctl.sh bind_pmd 0000:06:00.0
+
+# Or use VFs:
+#   TX host: plain VFs are enough
+sudo ${mtl_source_code}/script/nicctl.sh create_vf 0000:06:00.0
+#   RX host: trusted VFs plus a promiscuous PF (see dvledrx/README.md, Virtual Functions)
+sudo ${mtl_source_code}/script/nicctl.sh create_tvf 0000:06:00.0 <num_vfs>
+sudo ip link set <pf_iface> promisc on
+
+dpdk-devbind.py --status       # target NIC/VFs should show drv=vfio-pci
+
+# Allocate hugepages
+sudo sysctl -w vm.nr_hugepages=2048
+grep Huge /proc/meminfo
+```
+
+VF settings, PF promiscuous mode and hugepages are lost at reboot. Re-apply them at every boot,
+for example from a startup script or systemd unit. For RX VF details see
+[dvledrx — Virtual Functions](dvledrx/README.md#virtual-functions-vfs).
+
+### Locked-Memory Limit (Non-Root Run)
+
+The applications run as a normal user, so DPDK needs a high enough locked-memory limit
+(`RLIMIT_MEMLOCK`). If it is too low, start-up fails with:
+
+```text
+EAL: Cannot set up DMA remapping, error 12 (Cannot allocate memory)
+```
+
+Raise the limit as described in the
+[MTL run guide: notes for non-root run](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/run.md#821-rlimit_memlock),
+for example by adding these lines to `/etc/security/limits.conf` and rebooting:
+
+```text
+<user>    hard   memlock           unlimited
+<user>    soft   memlock           unlimited
+```
+
+Check with `ulimit -l`; it should print `unlimited`.
+
+## Run
+
+Both applications are configured entirely from a JSON file and share the same command line.
+Before running, make sure the [host setup](#host-setup) is complete and edit the sample config so
+`interfaces[].name` matches your NIC PCI address and the IP addresses match your network.
+
+### Command-Line Options
+
+| Option | Description |
+|--------|-------------|
+| `-C, --config <file>` | JSON configuration file (required) |
+| `-t, --test-time <secs>` | Run for N seconds (1..86400), then exit cleanly |
+| `-v, --version` | Show the version and exit |
+| `--help` | Show usage |
+
+### Run the Transmitter (dvledtx)
+
+```bash
+./build/dvledtx/dvledtx --config dvledtx/config/tx_fullhd_single_session.json
+```
+
+Set `video.tx_url` in the config to your source video file (or use `input_mode:
+screen_capture`). Configuration reference:
+[dvledtx/README.md — JSON Configuration](dvledtx/README.md#json-configuration).
+
+### Run the Receiver (dvledrx)
+
+dvledrx renders through X11, so it needs a running Xorg session and `DISPLAY` set:
+
+```bash
+export DISPLAY=:0
+./build/dvledrx/dvledrx --config dvledrx/config/rx_fullhd_1session.json
+```
+
+Configuration reference:
+[dvledrx/README.md — JSON Configuration](dvledrx/README.md#json-configuration).
+
+### End-to-End Example
+
+A TX session and the RX session that receives it must agree on:
+
+| Must match | TX config | RX config |
+|------------|-----------|-----------|
+| Multicast group | `interfaces[].dip` | `interfaces[].dip` |
+| UDP port | `tx_sessions[].udp_port` | `rx_sessions[].udp_port` |
+| RTP payload type | `tx_sessions[].payload_type` | `rx_sessions[].payload_type` |
+| Pixel format | `tx_video.fmt` | `video.fmt` |
+| Frame rate | `tx_video.fps` | `video.fps` |
+| Stream size | `tx_sessions[].crop.w` × `crop.h` | `rx_sessions[].crop.w` × `crop.h` |
+
+For example, a Full HD frame split into three 640×1080 strips:
+
+```bash
+# TX host
+./build/dvledtx/dvledtx --config dvledtx/config/tx_fullhd_multi_session.json
+
+# RX host (composite window of the three strips)
+export DISPLAY=:0
+./build/dvledrx/dvledrx --config dvledrx/config/rx_crop_3sessions.json
+```
+
+The shipped samples are independent examples: before pairing them, align the multicast `dip`
+and `fmt` values (here `tx_fullhd_multi_session.json` uses `239.168.85.21` / `yuv422p10le` and
+`rx_crop_3sessions.json` uses `239.168.85.20` / `gbrp12le`).
+
+### Stopping the Applications
+
+Press `Ctrl+C` (or send `SIGTERM`) for a clean shutdown; `--test-time` stops automatically. Closing
+a dvledrx window also stops the receiver. If an application becomes unresponsive:
+
+```bash
+pkill -9 -f dvledtx
+pkill -9 -f dvledrx
+```
+
+## Running Unit Tests
+
+```bash
+sudo apt install -y libcmocka-dev xvfb xauth
+pip install gcovr
+
+bash scripts/test.sh                # TX + RX unit tests with a coverage report
+bash scripts/test.sh --no-coverage  # tests only
+```
+
+The script builds into `build-tests/` and runs every test with `meson test`. dvledrx X11/session
+tests run under `xvfb-run`. dvledtx screen-capture success tests run only when a live X display is
+detected (or `DVLED_TEST_DISPLAY` is set to an x11grab source such as `:99.0+0,0`).
+
+## Troubleshooting
+
+Application-specific issues are covered in [dvledtx/README.md](dvledtx/README.md#troubleshooting)
+and [dvledrx/README.md](dvledrx/README.md#troubleshooting). Common issues:
+
+1. **MTL initialization failed**
+   - Check that the PCI address in the config matches your hardware:
      ```bash
      lspci | grep Ethernet
      # Example output: 06:00.0 Ethernet controller: Intel Corporation ...
      # Use BDF format in config: "0000:06:00.0"
      ```
-   - Verify MTL library is properly installed:
+   - Check MTL, DPDK and FFmpeg are installed at the expected versions — see
+     [Verify the Installation](#verify-the-installation).
+   - Verify the NIC is bound to VFIO:
      ```bash
-     # Check MTL shared library is present
-     ldconfig -p | grep mtl
-     # Expected: libmtl.so (libc6,x86-64) => /usr/local/lib/x86_64-linux-gnu/libmtl.so
-
-     # Check MTL pkg-config file is available
-     pkg-config --modversion mtl
-      # Expected: 26.09.0.REL
-
-     # Check MTL header files exist
-     ls /usr/local/include/mtl/mtl_api.h
-     ```
-   - Verify DPDK is installed and the NIC is bound to VFIO:
-     ```bash
-     # Check DPDK installation
-     pkg-config --modversion libdpdk
-
-     # Check NIC binding status
-     sudo $mtl_source_code/script/nicctl.sh list
+     sudo ${mtl_source_code}/script/nicctl.sh list all
      # Or use dpdk-devbind.py:
      dpdk-devbind.py --status
      # The target NIC should show "drv=vfio-pci"
      ```
-   - Ensure IOMMU is enabled (see [IOMMU/VFIO Kernel Parameters](#iommu--vfio-kernel-parameters-grub)):
-     ```bash
-     dmesg | grep -i iommu
-     # Should show "DMAR: IOMMU enabled"
-     cat /proc/cmdline | grep intel_iommu
-     ```
-   - Verify network card is supported (Intel I225, I226, E810 series)
+   - Ensure IOMMU is enabled — see [IOMMU / VFIO Kernel Parameters](#iommu--vfio-kernel-parameters-grub).
+   - Verify the network card is supported (Intel I225, I226, E610, E810 series).
 
-2. **Cannot Load Source File**  
-   - Check file exists and is readable:
-     ```bash
-     ls -la /path/to/video.mp4
-     ```
-   - Verify the file is a valid video (not corrupted):
-     ```bash
-     ffprobe /path/to/video.mp4
-     # Should show video stream info without errors
-     ```
-   - Ensure sufficient disk space:
-     ```bash
-     df -h .
-     ```
-   - Verify file format matches config parameters (resolution, pixel format)
-   - Note: Symlinked files are rejected for security reasons
+2. **Hugepage allocation failure / transmission issues**
+   ```bash
+   grep Huge /proc/meminfo                  # HugePages_Free should be > 0
+   sudo sysctl -w vm.nr_hugepages=2048      # make persistent in /etc/sysctl.conf
+   ```
+   Also check the NIC has enough bandwidth (uncompressed 1080p30 4:2:2 10-bit ≈ 1.3 Gb/s per
+   stream, more for 4:4:4 / 12-bit).
 
-3. **Network Transmission Issues**
-   - Ensure network card supports required bandwidth (uncompressed 1080p30 ≈ 1.8 Gbps)
-   - Verify hugepages are allocated:
-     ```bash
-     cat /proc/meminfo | grep HugePages
-     # HugePages_Free should be > 0
-     ```
+3. **Permission denied (VFIO)**
+   - Ensure the user is in the `vfio` group — see [VFIO Group Setup](#vfio-group-setup).
+   - Check `ls -la /dev/vfio/` — group should be `vfio` with rw permissions.
 
-4. **Hugepage Allocation Failure**
-   - Check current hugepage status:
-     ```bash
-     cat /proc/meminfo | grep Huge
-     ```
-   - Allocate hugepages (requires root):
-     ```bash
-     sudo sysctl -w vm.nr_hugepages=2048
-     # Or make persistent in /etc/sysctl.conf
-     ```
+4. **`pip install` fails with `externally-managed-environment`** (Ubuntu 24.04, PEP 668)
+   - See the note in the
+     [MTL build guide](https://github.com/OpenVisualCloud/Media-Transport-Library/blob/7bee24231c864d12da6db2c2ffbfd3986717af5a/doc/build.md#111-ubuntudebian),
+     or install with `pip install --break-system-packages <package>`.
 
-5. **Permission Denied (VFIO)**
-   - Ensure user is in the `vfio` group (see [VFIO Group Setup](#vfio-group-setup))
-   - Check VFIO device permissions:
-     ```bash
-     ls -la /dev/vfio/
-     # Group should be 'vfio' with rw permissions
-     ```
+5. **FFmpeg `./configure` fails with `nasm/yasm not found or too old`**
+   ```bash
+   sudo apt install -y nasm
+   ```
+   Then re-run `./configure`.
 
-6. **`pip install` fails with `externally-managed-environment`**
-   - On newer systems (Ubuntu 24.04+, PEP 668) `pip` refuses to install packages system-wide, which breaks installing the Python build tools (`meson`, `ninja`, `pyelftools`) required by DPDK/MTL. Re-run the install with `--break-system-packages`:
+6. **Build fails with `Dependency "mtl" not found` or missing `libav*`**
+   - Make sure `/usr/local` is on the pkg-config path:
      ```bash
-     pip install --break-system-packages meson ninja pyelftools
+     export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH
      ```
-
-7. **FFmpeg `./configure` fails with `nasm/yasm not found or too old`**
-   - Building FFmpeg (and DPDK) requires the NASM assembler. If configuring FFmpeg errors out looking for `nasm`, install it:
-     ```bash
-     sudo apt install -y nasm
-     ```
-   - Then re-run FFmpeg's `./configure`.
 
 ## Contributing
 
-Contributions are welcome. Please open an issue or submit a pull request on [GitHub](https://github.com/OpenVisualCloud/directview-led-software-toolkit).
+Contributions are welcome. Please open an issue or submit a pull request on
+[GitHub](https://github.com/OpenVisualCloud/directview-led-software-toolkit).
 
 ## License
 
 This project is licensed under the BSD 3-Clause License. See [LICENSE](LICENSE) for details.
-

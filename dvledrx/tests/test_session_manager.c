@@ -56,9 +56,10 @@ static void pump(session_manager_t* m, int ms) {
 
 /* Every frame handed out by MTL must come back exactly once, nothing leaked. */
 static void check_frames_balanced(void) {
-  CHECK_EQ_INT(fake_mtl.frames_put, fake_mtl.frames_got);
-  CHECK_EQ_INT(fake_mtl.bad_puts, 0);
-  CHECK_EQ_INT(fake_mtl.leaked, 0);
+  struct fake_mtl_state s = fake_mtl_snapshot();
+  CHECK_EQ_INT(s.frames_put, s.frames_got);
+  CHECK_EQ_INT(s.bad_puts, 0);
+  CHECK_EQ_INT(s.leaked, 0);
 }
 
 /* init + start, run for ms, then stop/cleanup as main() does. */
@@ -125,9 +126,26 @@ static void test_init_params(void) {
   CHECK_EQ_INT(p->rx_queues_cnt[1], 1 + 2);
   CHECK(p->flags & MTL_FLAG_TASKLET_SLEEP);
   CHECK(p->flags & MTL_FLAG_RX_VIDEO_MIGRATE);
+  CHECK(!(p->flags & MTL_FLAG_PTP_ENABLE)); /* default remains disabled */
   CHECK(!(p->flags & MTL_FLAG_RX_USE_CNI)); /* no VF */
   CHECK(app.mtl == m.mtl && m.mtl != NULL);
   CHECK_EQ_INT(m.st20p_count, 3);
+  session_manager_cleanup(&m);
+  CHECK_EQ_INT(fake_mtl.uninit_calls, 1);
+}
+
+static void test_init_ptp_flags(void) {
+  struct rx_app_context app;
+  session_manager_t m;
+  REQUIRE(make_app(&app,
+      "{ \"ptp\": { \"enable\": true, \"pi\": true, \"unicast\": true }, " IFACE ","
+      "  \"rx_sessions\": [ { \"crop\": { \"w\": 32, \"h\": 16 } } ] }") == 0);
+  fake_mtl_reset();
+  REQUIRE(session_manager_init(&m, &app) == 0);
+  const struct mtl_init_params* p = &fake_mtl.last_init;
+  CHECK(p->flags & MTL_FLAG_PTP_ENABLE);
+  CHECK(p->flags & MTL_FLAG_PTP_PI);
+  CHECK(p->flags & MTL_FLAG_PTP_UNICAST_ADDR);
   session_manager_cleanup(&m);
   CHECK_EQ_INT(fake_mtl.uninit_calls, 1);
 }
@@ -248,12 +266,13 @@ static void test_single_session_without_display(void) {
   CHECK_EQ_INT(run_app(&app, 300, &seen), 0);
   with_display();
   CHECK(seen.composite == NULL);
-  CHECK_EQ_INT(fake_mtl.frames_got, 120);
+  struct fake_mtl_state s = fake_mtl_snapshot();
+  CHECK_EQ_INT(s.frames_got, 120);
   check_frames_balanced();
-  CHECK_EQ_INT(fake_mtl.create_calls, 1);
-  CHECK_EQ_INT(fake_mtl.free_calls, 1);
-  CHECK_EQ_INT(fake_mtl.wake_calls, 1);
-  const struct st20p_rx_ops* ops = &fake_mtl.ops[0];
+  CHECK_EQ_INT(s.create_calls, 1);
+  CHECK_EQ_INT(s.free_calls, 1);
+  CHECK_EQ_INT(s.wake_calls, 1);
+  const struct st20p_rx_ops* ops = &s.ops[0];
   CHECK_EQ_STR(ops->name, "st20p_rx_0");
   CHECK_EQ_INT(ops->port.udp_port[MTL_SESSION_PORT_P], 20010);
   CHECK_EQ_INT(ops->port.payload_type, 112);
@@ -455,8 +474,9 @@ static void test_stop_twice(void) {
   no_display();
   fake_mtl_reset();
   REQUIRE(session_manager_init(&m, &app) == 0);
-  REQUIRE(session_manager_start(&m, &app) == 0);
-  CHECK(session_manager_is_running(&m));
+  int rc = session_manager_start(&m, &app);
+  CHECK_EQ_INT(rc, 0);
+  CHECK(rc != 0 || session_manager_is_running(&m));
   app.exit = true;
   session_manager_stop(&m);
   session_manager_stop(&m);
@@ -502,6 +522,7 @@ int main(void) {
   RUN_TEST(test_null_args);
   RUN_TEST(test_init_failure);
   RUN_TEST(test_init_params);
+  RUN_TEST(test_init_ptp_flags);
   RUN_TEST(test_init_invalid_sip);
   RUN_TEST(test_start_invalid_dip);
   RUN_TEST(test_start_unknown_nic_index);

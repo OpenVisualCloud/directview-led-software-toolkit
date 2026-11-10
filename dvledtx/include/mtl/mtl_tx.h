@@ -21,6 +21,8 @@
 
 #include "mtl_api.h"
 #include "st_pipeline_api.h"
+#include <stdbool.h>
+#include <stdint.h>
 #include <libavutil/pixfmt.h>
 #include <libavutil/frame.h>
 
@@ -45,6 +47,20 @@ int  mtl_tx_init(session_manager_t* manager, struct dvledtx_context* app);
  * mtl_tx_uninit() — release the MTL library instance stored in manager->mtl.
  */
 void mtl_tx_uninit(session_manager_t* manager);
+
+/* Consecutive slow PTP samples before the clock is declared stalled. */
+#define MTL_TX_PTP_STALL_LIMIT 3
+
+/*
+ * mtl_tx_ptp_stalled() — sample MTL's PTP time against CLOCK_MONOTONIC.
+ *   Call about once per second. Returns true once the PTP clock has advanced
+ *   less than half as fast as CLOCK_MONOTONIC for MTL_TX_PTP_STALL_LIMIT
+ *   consecutive samples. Always false when PTP is disabled or MTL is not up.
+ */
+bool mtl_tx_ptp_stalled(session_manager_t* manager);
+
+/* Watchdog core of mtl_tx_ptp_stalled(), taking the two timestamps directly. */
+bool mtl_tx_ptp_watch_update(session_manager_t* manager, uint64_t ptp_ns, uint64_t mono_ns);
 
 #ifdef ENABLE_MTL_TX
 

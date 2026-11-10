@@ -32,6 +32,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <pthread.h>
 
@@ -81,7 +82,9 @@ static int generate_test_video(void)
     const int W = 16, H = 16, FPS = 25, NFRAMES = 3;
     int ret = -1;
 
+    mode_t old_mask = umask(077);
     int tmp_fd = mkstemp(TEST_VIDEO_PATH);
+    umask(old_mask);
     if (tmp_fd < 0) return -1;
     close(tmp_fd);
 

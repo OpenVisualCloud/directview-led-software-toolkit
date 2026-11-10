@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "util/config_reader.h"
@@ -43,7 +44,9 @@ static char *write_tmpfile(const char *content)
 {
     char *path = strdup("/tmp/dvledtx_test_XXXXXX");
     if (!path) return NULL;
+    mode_t old_mask = umask(077);
     int fd = mkstemp(path);
+    umask(old_mask);
     if (fd < 0) { free(path); return NULL; }
     size_t len = strlen(content);
     if (write(fd, content, len) != (ssize_t)len) {
@@ -96,17 +99,22 @@ static void test_parse_returns_minus1_for_null_path(void **state)
 {
     (void)state;
     struct dvledtx_config cfg;
+    memset(&cfg, 0, sizeof(cfg));
     /* fopen(NULL) returns NULL on Linux/glibc; logger is a no-op when
      * uninitialized, so this is safe to call. */
-    assert_int_equal(parse_tx_config(NULL, &cfg), -1);
+    int ret = parse_tx_config(NULL, &cfg);
+    dvledtx_config_free(&cfg);
+    assert_int_equal(ret, -1);
 }
 
 static void test_parse_returns_minus1_for_missing_file(void **state)
 {
     (void)state;
     struct dvledtx_config cfg;
-    assert_int_equal(
-        parse_tx_config("/tmp/dvledtx_no_such_file_xyz.json", &cfg), -1);
+    memset(&cfg, 0, sizeof(cfg));
+    int ret = parse_tx_config("/tmp/dvledtx_no_such_file_xyz.json", &cfg);
+    dvledtx_config_free(&cfg);
+    assert_int_equal(ret, -1);
 }
 
 static void test_parse_3sessions_session_count(void **state)
@@ -1369,7 +1377,9 @@ static void test_validate_unknown_input_mode_fails(void **state)
     struct dvledtx_config cfg;
     fill_valid_config(&cfg);
     strncpy(cfg.input_mode, "camera", sizeof(cfg.input_mode) - 1);
-    assert_int_equal(validate_tx_config(&cfg), -1);
+    int ret = validate_tx_config(&cfg);
+    dvledtx_config_free(&cfg);
+    assert_int_equal(ret, -1);
 }
 
 static void test_validate_screen_capture_without_screen_input_fails(void **state)
@@ -1379,7 +1389,9 @@ static void test_validate_screen_capture_without_screen_input_fails(void **state
     fill_valid_config(&cfg);
     strncpy(cfg.input_mode, "screen_capture", sizeof(cfg.input_mode) - 1);
     cfg.screen_input[0] = '\0';
-    assert_int_equal(validate_tx_config(&cfg), -1);
+    int ret = validate_tx_config(&cfg);
+    dvledtx_config_free(&cfg);
+    assert_int_equal(ret, -1);
 }
 
 static void test_validate_screen_capture_with_screen_input_passes(void **state)
@@ -1389,7 +1401,9 @@ static void test_validate_screen_capture_with_screen_input_passes(void **state)
     fill_valid_config(&cfg);
     strncpy(cfg.input_mode, "screen_capture", sizeof(cfg.input_mode) - 1);
     strncpy(cfg.screen_input, ":0.0+0,0", sizeof(cfg.screen_input) - 1);
-    assert_int_equal(validate_tx_config(&cfg), 0);
+    int ret = validate_tx_config(&cfg);
+    dvledtx_config_free(&cfg);
+    assert_int_equal(ret, 0);
 }
 
 static void test_validate_duplicate_udp_ports_fails(void **state)
@@ -1595,13 +1609,8 @@ static void test_peek_log_file_strips_bare_control_chars(void **state)
 {
     (void)state;
     /* Embed an SOH (0x01) byte between 'a' and 'b' */
-    const char json[] = "{\"log_file\": \"a\x01""b.log\"}";
-    char *path = strdup("/tmp/dvledtx_ctrl_XXXXXX");
+    char *path = write_tmpfile("{\"log_file\": \"a\x01""b.log\"}");
     assert_non_null(path);
-    int fd = mkstemp(path);
-    assert_true(fd >= 0);
-    assert_int_equal(write(fd, json, sizeof(json) - 1), (ssize_t)(sizeof(json) - 1));
-    close(fd);
 
     char buf[256] = {0};
     int ret = peek_config_log_file(path, buf, sizeof(buf));
@@ -1782,7 +1791,9 @@ static void test_load_and_apply_config_null_file_returns_zero(void **state)
     (void)state;
     struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
-    assert_int_equal(load_and_apply_config(&app, NULL), 0);
+    int ret = load_and_apply_config(&app, NULL);
+    dvledtx_context_free(&app);
+    assert_int_equal(ret, 0);
 }
 
 static void test_load_and_apply_config_empty_file_returns_zero(void **state)
@@ -1790,7 +1801,9 @@ static void test_load_and_apply_config_empty_file_returns_zero(void **state)
     (void)state;
     struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
-    assert_int_equal(load_and_apply_config(&app, ""), 0);
+    int ret = load_and_apply_config(&app, "");
+    dvledtx_context_free(&app);
+    assert_int_equal(ret, 0);
 }
 
 static void test_load_and_apply_config_nonexistent_file_returns_minus1(void **state)
@@ -1798,8 +1811,9 @@ static void test_load_and_apply_config_nonexistent_file_returns_minus1(void **st
     (void)state;
     struct dvledtx_context app;
     memset(&app, 0, sizeof(app));
-    assert_int_equal(
-        load_and_apply_config(&app, "/tmp/dvledtx_no_such_config_xyz.json"), -1);
+    int ret = load_and_apply_config(&app, "/tmp/dvledtx_no_such_config_xyz.json");
+    dvledtx_context_free(&app);
+    assert_int_equal(ret, -1);
 }
 
 /* Minimal valid one-session JSON (no tx_url, file-open check skipped) */
@@ -1948,6 +1962,7 @@ static void test_load_and_apply_config_unknown_fmt_fails(void **state)
     memset(&app, 0, sizeof(app));
     int ret = load_and_apply_config(&app, path);
     unlink(path); free(path);
+    dvledtx_context_free(&app);
     assert_int_equal(ret, -1);
 }
 
@@ -2056,6 +2071,7 @@ static void test_load_and_apply_config_maps_screen_capture_fields(void **state)
     memset(&app, 0, sizeof(app));
     int ret = load_and_apply_config(&app, path);
     unlink(path); free(path);
+    dvledtx_context_free(&app); /* only releases nics/session_net */
     assert_int_equal(ret, 0);
     assert_true(app.use_screen_capture);
     assert_string_equal(app.screen_input, ":1.0+100,200");
