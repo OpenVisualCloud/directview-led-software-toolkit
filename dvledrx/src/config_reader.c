@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <arpa/inet.h>
 #include <json-c/json.h>
 
@@ -52,6 +53,14 @@ int parse_rx_config(const char* config_file, struct rx_config* config) {
     if (!config_file || !config) return -1;
 
     memset(config, 0, sizeof(*config));
+
+    /* A symlink could point dvledrx (run as root) at an attacker-controlled config. */
+    struct stat lst;
+    if (lstat(config_file, &lst) == 0 && S_ISLNK(lst.st_mode)) {
+        log_error(LOGGER_TAG, "Config file '%s' is a symbolic link - rejected for security",
+                  config_file);
+        return -1;
+    }
 
     json_object* root = json_object_from_file(config_file);
     if (!root) {

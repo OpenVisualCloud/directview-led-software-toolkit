@@ -505,7 +505,7 @@ static void wall_register(struct x11_display_ctx* d) {
   if (grab) grab_escape(d);
 }
 
-static void wall_unregister(struct x11_display_ctx* d) {
+static void wall_unregister(const struct x11_display_ctx* d) {
   pthread_mutex_lock(&g_wall_lock);
   for (int i = 0; i < g_nwall; i++) {
     if (g_wall[i] == d) {
@@ -527,7 +527,7 @@ int init_x11_display(struct x11_display_ctx* display, uint32_t width, uint32_t h
   Visual* x_visual;
   char window_title[96];
   int win_x = 100 + (session_idx * 50);
-  int win_y = 100 + (session_idx * 50);
+  int win_y = win_x; /* cascade new windows diagonally */
   int monitor_idx = -1;
   char matched_output[32] = "";
   bool fixed_window = false;
@@ -1121,7 +1121,7 @@ int init_composite_x11_display(struct composite_x11_ctx* comp,
   /* Full-width composite window */
   char title[128];
   snprintf(title, sizeof(title),
-           "dvledrx Composite (%dx%d, %d sessions)",
+           "dvledrx Composite (%ux%u, %d sessions)",
            comp->full_width, height, num_sessions);
 
   Window x_window = XCreateSimpleWindow(
@@ -1357,7 +1357,7 @@ void composite_write_strip(struct composite_x11_ctx* comp,
 
   for (uint32_t row = 0; row < h; row++) {
     uint8_t* dst = dst_base + row * row_stride_comp + x_byte_off;
-    uint8_t* src = strip_buf + row * row_stride_strip;
+    const uint8_t* src = strip_buf + row * row_stride_strip;
     memcpy(dst, src, row_stride_strip);
   }
 
@@ -1408,7 +1408,7 @@ void composite_write_crop(struct composite_x11_ctx* comp,
       copy_w = comp->full_width - dst_x;
 
     uint8_t* dst = dst_base + dy * row_stride_comp + dst_x * 4;
-    uint8_t* src = strip_buf + row * cw * 4;
+    const uint8_t* src = strip_buf + row * cw * 4;
     memcpy(dst, src, copy_w * 4);
   }
 

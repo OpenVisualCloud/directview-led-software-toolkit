@@ -105,8 +105,7 @@ int peek_config_log_file(const char* f, char* buf, size_t sz)
 {
     (void)f;
     if (stub_peek_config_log_file_ret == 0 && stub_peek_config_log_file_buf[0]) {
-        strncpy(buf, stub_peek_config_log_file_buf, sz - 1);
-        buf[sz - 1] = '\0';
+        snprintf(buf, sz, "%s", stub_peek_config_log_file_buf);
     }
     return stub_peek_config_log_file_ret;
 }

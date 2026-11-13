@@ -127,7 +127,13 @@ static void prepare_vf_parent_pf(const char* vf_bdf) {
   link_target[len] = '\0';
   {
     const char* base = strrchr(link_target, '/');
-    snprintf(pf_bdf, sizeof(pf_bdf), "%s", base ? base + 1 : link_target);
+    const char* name = base ? base + 1 : link_target;
+    size_t n = strlen(name);
+    if (n >= sizeof(pf_bdf)) {
+      log_warn(LOGGER_TAG, "VF setup: parent PF name too long for %s", vf_bdf);
+      return;
+    }
+    memcpy(pf_bdf, name, n + 1);
   }
   if (!is_valid_pci_bdf(pf_bdf)) {
     log_warn(LOGGER_TAG, "VF setup: invalid parent PF '%s' for %s", pf_bdf, vf_bdf);
@@ -148,7 +154,8 @@ static void prepare_vf_parent_pf(const char* vf_bdf) {
   if (dir) {
     while ((ent = readdir(dir)) != NULL) {
       if (ent->d_name[0] == '.') continue;
-      snprintf(pf_iface, sizeof(pf_iface), "%s", ent->d_name);
+      size_t n = strlen(ent->d_name);
+      if (n < sizeof(pf_iface)) memcpy(pf_iface, ent->d_name, n + 1);
       break;
     }
     closedir(dir);
@@ -352,7 +359,6 @@ static bool publish_frame_to_display(struct st20p_rx_ctx* ctx, struct st_frame* 
  */
 static void* st20p_rx_thread(void* arg) {
   struct st20p_rx_ctx* ctx = (struct st20p_rx_ctx*)arg;
-  struct st_frame* frame;
 
   log_info(LOGGER_TAG, "ST20P RX thread %d started - waiting for incoming frames", ctx->idx);
 
@@ -378,7 +384,7 @@ static void* st20p_rx_thread(void* arg) {
   }
 
   while (!ctx->app->exit) {
-    frame = st20p_rx_get_frame(ctx->handle);
+    struct st_frame* frame = st20p_rx_get_frame(ctx->handle);
     if (!frame) {
       usleep(1000); /* 1ms — avoid busy-spinning when no frame is ready */
       continue;
