@@ -72,8 +72,6 @@ static int create_sws_ctx(struct SwsContext** out_sws_ctx,
                           int src_w, int src_h, enum AVPixelFormat src_fmt,
                           int dst_w, int dst_h, enum AVPixelFormat dst_fmt,
                           const char* log_prefix) {
-  char errbuf[256];
-
   int sws_threads = ffmpeg_resolve_sws_threads();
   *out_sws_ctx = sws_alloc_context();
   if (*out_sws_ctx == NULL) {
@@ -91,6 +89,7 @@ static int create_sws_ctx(struct SwsContext** out_sws_ctx,
 
   int ret = sws_init_context(*out_sws_ctx, NULL, NULL);
   if (ret < 0) {
+    char errbuf[256];
     av_strerror(ret, errbuf, sizeof(errbuf));
     LOG_ERROR("%s: sws_init_context failed: %s", log_prefix, errbuf);
     sws_freeContext(*out_sws_ctx);
@@ -190,8 +189,6 @@ static int hwaccel_setup(AVCodecContext* codec_ctx, const AVCodec* codec,
                          const char* log_prefix,
                          AVBufferRef** out_hw_device_ctx,
                          enum AVPixelFormat* out_hw_pix_fmt) {
-  char errbuf[256];
-
   enum AVPixelFormat hw_pix_fmt = AV_PIX_FMT_NONE;
   for (int i = 0;; i++) {
     const AVCodecHWConfig* cfg = avcodec_get_hw_config(codec, i);
@@ -214,6 +211,7 @@ static int hwaccel_setup(AVCodecContext* codec_ctx, const AVCodec* codec,
   int ret = av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_VAAPI,
                                    NULL, NULL, 0);
   if (ret < 0) {
+    char errbuf[256];
     av_strerror(ret, errbuf, sizeof(errbuf));
     LOG_WARN("%s: cannot open VA-API device: %s", log_prefix, errbuf);
     return -1;
@@ -363,7 +361,7 @@ void* shared_decode_thread(void* arg) {
 
       /* Hardware decode: bring the GPU surface into system memory first.
        * No-op when decoding on the CPU. */
-      AVFrame* src_frame = hwaccel_map_to_cpu(dec->hw_device_ctx, dec->hw_pix_fmt,
+      const AVFrame* src_frame = hwaccel_map_to_cpu(dec->hw_device_ctx, dec->hw_pix_fmt,
                                               dec->av_frame, dec->sw_frame,
                                               "Shared decode");
       if (src_frame == NULL) {
@@ -895,7 +893,7 @@ bool ffmpeg_decode_next_frame(struct st20p_tx_ctx* ctx) {
     char log_prefix[64];
     snprintf(log_prefix, sizeof(log_prefix), "ST20P TX(%d)", ctx->idx);
 
-    AVFrame* src_frame = hwaccel_map_to_cpu(ctx->hw_device_ctx, ctx->hw_pix_fmt,
+    const AVFrame* src_frame = hwaccel_map_to_cpu(ctx->hw_device_ctx, ctx->hw_pix_fmt,
                                             ctx->av_frame, ctx->sw_frame, log_prefix);
     if (src_frame == NULL) {
       av_frame_unref(ctx->av_frame);

@@ -61,7 +61,7 @@ static void to_lower_copy(const char* src, char* dst, size_t dst_size) {
   if (!src || !dst || dst_size == 0) return;
 
   size_t i = 0;
-  for (; src[i] != '\0' && i < dst_size - 1; i++) {
+  for (; i < dst_size - 1 && src[i] != '\0'; i++) {
     dst[i] = (char)tolower((unsigned char)src[i]);
   }
   dst[i] = '\0';
@@ -418,12 +418,10 @@ void logger_vlog(enum log_level level, const char* tag, const char* fmt, va_list
 
   pthread_mutex_lock(&g_log_lock);
 
-  FILE* out = g_log_file ? g_log_file : stderr;
-
   if (g_log_file) check_and_rotate();
 
-  /* Re-read out in case check_and_rotate changed g_log_file */
-  out = g_log_file ? g_log_file : stderr;
+  /* Read after check_and_rotate, which may change g_log_file */
+  FILE* out = g_log_file ? g_log_file : stderr;
 
   bool use_color = (!g_log_file && level <= LOG_LEVEL_ERROR);
 

@@ -219,9 +219,9 @@ int convert_frame_to_rgb(struct st_frame* frame, uint8_t* rgb_buffer, uint32_t w
 		}
 
 		case ST_FRAME_FMT_YUV420PLANAR8: {
-			uint8_t* src_y = (uint8_t*)frame->addr[0];
-			uint8_t* src_u = (uint8_t*)frame->addr[1];
-			uint8_t* src_v = (uint8_t*)frame->addr[2];
+const uint8_t* src_y = (const uint8_t*)frame->addr[0];
+                        const uint8_t* src_u = (const uint8_t*)frame->addr[1];
+                        const uint8_t* src_v = (const uint8_t*)frame->addr[2];
 
 			for (uint32_t y = 0; y < height; y++) {
 				for (uint32_t x = 0; x < width; x++) {

@@ -328,6 +328,18 @@ static void test_load_and_validate(void) {
   CHECK_EQ_INT(load_and_validate_rx_config("bad.json", &c), -1);
 }
 
+static void test_symlinked_config_rejected(void) {
+  struct rx_config c;
+  REQUIRE(write_file("real.json",
+      "{ \"interfaces\": [ { \"name\": \"0000:03:00.0\", \"sip\": \"192.168.50.65\", \"dip\": \"239.168.85.20\" } ],\n"
+      "  \"video\": { \"fps\": 30, \"fmt\": \"yuv422p10le\" },\n"
+      "  \"rx_sessions\": [ { \"crop\": { \"w\": 1920, \"h\": 1080 } } ] }") == 0);
+  REQUIRE(symlink("real.json", "link.json") == 0);
+  CHECK_EQ_INT(load_and_validate_rx_config("real.json", &c), 0);
+  CHECK_EQ_INT(parse_rx_config("link.json", &c), -1);
+  CHECK_EQ_INT(load_and_validate_rx_config("link.json", &c), -1);
+}
+
 /* --------------------------------------------------------------- validation */
 
 static void test_validate_baseline(void) {
@@ -504,6 +516,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_parse_wrong_types_ignored);
   RUN_TEST(test_parse_errors);
   RUN_TEST(test_load_and_validate);
+  RUN_TEST(test_symlinked_config_rejected);
   RUN_TEST(test_validate_baseline);
   RUN_TEST(test_validate_interfaces);
   RUN_TEST(test_validate_video_size);
