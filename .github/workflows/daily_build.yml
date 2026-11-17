@@ -20,7 +20,7 @@ concurrency:
 jobs:
   build:
     name: Daily Build (${{ github.event.repository.default_branch }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read
@@ -65,7 +65,7 @@ jobs:
         uses: $/.github/actions/analysis/gitleaks
 
       - name: Upload daily build reports
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: DVLED-SW-TK-DailyBuild-${{ github.event.repository.default_branch }}-${{ github.run_id }}
@@ -74,9 +74,9 @@ jobs:
 
   afl-fuzz:
     name: Daily AFL Fuzz (${{ github.event.repository.default_branch }})
-    runs-on: ubuntu-latest
-    # 2h of fuzzing plus headroom for dependency install and the harness build.
-    timeout-minutes: 138
+    runs-on: ubuntu-24.04
+    # 4h of TX+RX fuzzing plus headroom for dependency install and builds.
+    timeout-minutes: 258
     permissions:
       contents: read
 
@@ -94,19 +94,21 @@ jobs:
           max-seconds: '7200'
 
       - name: Upload AFL fuzzing results
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: afl-fuzz-results-${{ github.event.repository.default_branch }}-${{ github.run_id }}
-          path: fuzz/findings/
+          path: |
+            dvledtx/fuzz/findings/
+            dvledrx/fuzz/findings/
           retention-days: 14
 
   libfuzzer:
     name: Daily libFuzzer (${{ github.event.repository.default_branch }})
-    runs-on: ubuntu-latest
-    # max-seconds applies per sanitizer mode (ASan + UBSan), so the fuzzing
-    # itself takes ~2h; the rest covers the two builds.
-    timeout-minutes: 138
+    runs-on: ubuntu-24.04
+    # max-seconds applies per target and sanitizer mode (TX+RX, ASan+UBSan),
+    # so fuzzing takes ~4h; the rest covers the four builds.
+    timeout-minutes: 258
     permissions:
       contents: read
 
@@ -124,13 +126,15 @@ jobs:
           max-seconds: '3600'
 
       - name: Upload libFuzzer corpora
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: libfuzzer-results-${{ github.event.repository.default_branch }}-${{ github.run_id }}
           path: |
-            fuzz/libfuzzer_corpus/
-            fuzz/ubsan_corpus/
+            dvledtx/fuzz/libfuzzer_corpus/
+            dvledtx/fuzz/ubsan_corpus/
+            dvledrx/fuzz/libfuzzer_corpus/
+            dvledrx/fuzz/ubsan_corpus/
           retention-days: 14
 
 
