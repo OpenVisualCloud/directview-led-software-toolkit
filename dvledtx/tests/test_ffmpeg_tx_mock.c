@@ -419,7 +419,7 @@ static void test_ffmpeg_tx_send_yuv_frame_bad_crop_fails(void **state)
 }
 
 /* =========================================================================
- * open_ffmpeg_tx — multi-NIC redundant-port registration (idx 0, nic_count 2)
+ * open_ffmpeg_tx — multi-NIC session pinning needs mtl_st20p's port fields
  * ========================================================================= */
 
 static void test_open_ffmpeg_tx_multi_nic(void **state)
@@ -451,13 +451,15 @@ static void test_open_ffmpeg_tx_multi_nic(void **state)
 
     struct st20p_tx_ctx ctx;
     memset(&ctx, 0, sizeof(ctx));
-    ctx.idx         = 0; /* first session → registers second NIC as redundant */
+    ctx.idx         = 0;
     ctx.app         = &app;
     ctx.crop_width  = 16;
     ctx.crop_height = 16;
 
-    assert_int_equal(open_ffmpeg_tx(&ctx), 0);
-    assert_non_null(ctx.out_fmt_ctx);
+    /* The mocked "null" muxer has no p_tx_ip/udp_port options to locate the
+     * session port fields from, so the session must fail cleanly. */
+    assert_int_equal(open_ffmpeg_tx(&ctx), -1);
+    assert_null(ctx.out_fmt_ctx);
 
     close_ffmpeg_tx(&ctx);
     dvledtx_context_free(&app);
