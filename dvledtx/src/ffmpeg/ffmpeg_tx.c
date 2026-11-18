@@ -27,6 +27,7 @@
 #include "app_context.h"
 #include "util/logger.h"
 #include "mtl_api.h"
+#include <arpa/inet.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,8 +57,22 @@ static const char* const dvledtx_nic_sip_opt[DVLEDTX_MAX_NICS] = {
   "p_sip", "r_sip", "p2_sip", "p3_sip", "p4_sip", "p5_sip", "p6_sip", "p7_sip"
 };
 
-/* Multicast group no receiver joins: sink for the plugin's mandatory R copy. */
-#define DVLEDTX_R_SINK_DIP "239.255.254.254"
+/*
+ * The plugin's mandatory R copy needs a valid group that differs from P and
+ * that no receiver joins. Derive it from the session's DIP by flipping the top
+ * bit of the second octet (same multicast scope, different /16), and reject it
+ * if it matches any configured DIP.
+ */
+static int derive_r_sink_dip(const struct dvledtx_context* app, const char* dip,
+                             char* out, size_t out_len) {
+  struct in_addr addr;
+  if (inet_pton(AF_INET, dip, &addr) != 1) return -1;
+  ((uint8_t*)&addr.s_addr)[1] ^= 0x80;
+  if (inet_ntop(AF_INET, &addr, out, (socklen_t)out_len) == NULL) return -1;
+  for (int i = 0; i < app->nic_count; i++)
+    if (strcmp(out, app->nics[i].dip_addr_str) == 0) return -1;
+  return 0;
+}
 
 /*
  * The plugin has no AVOption for the per-session port override
@@ -253,7 +268,14 @@ int open_ffmpeg_tx(struct st20p_tx_ctx* ctx) {
     }
 
     int r_nic = (nic + 1) % nic_total;
-    ret = av_opt_set(ctx->out_fmt_ctx->priv_data, "r_tx_ip", DVLEDTX_R_SINK_DIP, 0);
+    char r_dip[INET_ADDRSTRLEN];
+    if (derive_r_sink_dip(ctx->app, ctx->app->nics[nic].dip_addr_str, r_dip, sizeof(r_dip)) < 0) {
+      LOG_ERROR("ST20P TX(%d): cannot derive an unused R group from DIP %s",
+                ctx->idx, ctx->app->nics[nic].dip_addr_str);
+      avformat_free_context(ctx->out_fmt_ctx); ctx->out_fmt_ctx = NULL;
+      return -1;
+    }
+    ret = av_opt_set(ctx->out_fmt_ctx->priv_data, "r_tx_ip", r_dip, 0);
     if (ret < 0 ||
         pin_session_port(ctx, ctx->app->nics[nic].port, ctx->app->nics[r_nic].port) < 0) {
       LOG_ERROR("ST20P TX(%d): cannot pin session to NIC %s", ctx->idx, ctx->app->nics[nic].port);
@@ -262,7 +284,7 @@ int open_ffmpeg_tx(struct st20p_tx_ctx* ctx) {
     }
     LOG_INFO("ST20P TX(%d): multi-NIC, %d NICs registered, session pinned to %s "
              "(R copy via %s -> %s)", ctx->idx, nic_total, ctx->app->nics[nic].port,
-             ctx->app->nics[r_nic].port, DVLEDTX_R_SINK_DIP);
+             ctx->app->nics[r_nic].port, r_dip);
   }
 
   /* RAWVIDEO stream — no encoder; MTL accepts raw packed pixel data directly. */
