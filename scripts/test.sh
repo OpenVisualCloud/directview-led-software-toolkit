@@ -2,18 +2,17 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright 2026 Intel Corporation
 
-# Unit test runner for dvledtx
+# Unit test runner for dvledtx and dvledrx
 # Usage: bash scripts/test.sh [--no-coverage]
 #
-# Runs all cmocka unit tests under tests/ and prints a pass/fail summary.
+# Runs both applications' unit tests and prints a pass/fail summary.
 # When gcovr is available (and --no-coverage is not passed), a per-file
-# line coverage report is printed after the test results.
+# line coverage report is printed for both source trees.
 
 set -e
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TESTS_DIR="$REPO_ROOT/tests"
-BUILD_DIR="$TESTS_DIR/build"
+BUILD_DIR="$REPO_ROOT/build-tests"
 
 COVERAGE=true
 if [[ "${1:-}" == "--no-coverage" ]]; then
@@ -36,15 +35,14 @@ if $COVERAGE && [[ -z "$GCOVR" ]]; then
 fi
 
 # ── Build ──────────────────────────────────────────────────────────────────
-echo "Setting up test build..."
-cd "$TESTS_DIR"
+echo "Setting up combined test build..."
 rm -rf "$BUILD_DIR"
 
 MESON_ARGS=()
 $COVERAGE && MESON_ARGS+=("-Db_coverage=true")
 
-meson setup build "${MESON_ARGS[@]}" >/dev/null
-ninja -C build >/dev/null
+meson setup "$BUILD_DIR" "$REPO_ROOT" "${MESON_ARGS[@]}" >/dev/null
+ninja -C "$BUILD_DIR" >/dev/null
 
 # ── Detect a live X display for opt-in screen-capture (x11grab) tests ───────
 # The screen-capture success tests run only when DVLED_TEST_DISPLAY is set to
@@ -72,19 +70,21 @@ echo ""
 echo "Running unit tests..."
 echo "──────────────────────────────────────────────────────────────────────"
 set +e
-meson test -C build --print-errorlogs 2>&1
+meson test -C "$BUILD_DIR" --print-errorlogs 2>&1
 TEST_EXIT=$?
 set -e
 
 # ── Coverage ───────────────────────────────────────────────────────────────
 if $COVERAGE; then
     echo ""
-    echo "Coverage report (src/ — main.c excluded)"
+    echo "Coverage report (dvledtx/src/ and dvledrx/src/ — main.c excluded)"
     echo "──────────────────────────────────────────────────────────────────────"
     "$GCOVR" \
-        --root "$REPO_ROOT/src" \
-        --filter "$REPO_ROOT/src/" \
-        --exclude "$REPO_ROOT/src/main.c" \
+        --root "$REPO_ROOT" \
+        --filter "$REPO_ROOT/dvledtx/src/" \
+        --filter "$REPO_ROOT/dvledrx/src/" \
+        --exclude "$REPO_ROOT/dvledtx/src/main.c" \
+        --exclude "$REPO_ROOT/dvledrx/src/main.c" \
         --gcov-ignore-parse-errors=negative_hits.warn_once_per_file \
         "$BUILD_DIR" \
         --txt

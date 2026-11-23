@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 name: 'checksec Analysis'
-description: 'Run checksec static hardening analysis on dvledtx binaries'
+description: 'Run checksec static hardening analysis on dvledtx and dvledrx binaries'
 
 runs:
   using: composite
@@ -40,7 +40,7 @@ runs:
           echo "=================================================="
           echo " checksec � Binary Hardening Analysis"
           echo "=================================================="
-          for BIN in bins/dvledtx bins/dvledtx-mtl; do
+          for BIN in bins/dvledtx bins/dvledtx-mtl bins/dvledrx; do
             if [ -f "$BIN" ]; then
               echo ""
               echo "--- $BIN ---"
@@ -59,7 +59,7 @@ runs:
       run: |
         REPORT_DIR="$GITHUB_WORKSPACE/reports"
         mkdir -p "$REPORT_DIR"
-        for BIN in bins/dvledtx bins/dvledtx-mtl; do
+        for BIN in bins/dvledtx bins/dvledtx-mtl bins/dvledrx; do
           if [ -f "$BIN" ]; then
             LABEL=$(basename "$BIN")
             checksec --no-banner file -o json "$BIN" 2>/dev/null \

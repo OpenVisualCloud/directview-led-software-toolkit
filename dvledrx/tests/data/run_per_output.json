@@ -1,0 +1,18 @@
+{
+  "interfaces": [ { "name": "0000:03:00.0", "sip": "192.168.50.65", "dip": "239.168.85.20" } ],
+  "video": { "width": 64, "height": 32, "fps": 50, "fmt": "yuv422p12le" },
+  "rx_sessions": [
+    { "udp_port": 20000, "crop": { "x": 0,  "y": 0, "w": 32, "h": 32 } },
+    { "udp_port": 20002, "crop": { "x": 32, "y": 0, "w": 32, "h": 32 } }
+  ],
+  "displays": [
+    {
+      "output": "screen",
+      "sessions": [
+        { "session": 0, "x": 0,  "y": 0,  "scale_w": 16, "scale_h": 16 },
+        { "session": 1, "x": 16, "y": 0,  "scale_w": 16, "scale_h": 16 },
+        { "session": 0, "x": 0,  "y": 40, "scale_w": 16, "scale_h": 16 }
+      ]
+    }
+  ]
+}

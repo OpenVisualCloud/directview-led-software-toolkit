@@ -1,0 +1,5 @@
+{
+  "interfaces": [ { "name": "0000:03:00.0", "sip": "192.168.50.65", "dip": "239.168.85.20" } ],
+  "video": { "width": 32, "height": 16, "fps": 24, "fmt": "yuv444p12le" },
+  "rx_sessions": [ { "crop": { "w": 32, "h": 16 } } ]
+}
